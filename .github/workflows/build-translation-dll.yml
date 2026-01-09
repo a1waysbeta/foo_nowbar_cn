@@ -99,7 +99,7 @@ jobs:
 
     # 3.3 Build Columns UI SDK
     - name: Build Columns UI SDK
-      run: msbuild columns_ui/columns_ui-sdk/columns_ui_sdk.vcxproj /p:Configuration=Release /p:Platform=x64
+      run: msbuild columns_ui/columns_ui-sdk/columns_ui-sdk.vcxproj /p:Configuration=Release /p:Platform=x64
 
     # 3.4 Build Shared (Try to find project, or assume built by SDK hooks)
     # Note: If this fails, we may need to build 'foobar2000_component_client' instead.
