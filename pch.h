@@ -7,8 +7,7 @@
 #include <shellapi.h>
 #include <commctrl.h>
 #include <objbase.h> // Required for IID definitions before GDI+
-#include <mmsystem.h>
-#include <timeapi.h> // For timeGetTime used by pfc
+#include <mmsystem.h> // For timeGetTime used by pfc
 #pragma comment(lib, "winmm.lib")
 
 // GDI+ - after Windows headers
@@ -23,15 +22,15 @@
 #include <atlbase.h>
 
 // STL
-#include <algorithm>
 #include <vector>
 #include <string>
-#include <map>
 #include <memory>
+#include <algorithm>
+#include <map>
 #include <functional>
 #include <mutex>
-#include <atomic>
 #include <chrono>
+#include <format>
 
 // ----------------------------------------------------------------------------
 // SDK INCLUDE PATH HANDLING
@@ -77,3 +76,6 @@
 // Project headers
 #include "guids.h"
 #include "version.h"
+
+// UI Headers - Makes uie::window available to everyone
+#include "ui/control_panel_cui.h"
