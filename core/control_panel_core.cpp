@@ -92,6 +92,28 @@ static bool pt_in_rect(const RECT &r, int x, int y) {
   return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 }
 
+// Convert dB (-100 to 0) to perceptual slider position (0.0 to 1.0)
+// Uses square root curve so perceived loudness maps linearly to slider
+static inline float db_to_perceptual(float db) {
+    if (db <= -100.0f) return 0.0f;
+    if (db >= 0.0f) return 1.0f;
+    // Convert dB to linear amplitude: 10^(dB/20)
+    float linear = std::pow(10.0f, db / 20.0f);
+    // Apply square root for perceptual mapping
+    return std::sqrt(linear);
+}
+
+// Convert perceptual slider position (0.0 to 1.0) to dB (-100 to 0)
+// Inverse of db_to_perceptual
+static inline float perceptual_to_db(float slider_pos) {
+    if (slider_pos <= 0.0f) return -100.0f;
+    if (slider_pos >= 1.0f) return 0.0f;
+    // Square the position to undo perceptual curve
+    float linear = slider_pos * slider_pos;
+    // Convert linear amplitude to dB: 20*log10(linear)
+    return 20.0f * std::log10(linear);
+}
+
 ControlPanelCore::ControlPanelCore() {
   // Register for playback callbacks
   PlaybackStateManager::get().register_callback(this);
@@ -2007,12 +2029,8 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     g.FillRectangle(&trackBrush, bar_x, bar_y, bar_w, bar_h);
   }
 
-  // Level (convert dB to linear: 0dB = 100%, -100dB = 0%)
-  float bar_level = (m_state.volume_db + 100.0f) / 100.0f;
-  if (bar_level < 0)
-    bar_level = 0;
-  if (bar_level > 1)
-    bar_level = 1;
+  // Level - use perceptual mapping so slider reflects perceived loudness
+  float bar_level = db_to_perceptual(m_state.volume_db);
   int level_w = static_cast<int>(bar_w * bar_level);
 
   if (level_w > 0) {
@@ -2115,7 +2133,7 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     int bar_w = (m_rect_volume.right - m_rect_volume.left) - bar_offset;
     double level = static_cast<double>(x - bar_x) / bar_w;
     level = std::max(0.0, std::min(1.0, level));
-    float db = static_cast<float>(level * 100.0 - 100.0);
+    float db = perceptual_to_db(static_cast<float>(level));
     playback_control::get()->set_volume(db);
     // Update local state for immediate visual feedback
     m_state.volume_db = db;
