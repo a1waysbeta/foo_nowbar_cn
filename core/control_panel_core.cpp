@@ -189,6 +189,8 @@ void ControlPanelCore::set_dark_mode(bool dark) {
   // Invalidate background cache to force redraw with new colors
   m_bg_cache_valid = false;
   m_prev_background.reset();
+  m_target_background.reset();
+
   
   invalidate();
 }
@@ -284,6 +286,9 @@ void ControlPanelCore::on_settings_changed() {
   
   // Update glass effect state from preferences
   m_glass_effect_enabled = get_nowbar_glass_effect_enabled();
+  
+  // Invalidate target background to prevent stale content during transition
+  m_target_background.reset();
 }
 
 void ControlPanelCore::set_color_query_callback(ColorQueryCallback callback) {
@@ -318,6 +323,9 @@ void ControlPanelCore::apply_custom_colors() {
     // Hover color - semi-transparent version of text color
     m_button_hover_color = Gdiplus::Color(40, GetRValue(text), GetGValue(text), GetBValue(text));
     
+    // Invalidate caches
+    m_bg_cache_valid = false;
+    m_target_background.reset();
     invalidate();
   } else {
     // Callback failed, fallback to auto
@@ -1016,21 +1024,9 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
   int bg_style = get_nowbar_background_style();
   
   // Detect if background style or content has changed (needs transition)
-  int prev_style = m_prev_bg_style;
-  bool style_changed = (prev_style != -1 && prev_style != bg_style);
+  bool style_changed = (m_prev_bg_style != -1 && m_prev_bg_style != bg_style);
   bool size_changed = (m_prev_background && 
                        (m_prev_background_size.cx != width || m_prev_background_size.cy != height));
-  
-  // Update the style tracker immediately when style changes
-  if (style_changed) {
-    m_prev_bg_style = bg_style;
-    m_bg_cache_valid = false;  // Invalidate cache so it gets re-rendered
-    // Clear blurred artwork cache when leaving blurred mode (mode 2)
-    if (prev_style == 2 && bg_style != 2) {
-      m_blurred_artwork.reset();
-      m_blurred_artwork_size = {0, 0};
-    }
-  }
   
   // Start transition if style changed and we have a cached previous background
   // Only start if smooth animations are enabled
@@ -1038,7 +1034,7 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
     m_bg_transition_active = true;
     m_bg_transition_start_time = std::chrono::steady_clock::now();
   } else if (style_changed && !get_nowbar_smooth_animations_enabled()) {
-    // Smooth animations disabled - skip transition, apply immediately
+    // Smooth animations disabled - skip transition
     m_prev_background.reset();
     m_bg_transition_active = false;
   }
@@ -1113,58 +1109,27 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
   
   // Draw with transition if active
   if (m_bg_transition_active && m_prev_background && transition_alpha < 1.0f) {
-    // Draw cached previous background first
+    // 1. Ensure target background cache exists and is up to date
+    bool target_needs_update = (!m_target_background || 
+                                m_target_background_size.cx != width || 
+                                m_target_background_size.cy != height);
+    
+    if (target_needs_update) {
+      m_target_background.reset(new Gdiplus::Bitmap(width, height, PixelFormat32bppARGB));
+      m_target_background_size = {(LONG)width, (LONG)height};
+      
+      Gdiplus::Graphics target_g(m_target_background.get());
+      target_g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+      target_g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+      
+      // Draw current background content to target cache ONCE
+      draw_current_bg(target_g);
+    }
+
+    // 2. Draw cached previous background (opaque)
     g.DrawImage(m_prev_background.get(), r.X, r.Y);
     
-    // Draw new background to temporary bitmap with alpha
-    std::unique_ptr<Gdiplus::Bitmap> new_bg(new Gdiplus::Bitmap(width, height, PixelFormat32bppARGB));
-    {
-      Gdiplus::Graphics temp_g(new_bg.get());
-      temp_g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-      
-      // Create rect at origin for temp bitmap
-      RECT temp_rect = {0, 0, width, height};
-      Gdiplus::Rect temp_r(0, 0, width, height);
-      
-      // Draw current background content to temp
-      if (bg_style == 1 && m_artwork_colors_valid) {
-        Gdiplus::LinearGradientBrush gradientBrush(
-            Gdiplus::Point(0, 0),
-            Gdiplus::Point(width, 0),
-            m_artwork_color_secondary,
-            m_artwork_color_primary
-        );
-        temp_g.FillRectangle(&gradientBrush, temp_r);
-        
-        BYTE overlay_alpha = m_dark_mode ? 120 : 80;
-        Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
-        Gdiplus::SolidBrush overlayBrush(overlayColor);
-        temp_g.FillRectangle(&overlayBrush, temp_r);
-      } else if (bg_style == 2 && m_artwork_bitmap) {
-        if (!m_blurred_artwork || 
-            m_blurred_artwork_size.cx != width || 
-            m_blurred_artwork_size.cy != height) {
-          create_blurred_artwork(width, height);
-        }
-        if (m_blurred_artwork) {
-          temp_g.DrawImage(m_blurred_artwork.get(), 0, 0);
-        }
-        BYTE overlay_alpha = m_dark_mode ? 140 : 180;
-        Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
-        Gdiplus::SolidBrush overlayBrush(overlayColor);
-        temp_g.FillRectangle(&overlayBrush, temp_r);
-      } else if (m_glass_effect_enabled) {
-        BYTE glass_alpha = m_dark_mode ? 150 : 200;
-        Gdiplus::Color glassColor(glass_alpha, m_bg_color.GetR(), m_bg_color.GetG(), m_bg_color.GetB());
-        Gdiplus::SolidBrush brush(glassColor);
-        temp_g.FillRectangle(&brush, temp_r);
-      } else {
-        Gdiplus::SolidBrush brush(m_bg_color);
-        temp_g.FillRectangle(&brush, temp_r);
-      }
-    }
-    
-    // Draw new background with alpha blending
+    // 3. Draw cached target background (with alpha) - fast blit
     Gdiplus::ColorMatrix cm = {
       1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
       0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
@@ -1175,10 +1140,23 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
     Gdiplus::ImageAttributes ia;
     ia.SetColorMatrix(&cm);
     
-    g.DrawImage(new_bg.get(), r, 0, 0, width, height, Gdiplus::UnitPixel, &ia);
+    g.DrawImage(m_target_background.get(), r, 0, 0, width, height, Gdiplus::UnitPixel, &ia);
     
-    // Continue animation (smooth transitions enabled, no frame rate limiting)
-    invalidate();
+    // Continue animation
+    if (m_bg_transition_active) {
+        invalidate();
+    }
+    
+    // End of transition handling
+    if (transition_alpha >= 1.0f) {
+        // Transition complete - promote target to be the new "previous" cache
+        m_bg_transition_active = false;
+        m_prev_background = std::move(m_target_background);
+        m_prev_background_size = m_target_background_size;
+        m_bg_cache_valid = true;
+        m_prev_bg_style = bg_style;
+        // target is now empty (moved from), which is fine
+    }
   } else {
     // No transition - use cached background if available for performance
     if (m_bg_cache_valid && m_prev_background && 
@@ -2931,21 +2909,22 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
         // Extract colors for dynamic background
         extract_artwork_colors();
         
+        // Trigger background transition BEFORE invalidating cache
+        // (crossfade needs valid cached background to blend from)
+        int bg_style = get_nowbar_background_style();
+        if ((bg_style == 1 || bg_style == 2) && get_nowbar_smooth_animations_enabled()) {
+          if (m_prev_background && m_bg_cache_valid) {
+            m_bg_transition_active = true;
+            m_bg_transition_start_time = std::chrono::steady_clock::now();
+          }
+        }
+        
         // Invalidate blurred artwork cache so it regenerates with new artwork
         m_blurred_artwork.reset();
+        m_target_background.reset(); // Invalidate target for new artwork
         m_blurred_artwork_size = {0, 0};
         m_bg_cache_valid = false;  // Invalidate cache for new artwork
       }
-    }
-  }
-
-  // Trigger background transition for artwork-based backgrounds
-  int bg_style = get_nowbar_background_style();
-  if (bg_style == 1 || bg_style == 2) {
-    // Artwork Colors or Blurred Artwork - start crossfade transition
-    if (m_prev_background) {
-      m_bg_transition_active = true;
-      m_bg_transition_start_time = std::chrono::steady_clock::now();
     }
   }
 
@@ -2956,6 +2935,7 @@ void ControlPanelCore::clear_artwork() {
   m_artwork_bitmap.reset();
   m_artwork_colors_valid = false;
   m_blurred_artwork.reset();
+  m_target_background.reset();
   m_blurred_artwork_size = {0, 0};
   m_bg_cache_valid = false;  // Invalidate cache when artwork cleared
   invalidate();
