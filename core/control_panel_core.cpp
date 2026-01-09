@@ -1177,15 +1177,8 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
     
     g.DrawImage(new_bg.get(), r, 0, 0, width, height, Gdiplus::UnitPixel, &ia);
     
-    // Continue animation (with frame rate limiting)
-    {
-      auto anim_now = std::chrono::steady_clock::now();
-      float frame_elapsed = std::chrono::duration<float, std::milli>(anim_now - m_last_animation_frame).count();
-      if (frame_elapsed >= MIN_ANIMATION_FRAME_MS) {
-        m_last_animation_frame = anim_now;
-        invalidate();
-      }
-    }
+    // Continue animation (smooth transitions enabled, no frame rate limiting)
+    invalidate();
   } else {
     // No transition - use cached background if available for performance
     if (m_bg_cache_valid && m_prev_background && 
@@ -1571,15 +1564,10 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       m_rect_super.right - super_inset, m_rect_super.bottom - super_inset};
   draw_super_icon(g, superIconRect, icon_secondary_color);
   
-  // Continue animation loop if hover transition is in progress (with frame rate limiting)
+  // Continue animation loop if hover transition is in progress
   // Only needed when smooth animations are enabled
   if (hover_animating && get_nowbar_smooth_animations_enabled()) {
-    // Only request repaint if enough time has passed since last animation frame
-    float frame_elapsed = std::chrono::duration<float, std::milli>(now - m_last_animation_frame).count();
-    if (frame_elapsed >= MIN_ANIMATION_FRAME_MS) {
-      m_last_animation_frame = now;
-      invalidate();
-    }
+    invalidate();  // Direct invalidate for smooth animation (no frame rate limiting)
   }
 
   // Custom buttons #1-6 (only render if enabled)
@@ -1700,15 +1688,10 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   draw_cbutton(4, m_rect_cbutton5, HitRegion::CButton5);
   draw_cbutton(5, m_rect_cbutton6, HitRegion::CButton6);
   
-  // Continue animation loop if fade is in progress (with frame rate limiting)
+  // Continue animation loop if fade is in progress
   // Only needed when smooth animations are enabled
   if (m_cbutton_fade_active && get_nowbar_smooth_animations_enabled()) {
-    auto now = std::chrono::steady_clock::now();
-    float frame_elapsed = std::chrono::duration<float, std::milli>(now - m_last_animation_frame).count();
-    if (frame_elapsed >= MIN_ANIMATION_FRAME_MS) {
-      m_last_animation_frame = now;
-      invalidate();
-    }
+    invalidate();  // Direct invalidate for smooth animation (no frame rate limiting)
   }
 }
 
@@ -1846,16 +1829,11 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
     }
   }
   
-  // Continue animation if not at target (with frame rate limiting)
+  // Continue animation if not at target
   // Only needed when smooth animations are enabled
   if (get_nowbar_smooth_animations_enabled() && 
       std::abs(m_animated_progress - m_target_progress) > 0.0005 && !m_seeking) {
-    auto anim_now = std::chrono::steady_clock::now();
-    float frame_elapsed = std::chrono::duration<float, std::milli>(anim_now - m_last_animation_frame).count();
-    if (frame_elapsed >= MIN_ANIMATION_FRAME_MS) {
-      m_last_animation_frame = anim_now;
-      invalidate();
-    }
+    invalidate();  // Direct invalidate for smooth animation
   }
 
   // Seek handle (only on hover)
