@@ -121,11 +121,17 @@ jobs:
     # 4. Build Your Component
     # -------------------------------------------------------------------------
     - name: Build foo_nowbar
-      run: msbuild foo_nowbar/foo_nowbar.vcxproj /p:Configuration=Release /p:Platform=x64
+      # We force OutDir to "..\bin\" (relative to project file) so the DLL lands in the repo root/bin
+      run: msbuild foo_nowbar/foo_nowbar.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=..\bin\
+
+    # Debug: List the bin folder to be sure
+    - name: List Output Files
+      run: dir bin
+      shell: cmd
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
       with:
         name: foo_nowbar_dll
-        path: foo_nowbar/x64/Release/foo_nowbar.dll
+        path: bin/foo_nowbar.dll
         if-no-files-found: error
