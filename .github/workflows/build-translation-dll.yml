@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    # 1. Checkout YOUR code
+    # 1. Checkout my code
     - name: Checkout foo_nowbar
       uses: actions/checkout@v4
       with:
@@ -23,18 +23,24 @@ jobs:
         repository: reupen/columns_ui
         path: columns_ui
 
-    # 3. Checkout Foobar2000 SDK (The missing inner piece)
-    # We place it exactly where your include path expects it: inside columns_ui/foobar2000
+    # 3. Checkout Foobar2000 SDK (Nested inside columns_ui)
     - name: Checkout Foobar2000 SDK
       uses: actions/checkout@v4
       with:
         repository: reupen/foobar2000-sdk-modified
-        path: columns_ui/foobar2000  # <--- NESTED HERE
+        path: columns_ui/foobar2000
+
+    # 4. Checkout PFC (Nested inside columns_ui, sibling to foobar2000)
+    - name: Checkout PFC
+      uses: actions/checkout@v4
+      with:
+        repository: reupen/pfc-modified
+        path: columns_ui/pfc
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 4. Build
+    # 5. Build
     - name: Build Project
       run: msbuild foo_nowbar/foo_nowbar.vcxproj /p:Configuration=Release /p:Platform=x64
 
