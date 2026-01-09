@@ -16,28 +16,37 @@ jobs:
       with:
         path: foo_nowbar
 
-    # 2. Checkout Columns UI SDK (The wrapper)
-    - name: Checkout Columns UI SDK
+    # 2. Checkout Columns UI (Component Source)
+    - name: Checkout Columns UI Source
       uses: actions/checkout@v4
       with:
         repository: reupen/columns_ui
         path: columns_ui
 
-    # 3. Checkout Foobar2000 SDK
+    # 3. Checkout Columns UI SDK
+    # We place it INSIDE columns_ui/columns_ui-sdk because that's what your pch.h likely expects
+    # based on: #include "../columns_ui/columns_ui-sdk/ui_extension.h"
+    - name: Checkout Columns UI SDK
+      uses: actions/checkout@v4
+      with:
+        repository: reupen/columns_ui-sdk
+        path: columns_ui/columns_ui-sdk
+
+    # 4. Checkout Foobar2000 SDK
     - name: Checkout Foobar2000 SDK
       uses: actions/checkout@v4
       with:
         repository: reupen/foobar2000-sdk-modified
         path: columns_ui/foobar2000
 
-    # 4. Checkout PFC
+    # 5. Checkout PFC
     - name: Checkout PFC
       uses: actions/checkout@v4
       with:
         repository: reupen/pfc-modified
         path: columns_ui/pfc
 
-    # 5. Checkout libPPUI (from marc2k3/foobar2000-sdk)
+    # 6. Checkout libPPUI
     - name: Checkout libPPUI
       uses: actions/checkout@v4
       with:
@@ -52,8 +61,7 @@ jobs:
         rmdir /s /q temp_libppui
       shell: cmd
 
-    # 6. Checkout SVG Services
-    # This satisfies: ../columns_ui/svg-services/api/api.h
+    # 7. Checkout SVG Services
     - name: Checkout SVG Services
       uses: actions/checkout@v4
       with:
@@ -63,7 +71,7 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 7. Build
+    # 8. Build
     - name: Build Project
       run: msbuild foo_nowbar/foo_nowbar.vcxproj /p:Configuration=Release /p:Platform=x64
 
