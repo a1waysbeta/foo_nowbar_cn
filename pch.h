@@ -52,11 +52,19 @@
     #error "Cannot find foobar2000 SDK! Checked '../columns_ui' and 'lib/columns_ui'"
 #endif
 
-// 2. Columns UI SDK
+// ----------------------------------------------------------------------------
+// Columns UI SDK
+// ----------------------------------------------------------------------------
+// Try every possible combination to find ui_extension.h
 #if __has_include("../columns_ui/columns_ui-sdk/ui_extension.h")
     #include "../columns_ui/columns_ui-sdk/ui_extension.h"
 #elif __has_include("lib/columns_ui/columns_ui-sdk/ui_extension.h")
     #include "lib/columns_ui/columns_ui-sdk/ui_extension.h"
+#elif __has_include("columns_ui/columns_ui-sdk/ui_extension.h")
+    #include "columns_ui/columns_ui-sdk/ui_extension.h"
+#else
+    // Fallback: Assume it's in the include path directly
+    #include <columns_ui-sdk/ui_extension.h>
 #endif
 
 // 3. SVG Services API
