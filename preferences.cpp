@@ -285,7 +285,7 @@ static cfg_string cfg_cbutton_profiles(
 );
 static cfg_string cfg_cbutton_current_profile(
     GUID{0xABCDEF71, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF7}},
-    "默认"  // Default profile name
+    u8"默认"  // Default profile name
 );
 
 //=============================================================================
