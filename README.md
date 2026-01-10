@@ -8,7 +8,7 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 
 ### Core Features
 - **Dual UI Support**: Works seamlessly with both Default UI (DUI) and Columns UI (CUI)
-- **Album Artwork Display**: Shows album art with configurable margin/edge-to-edge display
+- **Album Artwork Display**: Shows album art edge-to-edge
 - **Track Information**: Displays track info with customizable Title Formatting (default: title and artist)
 - **DPI Aware**: Properly scales on high-DPI displays with adaptive sizing
 
@@ -35,12 +35,17 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
   - Requires [foo_traycontrols](https://github.com/jame25/foo_traycontrols)
   - Blue when active, can be hidden via preferences
 - **Super Button**: Quick access to autoplaylists via popup menu
-  - Preset autoplaylist queries: Never played, Recently played, Unrated, Rated 3-5/4/5, Loved tracks, Recently added, Same artist/title as playing
-- **Up to 6 Custom Buttons**: Fully configurable action buttons
-  - Open URL, Run executable, or Execute foobar2000 main menu commands
-  - Custom PNG/ICO icon support per button
+  - Preset autoplaylist queries: Never played, Recently played, Unrated, Rated 3-5/4/5, Loved tracks, Recently added, Same artist/title as selected
+- **Up to 12 Custom Buttons**: Fully configurable action buttons
+  - **Buttons 1-6**: Visible on panel, configurable via Preferences or config file
+  - **Buttons 7-12**: Hidden, keyboard shortcuts only (config file only)
+  - Open URL, Run executable, or Execute foobar2000 menu commands (main menu or context menu)
+  - Custom PNG/ICO/SVG icon support per button (SVG requires [foo_svg_services](https://github.com/punkdrummer/foo_svg_services))
   - Adaptive layout: 2-row (buttons 1-3, 4-6) at larger heights, single row at smaller heights
   - Auto-hide during playback (optional, with smooth 300ms fade animation)
+  - URL/Executable actions use selected track for title formatting (not playing track)
+  - Configuration profiles for saving/loading button sets
+  - Config file location: `<foobar2000_profile>\foo_nowbar_data\custom_buttons.conf`
 
 ### Theming & Appearance
 - **Theme Modes**:
@@ -48,12 +53,14 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
   - **Dark**: Forces dark mode
   - **Light**: Forces light mode
   - **Custom**: Syncs with DUI color scheme (DUI only)
-- **Cover Margin**: Enable/disable margin around album artwork
 - **Seek/Volume Bar Style**: Pill-shaped or rectangular
 - **Hover Circles**: Optional hover effect on buttons
 - **Hover Enlarge Effect**: Playback controls enlarge 15% on hover
 - **Alternate Icons**: Alternative play/pause/stop icon style (outline vs filled)
 - **Custom Fonts**: Select custom fonts for track title and artist
+- **Smooth Animations**: Toggle for animated transitions (disabled by default for performance)
+  - When enabled: custom button auto-hide fade, background crossfade
+  - When disabled: instant transitions for better performance
 - **Glass Effect**: Windows 11 acrylic backdrop blur behind the panel (semi-transparent background)
 - **Background Style**:
 - **Solid**: Standard solid color background
@@ -86,7 +93,7 @@ Customize the two lines of track information using foobar2000's [Title Formattin
 | Setting | Options | Description |
 |---------|---------|-------------|
 | Theme Mode | Auto / Dark / Light / Custom | Controls panel color scheme |
-| Cover Margin | Yes / No | Enable margin around album art |
+| Smooth Animations | Disabled / Enabled | Smooth animated transitions (may impact performance) |
 | Seek/Volume Bar Style | Pill-shaped / Rectangular | Bar appearance |
 | Mood Icon | Show / Hidden | Toggle heart button visibility |
 | MiniPlayer Icon | Show / Hidden | Toggle MiniPlayer button visibility |
@@ -97,14 +104,20 @@ Customize the two lines of track information using foobar2000's [Title Formattin
 | Background Style | Solid / Artwork Colors / Blurred Artwork | Panel background appearance |
 
 ### Custom Button Tab
-Configure up to 6 custom buttons with the following actions:
+
+#### Configuration Profile
+- **Configuration name**: Select between saved button configurations
+- **[...] menu**: New, Rename, Delete, Export, Import options for profiles
+
+#### Button Configuration
+Configure up to 6 visible custom buttons (7-12 via config file only):
 - **None**: Button disabled
-- **Open URL**: Opens a URL in the default browser (supports Title Formatting)
-- **Run Executable**: Launches an external program (supports Title Formatting)
-- **Foobar2k Action**: Executes a foobar2000 main menu command (e.g., `Playback/Stop`)
+- **Open URL**: Opens a URL in the default browser (supports Title Formatting, uses selected track)
+- **Run Executable**: Launches an external program (supports Title Formatting, uses selected track)
+- **Foobar2k Action**: Executes a foobar2000 menu command (e.g., `Playback/Stop` or context menu `File Operations/Move to/MP3`)
 
 Each button also supports:
-- **Custom Icon (PNG/ICO)**: Optional custom icon image path
+- **Custom Icon (PNG/ICO/SVG)**: Optional custom icon image path
 - Automatic fallback to numbered square icons when custom icon is missing
 
 ### Fonts Tab
@@ -112,11 +125,11 @@ Each button also supports:
 - Reset to default fonts option
 
 ### Keyboard Shortcuts
-Custom button actions can be triggered via keyboard shortcuts:
+All 12 custom button actions can be triggered via keyboard shortcuts:
 
 1. Go to **Preferences → Keyboard Shortcuts**
 2. Find commands under **Playback → Now Bar**:
-   - `Custom Button 1` through `Custom Button 6`
+   - `Custom Button 1` through `Custom Button 12`
 3. Assign any keyboard shortcut to trigger the corresponding button's action
 
 ## Building from Source
@@ -172,14 +185,15 @@ foo_nowbar/
 
 | Element | Action |
 |---------|--------|
-| **Play/Pause** | Click to toggle playback; hover for 1+ second to show stop icon |
+| **Play/Pause** | Click to toggle playback |
+| **Stop** | Stop playback (optional, hidden by default) |
 | **Previous/Next** | Navigate tracks |
 | **Shuffle** | Toggle shuffle mode (blue when active) |
 | **Repeat** | Cycle repeat modes: Off → All → Track (blue when active) |
 | **Super Button** | Open autoplaylist menu with preset queries |
-| **Seek Bar** | Click or drag to seek within track |
+| **Seek Bar** | Click or drag to seek within track (tooltip shows timestamp) |
 | **Volume Icon** | Click to mute/unmute |
-| **Volume Bar** | Click or drag to adjust volume |
+| **Volume Bar** | Click or drag to adjust volume (perceptual loudness mapping) |
 | **Mouse Wheel** | Scroll over panel to adjust volume |
 | **Heart Icon** | Toggle MOOD tag for current track (red when set) |
 | **MiniPlayer Icon** | Launch/toggle MiniPlayer (blue when active) |
