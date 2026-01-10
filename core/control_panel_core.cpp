@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "control_panel_core.h"
 #include "../preferences.h"
 #include "../resource.h"
@@ -375,7 +375,7 @@ void ControlPanelCore::update_fonts() {
   m_font_artist.reset(artistFont);
 
   // Time font - always use default Microsoft YaHei
-  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei");
+  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");
   m_font_time.reset(new Gdiplus::Font(&fontFamily, 9.0f * m_dpi_scale,
                                       Gdiplus::FontStyleRegular,
                                       Gdiplus::UnitPoint));
@@ -1900,7 +1900,7 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
 
   // Create a scaled time font based on current size scale
   float time_font_size = 9.0f * m_dpi_scale * m_size_scale;
-  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei");
+  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");
   Gdiplus::Font timeFont(&fontFamily, time_font_size, Gdiplus::FontStyleRegular,
                          Gdiplus::UnitPoint);
 
@@ -2284,7 +2284,7 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
         for (t_uint32 i = 0; i < ptr->get_command_count(); i++) {
           pfc::string8 name;
           ptr->get_name(i, name);
-          if (pfc::string_find_first(name, "Launch MiniPlayer") !=
+          if (pfc::string_find_first(name, reinterpret_cast<const char*>(u8"启动迷你播放器")) !=
               pfc::infinite_size) {
             ptr->execute(i, nullptr);
             break;
@@ -2515,7 +2515,7 @@ void ControlPanelCore::create_autoplaylist(const char* name, const char* query, 
     pm->set_active_playlist(new_playlist);
   } catch (const std::exception& e) {
     pfc::string8 msg;
-    msg << "foo_nowbar: Failed to create autoplaylist - " << e.what();
+    msg << "foo_nowbar：创建自动播放列表失败 -" << e.what();
     console::print(msg.c_str());
   }
 }
@@ -2576,24 +2576,24 @@ void ControlPanelCore::show_autoplaylist_menu() {
   }
   
   // Add menu items - Group 1: Play count related
-  AppendMenuW(menu, MF_STRING, ID_NEVER_PLAYED, L"Tracks never played");
-  AppendMenuW(menu, MF_STRING, ID_PLAYED_LAST_5_DAYS, L"Tracks played in last 5 days");
+  AppendMenuW(menu, MF_STRING, ID_NEVER_PLAYED, L"从未播放");
+  AppendMenuW(menu, MF_STRING, ID_PLAYED_LAST_5_DAYS, L"最近 5 天播放过");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   
   // Group 2: Rating related
-  AppendMenuW(menu, MF_STRING, ID_UNRATED, L"Tracks unrated");
-  AppendMenuW(menu, MF_STRING, ID_RATED_3_TO_5, L"Tracks rated 3 to 5");
-  AppendMenuW(menu, MF_STRING, ID_RATED_4, L"Tracks rated 4");
-  AppendMenuW(menu, MF_STRING, ID_RATED_5, L"Tracks rated 5");
+  AppendMenuW(menu, MF_STRING, ID_UNRATED, L"未评级");
+  AppendMenuW(menu, MF_STRING, ID_RATED_3_TO_5, L"评级为 3-5");
+  AppendMenuW(menu, MF_STRING, ID_RATED_4, L"评级为 4");
+  AppendMenuW(menu, MF_STRING, ID_RATED_5, L"评级为 5");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   
   // Group 3: Special
-  AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"Loved Tracks");
-  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"Recently added");
+  AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"喜爱的曲目");
+  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"最近添加");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -2601,8 +2601,8 @@ void ControlPanelCore::show_autoplaylist_menu() {
   // Group 4: Dynamic (based on currently selected track)
   UINT artist_flags = MF_STRING | (current_artist.is_empty() ? MF_GRAYED : 0);
   UINT title_flags = MF_STRING | (current_title.is_empty() ? MF_GRAYED : 0);
-  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"Same artist as currently selected");
-  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"Same title as currently selected");
+  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"与当前所选曲目艺术家相同");
+  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"与当前所选曲目标题相同");
   
   // Get Super button position for menu placement
   POINT pt;
@@ -2622,42 +2622,42 @@ void ControlPanelCore::show_autoplaylist_menu() {
   // Handle selection
   switch (cmd) {
     case ID_NEVER_PLAYED:
-      create_autoplaylist("Tracks never played", 
+      create_autoplaylist(reinterpret_cast<const char*>(u8"从未播放"), 
                           "%play_count% MISSING",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_PLAYED_LAST_5_DAYS:
-      create_autoplaylist("Tracks played in last 5 days",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"最近 5 天播放过"),
                           "%last_played% DURING LAST 5 DAYS",
                           "%last_played%");
       break;
     case ID_UNRATED:
-      create_autoplaylist("Tracks unrated",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"未评级"),
                           "%rating% MISSING",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_RATED_3_TO_5:
-      create_autoplaylist("Tracks rated 3 to 5",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"评级为 3-5"),
                           "%rating% GREATER 2",
                           "%rating% | %album artist% | %album%");
       break;
     case ID_RATED_4:
-      create_autoplaylist("Tracks rated 4",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"评级为 4"),
                           "%rating% EQUAL 4",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_RATED_5:
-      create_autoplaylist("Tracks rated 5",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"评级为 5"),
                           "%rating% EQUAL 5",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_LOVED_TRACKS:
-      create_autoplaylist("Loved Tracks",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"喜爱的曲目"),
                           "%mood% PRESENT",
                           "%mood% | %album artist% | %album%");
       break;
     case ID_RECENTLY_ADDED:
-      create_autoplaylist("Recently added",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"最近添加"),
                           "%added% DURING LAST 2 WEEKS",
                           "%added%");
       break;
@@ -2670,7 +2670,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
         query << "artist IS \"" << escaped_artist << "\"";
         
         pfc::string8 name;
-        name << "Artist: " << current_artist;
+        name << reinterpret_cast<const char*>(u8"艺术家：") << current_artist;
         
         create_autoplaylist(name.c_str(), query.c_str(),
                             "%album% | %discnumber% | %tracknumber%");
@@ -2685,7 +2685,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
         query << "title IS \"" << escaped_title << "\"";
         
         pfc::string8 name;
-        name << "Title: " << current_title;
+        name << reinterpret_cast<const char*>(u8"标题：") << current_title;
         
         create_autoplaylist(name.c_str(), query.c_str(),
                             "%album artist% | %album%");
