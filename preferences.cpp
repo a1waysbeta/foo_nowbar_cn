@@ -285,7 +285,7 @@ static cfg_string cfg_cbutton_profiles(
 );
 static cfg_string cfg_cbutton_current_profile(
     GUID{0xABCDEF71, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF7}},
-    u8"默认"  // Default profile name
+    reinterpret_cast<const char*>(u8"默认")  // Default profile name
 );
 
 //=============================================================================
@@ -836,7 +836,7 @@ static std::vector<CButtonProfile> get_all_profiles() {
     if (data.is_empty()) {
         // Create default profile with current settings
         CButtonProfile def;
-        def.name = "默认";
+        def.name = reinterpret_cast<const char*>(u8"默认");
         for (int i = 0; i < 6; i++) {
             def.buttons[i].enabled = get_nowbar_cbutton_enabled(i);
             def.buttons[i].action = get_nowbar_cbutton_action(i);
@@ -876,7 +876,7 @@ static std::vector<CButtonProfile> get_all_profiles() {
     
     if (profiles.empty()) {
         CButtonProfile def;
-        def.name = "默认";
+        def.name = reinterpret_cast<const char*>(u8"默认");
         profiles.push_back(def);
     }
     
