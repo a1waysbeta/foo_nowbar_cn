@@ -379,6 +379,9 @@ static void create_default_config_file() {
     std::ofstream file(wide_path.get_ptr(), std::ios::out | std::ios::binary);
     if (!file.is_open()) return;
     
+    // Write UTF-8 BOM for proper encoding detection
+    file.write("\xEF\xBB\xBF", 3);
+    
     file << "# 播放控制面板自定义按钮配置\n";
     file << "# 按钮 1–6：在面板中显示，并支持键盘快捷键\n";
     file << "# 按钮 7–12：隐藏按钮（仅支持键盘快捷键）\n";
@@ -517,6 +520,9 @@ static void save_config_file() {
     
     std::ofstream file(wide_path.get_ptr(), std::ios::out | std::ios::binary);
     if (!file.is_open()) return;
+    
+    // Write UTF-8 BOM for proper encoding detection
+    file.write("\xEF\xBB\xBF", 3);
     
     file << "# 播放控制面板自定义按钮配置\n";
     file << "# 按钮 1–6：在面板中显示，并支持键盘快捷键\n";
