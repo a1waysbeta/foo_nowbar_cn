@@ -2515,7 +2515,7 @@ void ControlPanelCore::create_autoplaylist(const char* name, const char* query, 
     pm->set_active_playlist(new_playlist);
   } catch (const std::exception& e) {
     pfc::string8 msg;
-    msg << "foo_nowbar：创建自动播放列表失败 -" << e.what();
+    msg << "foo_nowbar: Failed to create autoplaylist - " << e.what();
     console::print(msg.c_str());
   }
 }
