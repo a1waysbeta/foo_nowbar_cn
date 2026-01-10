@@ -1791,36 +1791,17 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
     g.FillRectangle(&trackBrush, m_rect_seekbar.left, track_y, w, track_h);
   }
 
-  // Smooth progress interpolation (only when enabled)
+  // Progress bar always uses direct value (no interpolation) for performance
+  // The Smooth Animations setting does not affect the progress bar
   double progress;
   if (m_seeking) {
-    // During seeking, always use direct position
+    // During seeking, use the current playback time
     progress = (m_state.track_length > 0)
                    ? (m_state.playback_time / m_state.track_length)
                    : 0.0;
-  } else if (!get_nowbar_smooth_animations_enabled()) {
-    // Smooth animations disabled - use direct target with no interpolation
-    progress = m_target_progress;
-    m_animated_progress = m_target_progress;  // Keep in sync
   } else {
-    // Smooth animations enabled - use lerp interpolation
-    auto now = std::chrono::steady_clock::now();
-    double delta_seconds = std::chrono::duration<double>(now - m_last_frame_time).count();
-    m_last_frame_time = now;
-    
-    // Clamp delta to reasonable range (prevent large jumps after window focus loss)
-    delta_seconds = std::min(delta_seconds, 0.1);
-    
-    // Lerp animated progress toward target
-    double lerp_factor = 1.0 - std::exp(-PROGRESS_LERP_SPEED * delta_seconds);
-    m_animated_progress += (m_target_progress - m_animated_progress) * lerp_factor;
-    
-    // Snap to target when very close to prevent infinite animation loop
-    if (std::abs(m_animated_progress - m_target_progress) < 0.001) {
-      m_animated_progress = m_target_progress;
-    }
-    
-    progress = m_animated_progress;
+    // Normal playback - use target progress directly
+    progress = m_target_progress;
   }
   
   // Clamp progress
@@ -1849,11 +1830,8 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
     }
   }
   
-  // Track whether seekbar animation is still in progress
-  // The centralized animation loop in paint() will request the next frame
-  m_seekbar_animating = get_nowbar_smooth_animations_enabled() && 
-                        std::abs(m_animated_progress - m_target_progress) > 0.0005 && 
-                        !m_seeking;
+  // Seekbar never drives the animation loop (no interpolation = no need for continuous frames)
+  m_seekbar_animating = false;
 
   // Seek handle (only on hover)
   if (m_hover_region == HitRegion::SeekBar || m_seeking) {
@@ -2888,24 +2866,16 @@ void ControlPanelCore::on_playback_time_changed(double time) {
   if (!m_seeking) {
     m_state.playback_time = time;
     
-    // Update target progress for smooth animation
+    // Update target progress (used directly by seekbar, no interpolation)
     if (m_state.track_length > 0) {
       m_target_progress = time / m_state.track_length;
     } else {
       m_target_progress = 0.0;
     }
     
-    // When smooth animations are enabled, the seekbar interpolation loop
-    // handles continuous repainting. Only invalidate when time display changes
-    // to update the displayed seconds (reduces invalidation from 10Hz to 1Hz).
-    if (get_nowbar_smooth_animations_enabled()) {
-      // The seekbar animation loop will be activated by the progress change
-      // and handle frame scheduling via the centralized timer
-      m_seekbar_animating = true;
-    } else {
-      // Smooth animations disabled - must invalidate on every update
-      invalidate();
-    }
+    // Always use direct invalidate for playback time updates
+    // Progress bar does not use smooth animation for performance reasons
+    invalidate();
   }
 }
 
