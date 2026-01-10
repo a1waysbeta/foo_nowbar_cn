@@ -317,6 +317,11 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             m_core->on_mouse_wheel(GET_WHEEL_DELTA_WPARAM(wp));
         }
         return 0;
+        
+    case WM_TIMER:
+        // Animation timer fired - trigger a repaint to continue the animation
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return 0;
     }
     
     return DefWindowProc(m_hwnd, msg, wp, lp);
