@@ -256,6 +256,24 @@ private:
     static constexpr float HOVER_FADE_DURATION_MS = 150.0f;  // Quick fade for responsiveness
     static constexpr float MIN_ANIMATION_FRAME_MS = 16.0f;   // ~60 FPS cap for animations
     
+    // Centralized animation frame timer (performance optimization)
+    // All animations use request_animation() instead of direct invalidate()
+    bool m_animation_requested = false;  // An animation frame is pending
+    std::chrono::steady_clock::time_point m_last_invalidate_time;  // Last actual invalidation
+    static constexpr float TARGET_FRAME_INTERVAL_MS = 16.6f;  // ~60 FPS target
+    
+    // Track which animation systems are active (for determining when to stop the loop)
+    bool m_seekbar_animating = false;
+    bool m_hover_animating = false;
+    bool m_cbutton_animating = false;
+    bool m_bg_animating = false;
+    
+    // Timer-based animation scheduling
+    static constexpr UINT_PTR ANIMATION_TIMER_ID = 1001;
+    bool m_animation_timer_active = false;
+    
+    void request_animation();  // Request an animation frame (throttled)
+    
     // Artwork
     std::unique_ptr<Gdiplus::Bitmap> m_artwork_bitmap;
     std::unique_ptr<Gdiplus::Bitmap> m_default_artwork;
