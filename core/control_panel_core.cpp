@@ -2577,7 +2577,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
   
   // Add menu items - Group 1: Play count related
   AppendMenuW(menu, MF_STRING, ID_NEVER_PLAYED, L"从未播放");
-  AppendMenuW(menu, MF_STRING, ID_PLAYED_LAST_5_DAYS, L"最近 5 天播放过");
+  AppendMenuW(menu, MF_STRING, ID_PLAYED_LAST_5_DAYS, L"近5天播放");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -2592,8 +2592,8 @@ void ControlPanelCore::show_autoplaylist_menu() {
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   
   // Group 3: Special
-  AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"喜爱的曲目");
-  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"最近 2 周添加");
+  AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"我的收藏");
+  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"近2周添加");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -2601,8 +2601,8 @@ void ControlPanelCore::show_autoplaylist_menu() {
   // Group 4: Dynamic (based on currently selected track)
   UINT artist_flags = MF_STRING | (current_artist.is_empty() ? MF_GRAYED : 0);
   UINT title_flags = MF_STRING | (current_title.is_empty() ? MF_GRAYED : 0);
-  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"与当前所选相同的艺术家");
-  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"与当前所选相同的标题");
+  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"相同艺术家");
+  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"相同标题");
   
   // Get Super button position for menu placement
   POINT pt;
@@ -2627,7 +2627,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_PLAYED_LAST_5_DAYS:
-      create_autoplaylist(reinterpret_cast<const char*>(u8"最近 5 天播放过"),
+      create_autoplaylist(reinterpret_cast<const char*>(u8"近5天播放"),
                           "%last_played% DURING LAST 5 DAYS",
                           "%last_played%");
       break;
@@ -2652,12 +2652,12 @@ void ControlPanelCore::show_autoplaylist_menu() {
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_LOVED_TRACKS:
-      create_autoplaylist(reinterpret_cast<const char*>(u8"喜爱的曲目"),
+      create_autoplaylist(reinterpret_cast<const char*>(u8"我的收藏"),
                           "%mood% PRESENT",
                           "%mood% | %album artist% | %album%");
       break;
     case ID_RECENTLY_ADDED:
-      create_autoplaylist(reinterpret_cast<const char*>(u8"最近 2 周添加"),
+      create_autoplaylist(reinterpret_cast<const char*>(u8"近2周添加"),
                           "%added% DURING LAST 2 WEEKS",
                           "%added%");
       break;
