@@ -2593,7 +2593,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
   
   // Group 3: Special
   AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"喜爱的曲目");
-  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"最近添加");
+  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"最近 2 周添加");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -2601,8 +2601,8 @@ void ControlPanelCore::show_autoplaylist_menu() {
   // Group 4: Dynamic (based on currently selected track)
   UINT artist_flags = MF_STRING | (current_artist.is_empty() ? MF_GRAYED : 0);
   UINT title_flags = MF_STRING | (current_title.is_empty() ? MF_GRAYED : 0);
-  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"与当前所选曲目艺术家相同");
-  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"与当前所选曲目标题相同");
+  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"与当前所选相同的艺术家");
+  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"与当前所选相同的标题");
   
   // Get Super button position for menu placement
   POINT pt;
@@ -2657,7 +2657,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
                           "%mood% | %album artist% | %album%");
       break;
     case ID_RECENTLY_ADDED:
-      create_autoplaylist(reinterpret_cast<const char*>(u8"最近添加"),
+      create_autoplaylist(reinterpret_cast<const char*>(u8"最近 2 周添加"),
                           "%added% DURING LAST 2 WEEKS",
                           "%added%");
       break;
