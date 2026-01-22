@@ -18,6 +18,9 @@ bool get_nowbar_cbutton_autohide();  // true=Yes (auto-hide), false=No
 bool get_nowbar_glass_effect_enabled();  // true=Enabled, false=Disabled (Windows 11 only)
 int get_nowbar_background_style();  // 0=Solid, 1=Artwork Colors, 2=Blurred Artwork
 bool get_nowbar_smooth_animations_enabled();  // true=Enabled, false=Disabled
+COLORREF get_nowbar_button_accent_color();    // Button accent color for shuffle/repeat
+COLORREF get_nowbar_progress_accent_color();  // Progress bar fill color
+COLORREF get_nowbar_volume_accent_color();    // Volume bar fill color
 bool get_nowbar_custom_button_visible();  // true=Show, false=Hidden
 int get_nowbar_custom_button_action();  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action
 pfc::string8 get_nowbar_custom_button_url();
