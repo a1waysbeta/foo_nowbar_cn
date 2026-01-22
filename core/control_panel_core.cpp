@@ -616,8 +616,12 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     art_size = 32; // Minimum size
   }
   int art_y = y_center - art_size / 2;
-  m_rect_artwork = {rect.left + art_margin, art_y,
-                    rect.left + art_margin + art_size, art_y + art_size};
+  if (get_nowbar_cover_artwork_visible()) {
+    m_rect_artwork = {rect.left + art_margin, art_y,
+                      rect.left + art_margin + art_size, art_y + art_size};
+  } else {
+    m_rect_artwork = {};  // Clear rect when hidden
+  }
 
   // Calculate size scale factor based on panel height
   int reference_height =
@@ -675,7 +679,9 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int core_start_x = rect.left + (w - core_width) / 2;
   
   // Clamp control buttons to prevent overlap with artwork
-  int min_controls_x = m_rect_artwork.right + spacing;
+  int min_controls_x = get_nowbar_cover_artwork_visible()
+      ? m_rect_artwork.right + spacing
+      : rect.left + spacing;
   core_start_x = std::max(core_start_x, min_controls_x);
 
   // Calculate seekbar and time display heights first to determine available
@@ -740,14 +746,20 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   controls_x += button_size + spacing;
   
   // Super button - positioned after Repeat (cosmetic only)
-  m_rect_super = {controls_x, btn_y, controls_x + button_size,
-                  btn_y + button_size};
+  if (get_nowbar_super_icon_visible()) {
+    m_rect_super = {controls_x, btn_y, controls_x + button_size,
+                    btn_y + button_size};
+  } else {
+    m_rect_super = {};  // Clear rect when hidden
+  }
 
   // Heart button - positioned to the left of shuffle (if visible)
   if (get_nowbar_mood_icon_visible()) {
     int heart_x = m_rect_shuffle.left - spacing - button_size;
     // Prevent overlap with artwork - clamp left edge
-    int min_heart_x = m_rect_artwork.right + spacing;
+    int min_heart_x = get_nowbar_cover_artwork_visible()
+        ? m_rect_artwork.right + spacing
+        : rect.left + spacing;
     heart_x = std::max(heart_x, min_heart_x);
     m_rect_heart = {heart_x, btn_y, heart_x + button_size, btn_y + button_size};
   } else {
@@ -767,7 +779,10 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   m_rect_custom = {};  // Legacy - clear it
   
   // Calculate available space for custom buttons
-  int min_cbutton_left = m_rect_super.right + spacing;
+  // Use Super button right edge if visible, otherwise use Repeat button right edge
+  int min_cbutton_left = get_nowbar_super_icon_visible()
+      ? m_rect_super.right + spacing
+      : m_rect_repeat.right + spacing;
   int cbutton_right_edge = vol_x - spacing;
   int available_width = cbutton_right_edge - min_cbutton_left;
   
@@ -916,7 +931,9 @@ void ControlPanelCore::update_layout(const RECT &rect) {
 
   // Track info (between artwork and controls) - truly vertically centered on
   // panel
-  int info_x = m_rect_artwork.right + spacing;
+  int info_x = get_nowbar_cover_artwork_visible()
+      ? m_rect_artwork.right + spacing
+      : rect.left + spacing;
   // Use heart button as reference if visible, otherwise shuffle button
   // Add extra spacing to prevent text overlap with progress timer
   int extra_spacing = spacing; // Full spacing instead of 50%
@@ -938,8 +955,8 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Position seekbar to extend beyond heart icon (left) and super button (right)
   // Left edge: use heart button left if visible, otherwise shuffle left
   int seekbar_left = get_nowbar_mood_icon_visible() ? m_rect_heart.left : m_rect_shuffle.left;
-  // Right edge: use super button right
-  int seekbar_right = m_rect_super.right;
+  // Right edge: use super button right if visible, otherwise repeat button right
+  int seekbar_right = get_nowbar_super_icon_visible() ? m_rect_super.right : m_rect_repeat.right;
   
   m_rect_seekbar = {seekbar_left,
                     seek_y,
@@ -971,7 +988,9 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
   draw_background(g, rect);
-  draw_artwork(g);
+  if (get_nowbar_cover_artwork_visible()) {
+    draw_artwork(g);
+  }
   draw_track_info(g);
   draw_playback_buttons(g);
   draw_seekbar(g);
@@ -1547,23 +1566,25 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   draw_repeat_icon(g, repeatIconRect, repeatColor, repeat_one);
 
   // Super button (cosmetic - no functionality)
-  bool super_hovered = (m_hover_region == HitRegion::SuperButton);
-  float super_opacity = get_hover_opacity(HitRegion::SuperButton);
-  int supw = m_rect_super.right - m_rect_super.left;
-  int suph = m_rect_super.bottom - m_rect_super.top;
-  if (super_opacity > 0.01f && show_hover) {
-    BYTE alpha = static_cast<BYTE>(super_opacity * icon_hover_color.GetA());
-    Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
-    Gdiplus::SolidBrush hoverBrush(hoverColor);
-    g.FillEllipse(&hoverBrush, m_rect_super.left, m_rect_super.top, supw, suph);
+  if (get_nowbar_super_icon_visible()) {
+    bool super_hovered = (m_hover_region == HitRegion::SuperButton);
+    float super_opacity = get_hover_opacity(HitRegion::SuperButton);
+    int supw = m_rect_super.right - m_rect_super.left;
+    int suph = m_rect_super.bottom - m_rect_super.top;
+    if (super_opacity > 0.01f && show_hover) {
+      BYTE alpha = static_cast<BYTE>(super_opacity * icon_hover_color.GetA());
+      Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
+      Gdiplus::SolidBrush hoverBrush(hoverColor);
+      g.FillEllipse(&hoverBrush, m_rect_super.left, m_rect_super.top, supw, suph);
+    }
+    // Calculate icon inset - smaller when hovered (for enlarge effect) like other buttons
+    float super_scale = super_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+    int super_inset = static_cast<int>(supw * (1.0f - 0.70f * super_scale) / 2.0f);
+    RECT superIconRect = {
+        m_rect_super.left + super_inset, m_rect_super.top + super_inset,
+        m_rect_super.right - super_inset, m_rect_super.bottom - super_inset};
+    draw_super_icon(g, superIconRect, icon_secondary_color);
   }
-  // Calculate icon inset - smaller when hovered (for enlarge effect) like other buttons
-  float super_scale = super_hovered ? HOVER_SCALE_FACTOR : 1.0f;
-  int super_inset = static_cast<int>(supw * (1.0f - 0.70f * super_scale) / 2.0f);
-  RECT superIconRect = {
-      m_rect_super.left + super_inset, m_rect_super.top + super_inset,
-      m_rect_super.right - super_inset, m_rect_super.bottom - super_inset};
-  draw_super_icon(g, superIconRect, icon_secondary_color);
   
   // Hover fade animation is disabled for performance - don't drive continuous repaints
   // The hover effect still works when get_hover_opacity() is called during paint 
@@ -2047,7 +2068,7 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
     return HitRegion::ShuffleButton;
   if (pt_in_rect(m_rect_repeat, x, y))
     return HitRegion::RepeatButton;
-  if (pt_in_rect(m_rect_super, x, y))
+  if (get_nowbar_super_icon_visible() && pt_in_rect(m_rect_super, x, y))
     return HitRegion::SuperButton;
   if (pt_in_rect(m_rect_seekbar, x, y))
     return HitRegion::SeekBar;
@@ -2082,7 +2103,7 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
   if (get_nowbar_miniplayer_icon_visible() &&
       pt_in_rect(m_rect_miniplayer, x, y))
     return HitRegion::MiniPlayerButton;
-  if (pt_in_rect(m_rect_artwork, x, y))
+  if (get_nowbar_cover_artwork_visible() && pt_in_rect(m_rect_artwork, x, y))
     return HitRegion::Artwork;
   if (pt_in_rect(m_rect_track_info, x, y))
     return HitRegion::TrackInfo;
