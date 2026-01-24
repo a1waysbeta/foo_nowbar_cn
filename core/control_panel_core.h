@@ -325,7 +325,10 @@ private:
     // Methods for title formatting
     void update_title_formats();
     void evaluate_title_formats();
-    
+
+    // Theme management
+    void apply_theme();  // Apply theme based on theme mode, background style, and playback state
+
     // Custom button icons (PNG/ICO custom icons)
     std::unique_ptr<Gdiplus::Bitmap> m_cbutton_icons[6];  // Cached custom icons
     pfc::string8 m_cbutton_icon_paths[6];  // Cached paths to detect changes
