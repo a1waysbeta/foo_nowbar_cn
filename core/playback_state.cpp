@@ -84,7 +84,10 @@ void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
     m_state.can_seek = pc->playback_can_seek();
     m_state.current_track = p_track;  // Store the track handle
     m_state.playback_order = playlist_manager::get()->playback_order_get_active();  // Refresh playback order
-    
+
+    // Reset preview skip flag for new track
+    m_preview_skip_triggered = false;
+
     update_track_info(p_track);
     notify_track_changed();
     notify_state_changed();
@@ -124,6 +127,9 @@ void PlaybackStateManager::on_playback_pause(bool p_state) {
 void PlaybackStateManager::on_playback_time(double p_time) {
     m_state.playback_time = p_time;
     notify_time_changed(p_time);
+
+    // Check for playback preview skip
+    check_preview_skip(p_time);
 }
 
 void PlaybackStateManager::on_volume_change(float p_new_val) {
@@ -392,6 +398,58 @@ void PlaybackStateManager::handle_infinite_playback() {
     // Start playback from the first new track using main thread callback
     auto mtcm = main_thread_callback_manager::get();
     mtcm->add_callback(fb2k::service_new<InfinitePlaybackCallback>(insert_position));
+}
+
+// Callback to skip to next track on main thread
+class PreviewSkipCallback : public main_thread_callback {
+public:
+    void callback_run() override {
+        playback_control::get()->next();
+    }
+};
+
+void PlaybackStateManager::check_preview_skip(double current_time) {
+    // Skip if already triggered for this track
+    if (m_preview_skip_triggered) return;
+
+    // Get preview mode setting: 0=Off, 1=35%, 2=50%, 3=60sec
+    int preview_mode = get_nowbar_preview_mode();
+    if (preview_mode == 0) return;  // Preview disabled
+
+    // Need valid track length for percentage modes
+    double track_length = m_state.track_length;
+    if (track_length <= 0.0 && preview_mode != 3) return;
+
+    // Calculate preview threshold
+    double preview_threshold = 0.0;
+    switch (preview_mode) {
+        case 1:  // 35% of track
+            preview_threshold = track_length * 0.35;
+            break;
+        case 2:  // 50% of track
+            preview_threshold = track_length * 0.50;
+            break;
+        case 3:  // 60 seconds
+            preview_threshold = 60.0;
+            break;
+        default:
+            return;
+    }
+
+    // For fixed duration, don't skip if track is shorter than the threshold
+    // (let it play to the end naturally)
+    if (preview_mode == 3 && track_length > 0.0 && track_length <= preview_threshold) {
+        return;
+    }
+
+    // Check if we've reached the preview threshold
+    if (current_time >= preview_threshold) {
+        m_preview_skip_triggered = true;
+
+        // Skip to next track using main thread callback
+        auto mtcm = main_thread_callback_manager::get();
+        mtcm->add_callback(fb2k::service_new<PreviewSkipCallback>());
+    }
 }
 
 } // namespace nowbar
