@@ -68,6 +68,7 @@ private:
     void notify_time_changed(double time);
     void notify_volume_changed(float volume);
     void notify_track_changed();
+    void handle_infinite_playback();  // Add similar tracks when playlist ends
     
     PlaybackState m_state;
     std::vector<IPlaybackStateCallback*> m_callbacks;
