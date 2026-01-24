@@ -332,7 +332,12 @@ void ControlPanelCore::apply_custom_colors() {
   
   COLORREF bg, text, highlight;
   if (m_color_query_cb(bg, text, highlight)) {
-    
+
+    // Determine if this is a dark or light theme based on background luminance
+    // Using relative luminance formula: 0.299*R + 0.587*G + 0.114*B
+    int luminance = (299 * GetRValue(bg) + 587 * GetGValue(bg) + 114 * GetBValue(bg)) / 1000;
+    m_dark_mode = (luminance < 128);
+
     // Apply custom colors from DUI color scheme
     m_bg_color = Gdiplus::Color(255, GetRValue(bg), GetGValue(bg), GetBValue(bg));
     m_text_color = Gdiplus::Color(255, GetRValue(text), GetGValue(text), GetBValue(text));
