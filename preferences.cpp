@@ -40,6 +40,11 @@ static cfg_int cfg_nowbar_mood_icon_visible(
     1  // Default: Show (visible)
 );
 
+static cfg_int cfg_nowbar_mood_tag_mode(
+    GUID{0xABCDEF57, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE7}},
+    0  // Default: 0=MOOD, 1=2003_LOVED, 2=FEEDBACK, 3=LFM_LOVED, 4=SMP_LOVED
+);
+
 static cfg_int cfg_nowbar_stop_icon_visible(
     GUID{0xABCDEF51, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE1}},
     0  // Default: Hidden
@@ -1237,6 +1242,10 @@ bool get_nowbar_mood_icon_visible() {
     return cfg_nowbar_mood_icon_visible != 0;
 }
 
+int get_nowbar_mood_tag_mode() {
+    return cfg_nowbar_mood_tag_mode;
+}
+
 bool get_nowbar_stop_icon_visible() {
     return cfg_nowbar_stop_icon_visible != 0;
 }
@@ -1250,7 +1259,7 @@ bool get_nowbar_miniplayer_icon_visible() {
 }
 
 bool get_nowbar_hover_circles_enabled() {
-    return true;  // Hover circles always enabled (preference option removed)
+    return cfg_nowbar_hover_circles != 0;
 }
 
 bool get_nowbar_alternate_icons_enabled() {
@@ -1780,6 +1789,9 @@ void nowbar_preferences::switch_tab(int tab) {
     // Auto-hide C-buttons (behavior setting)
     ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), show_general);
+    // Mood Tag setting
+    ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_LABEL), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), show_general);
 
     // Appearance tab controls (Tab 1)
     BOOL show_appearance = (tab == 1) ? SW_SHOW : SW_HIDE;
@@ -2066,6 +2078,15 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hAutohideCbuttonsCombo, CB_ADDSTRING, 0, (LPARAM)L"No");
         SendMessage(hAutohideCbuttonsCombo, CB_SETCURSEL, cfg_nowbar_cbutton_autohide ? 0 : 1, 0);
 
+        // Initialize mood tag combobox
+        HWND hMoodTagCombo = GetDlgItem(hwnd, IDC_MOOD_TAG_COMBO);
+        SendMessage(hMoodTagCombo, CB_ADDSTRING, 0, (LPARAM)L"%MOOD%");
+        SendMessage(hMoodTagCombo, CB_ADDSTRING, 0, (LPARAM)L"%2003_LOVED%");
+        SendMessage(hMoodTagCombo, CB_ADDSTRING, 0, (LPARAM)L"%FEEDBACK%");
+        SendMessage(hMoodTagCombo, CB_ADDSTRING, 0, (LPARAM)L"%LFM_LOVED%");
+        SendMessage(hMoodTagCombo, CB_ADDSTRING, 0, (LPARAM)L"%SMP_LOVED%");
+        SendMessage(hMoodTagCombo, CB_SETCURSEL, cfg_nowbar_mood_tag_mode, 0);
+
         // Initialize glass effect combobox
         HWND hGlassEffectCombo = GetDlgItem(hwnd, IDC_GLASS_EFFECT_COMBO);
         SendMessage(hGlassEffectCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
@@ -2170,6 +2191,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_ALTERNATE_ICONS_COMBO:
         case IDC_AUTOHIDE_CBUTTONS_COMBO:
         case IDC_GLASS_EFFECT_COMBO:
+        case IDC_MOOD_TAG_COMBO:
             if (HIWORD(wp) == CBN_SELCHANGE) {
                 p_this->on_changed();
             }
@@ -2839,6 +2861,9 @@ void nowbar_preferences::apply_settings() {
         // Save auto-hide C-buttons setting (0=Yes, 1=No in combobox -> config 1=Yes, 0=No)
         int autohideCbuttonsSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_cbutton_autohide = (autohideCbuttonsSel == 0) ? 1 : 0;
+
+        // Save mood tag mode (0=MOOD, 1=2003_LOVED, 2=FEEDBACK, 3=LFM_LOVED)
+        cfg_nowbar_mood_tag_mode = (int)SendMessage(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), CB_GETCURSEL, 0, 0);
 
         // Save glass effect setting (0=Disabled, 1=Enabled in combobox -> config 0=Disabled, 1=Enabled)
         int glassEffectSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_COMBO), CB_GETCURSEL, 0, 0);
