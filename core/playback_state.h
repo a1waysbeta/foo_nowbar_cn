@@ -41,15 +41,17 @@ public:
 class PlaybackStateManager : private play_callback_impl_base {
 public:
     static PlaybackStateManager& get();
-    
+    static void shutdown();  // Must be called during on_quit() before services are gone
+    static bool is_available();  // Check if singleton is still valid
+
     void register_callback(IPlaybackStateCallback* cb);
     void unregister_callback(IPlaybackStateCallback* cb);
-    
+
     const PlaybackState& get_state() const { return m_state; }
-    
+
 private:
     PlaybackStateManager();
-    ~PlaybackStateManager() = default;
+    ~PlaybackStateManager();
     
     // play_callback overrides
     void on_playback_starting(play_control::t_track_command p_command, bool p_paused) override;
