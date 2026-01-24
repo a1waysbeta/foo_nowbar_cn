@@ -266,13 +266,40 @@ void ControlPanelCore::notify_all_settings_changed() {
   }
 }
 
-void ControlPanelCore::on_settings_changed() {
-  // Reload theme mode from preferences
+void ControlPanelCore::apply_theme() {
   int theme_mode = get_nowbar_theme_mode();
   int bg_style = get_nowbar_background_style();
 
-  // Force dark mode for artwork-based backgrounds (they have dark overlays)
-  bool force_dark = (bg_style == 1 || bg_style == 2);
+  // Check if we have artwork-based background (Artwork Colors or Blurred)
+  bool has_artwork_bg = (bg_style == 1 || bg_style == 2);
+
+  // Determine if playback is stopped (not playing AND not paused)
+  bool is_stopped = !m_state.is_playing && !m_state.is_paused;
+
+  // Special case: Light theme + artwork background
+  // Use Light theme only when stopped (showing placeholder), Dark when playing/paused
+  if (theme_mode == 2 && has_artwork_bg) {
+    set_dark_mode(!is_stopped);  // Light when stopped, Dark when playing/paused
+    return;
+  }
+
+  // Special case: Auto theme + artwork background
+  // When stopped (no artwork visible), follow DUI theme; when playing/paused, force dark
+  // (artwork backgrounds have dark overlays that require light text)
+  if (theme_mode == 0 && has_artwork_bg) {
+    if (is_stopped) {
+      // No artwork visible, follow DUI theme setting
+      set_dark_mode(ui_config_manager::g_is_dark_mode());
+    } else {
+      // Artwork visible with dark overlay, force dark mode for readability
+      set_dark_mode(true);
+    }
+    return;
+  }
+
+  // Force dark mode for artwork-based backgrounds when not in Light or Auto mode
+  // (artwork backgrounds have dark overlays that require light text)
+  bool force_dark = has_artwork_bg;
 
   if (theme_mode == 3 && !force_dark) {
     // Custom - use DUI color scheme via callback
@@ -296,6 +323,11 @@ void ControlPanelCore::on_settings_changed() {
     }
     set_dark_mode(dark);
   }
+}
+
+void ControlPanelCore::on_settings_changed() {
+  // Apply theme based on current settings and playback state
+  apply_theme();
 
   // Update fonts from preferences
   update_fonts();
@@ -3026,18 +3058,39 @@ void ControlPanelCore::update_mood_state() {
 }
 
 void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
-  bool was_playing = m_state.is_playing && !m_state.is_paused;
+  bool was_playing = m_state.is_playing || m_state.is_paused;
   m_state = state;
   bool is_playing_now = m_state.is_playing && !m_state.is_paused;
-  
+  bool is_stopped = !m_state.is_playing && !m_state.is_paused;
+
+  // If playback stopped completely, reset to initial state
+  if (was_playing && is_stopped) {
+    // Reset progress bar
+    m_animated_progress = 0.0;
+    m_target_progress = 0.0;
+
+    // Clear artwork to show placeholder
+    clear_artwork();
+
+    // Reset mood state
+    m_mood_active = false;
+  }
+
+  // Reapply theme when transitioning between stopped and playing/paused
+  // This handles Light theme + artwork background special case (Light when stopped, Dark when playing)
+  bool was_stopped = !was_playing;
+  if (was_stopped != is_stopped) {
+    apply_theme();
+  }
+
   // Trigger fade animation if playback state changed
-  if (get_nowbar_cbutton_autohide() && was_playing != is_playing_now) {
+  if (get_nowbar_cbutton_autohide() && (was_playing && is_stopped) != (!was_playing && is_playing_now)) {
     m_cbutton_start_opacity = m_cbutton_opacity;  // Start from current opacity
     m_cbutton_target_opacity = is_playing_now ? 0.0f : 1.0f;
     m_cbutton_fade_start_time = std::chrono::steady_clock::now();
     m_cbutton_fade_active = true;
   }
-  
+
   evaluate_title_formats();
   invalidate();
 }
