@@ -2724,33 +2724,33 @@ void ControlPanelCore::show_autoplaylist_menu() {
       break;
     case ID_LOVED_TRACKS: {
       // Determine tag name based on mood tag mode setting
-      // 0=MOOD, 1=2003_LOVED, 2=FEEDBACK, 3=LFM_LOVED, 4=SMP_LOVED
+      // 0=FEEDBACK, 1=2003_LOVED, 2=LFM_LOVED, 3=SMP_LOVED, 4=MOOD
       int tag_mode = get_nowbar_mood_tag_mode();
       const char* tag_name;
       pfc::string8 query;
       pfc::string8 sort;
 
       switch (tag_mode) {
+        case 0:
+          tag_name = "FEEDBACK";
+          break;
         case 1:
           tag_name = "2003_LOVED";
           break;
         case 2:
-          tag_name = "FEEDBACK";
-          break;
-        case 3:
           tag_name = "LFM_LOVED";
           break;
-        case 4:
+        case 3:
           tag_name = "SMP_LOVED";
           break;
-        case 0:
+        case 4:
         default:
           tag_name = "MOOD";
           break;
       }
 
       // For FEEDBACK tag, check for value "1" (loved); for others, just check PRESENT
-      if (tag_mode == 2) {
+      if (tag_mode == 0) {
         query.set_string("%");
         query.add_string(tag_name);
         query.add_string("% EQUAL 1");
@@ -2901,33 +2901,33 @@ void ControlPanelCore::do_toggle_mood() {
   bool new_mood = !m_mood_active;
 
   // Determine tag name and value based on mood tag mode setting
-  // 0=MOOD (datetime), 1=2003_LOVED (1), 2=FEEDBACK (1/-1), 3=LFM_LOVED (1)
+  // 0=FEEDBACK (1/-1), 1=2003_LOVED (1), 2=LFM_LOVED (1), 3=SMP_LOVED (1), 4=MOOD (datetime)
   int tag_mode = get_nowbar_mood_tag_mode();
   const char* tag_name;
   pfc::string8 value;
 
   switch (tag_mode) {
+    case 0: {  // FEEDBACK - "1" if loved, "-1" if hated (we only do loved via toggle)
+      tag_name = "FEEDBACK";
+      value = "1";
+      break;
+    }
     case 1: {  // 2003_LOVED - "1" if loved, remove if not
       tag_name = "2003_LOVED";
       value = "1";
       break;
     }
-    case 2: {  // FEEDBACK - "1" if loved, "-1" if hated (we only do loved via toggle)
-      tag_name = "FEEDBACK";
-      value = "1";
-      break;
-    }
-    case 3: {  // LFM_LOVED - "1" if loved, remove if not
+    case 2: {  // LFM_LOVED - "1" if loved, remove if not
       tag_name = "LFM_LOVED";
       value = "1";
       break;
     }
-    case 4: {  // SMP_LOVED - "1" if loved, remove if not
+    case 3: {  // SMP_LOVED - "1" if loved, remove if not
       tag_name = "SMP_LOVED";
       value = "1";
       break;
     }
-    case 0:  // MOOD - datetime string
+    case 4:  // MOOD - datetime string
     default: {
       tag_name = "MOOD";
       // Get current date/time for MOOD tag
@@ -2964,28 +2964,28 @@ void ControlPanelCore::update_mood_state() {
   }
 
   // Determine tag name based on mood tag mode setting
-  // 0=MOOD, 1=2003_LOVED, 2=FEEDBACK, 3=LFM_LOVED
+  // 0=FEEDBACK, 1=2003_LOVED, 2=LFM_LOVED, 3=SMP_LOVED, 4=MOOD
   int tag_mode = get_nowbar_mood_tag_mode();
   const char* tag_name;
 
   switch (tag_mode) {
+    case 0: {
+      tag_name = "FEEDBACK";
+      break;
+    }
     case 1: {
       tag_name = "2003_LOVED";
       break;
     }
     case 2: {
-      tag_name = "FEEDBACK";
-      break;
-    }
-    case 3: {
       tag_name = "LFM_LOVED";
       break;
     }
-    case 4: {
+    case 3: {
       tag_name = "SMP_LOVED";
       break;
     }
-    case 0:
+    case 4:
     default: {
       tag_name = "MOOD";
       break;
@@ -3000,7 +3000,7 @@ void ControlPanelCore::update_mood_state() {
     if (tag_value != nullptr && strlen(tag_value) > 0) {
       // For FEEDBACK tag, check if value is "1" (loved) vs "-1" (hated)
       // For other tags, any non-empty value means "loved"
-      if (tag_mode == 2) {  // FEEDBACK mode
+      if (tag_mode == 0) {  // FEEDBACK mode
         m_mood_active = (strcmp(tag_value, "1") == 0);
       } else {
         m_mood_active = true;
