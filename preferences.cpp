@@ -110,6 +110,11 @@ static cfg_int cfg_nowbar_volume_accent_color(
     RGB(140, 140, 140)  // Default: Gray (matches current volume bar color)
 );
 
+static cfg_int cfg_nowbar_infinite_playback(
+    GUID{0xABCDEF58, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE8}},
+    0  // Default: Disabled
+);
+
 static cfg_int cfg_nowbar_custom_button_action(
     GUID{0xABCDEF0A, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x92}},
     0  // Default: None (0=None, 1=Open URL, 2=Run Executable)
@@ -1272,6 +1277,14 @@ bool get_nowbar_cbutton_autohide() {
 
 bool get_nowbar_glass_effect_enabled() {
     return cfg_nowbar_glass_effect != 0;
+}
+
+bool get_nowbar_infinite_playback_enabled() {
+    return cfg_nowbar_infinite_playback != 0;
+}
+
+void set_nowbar_infinite_playback_enabled(bool enabled) {
+    cfg_nowbar_infinite_playback = enabled ? 1 : 0;
 }
 
 int get_nowbar_background_style() {
