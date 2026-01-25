@@ -88,6 +88,14 @@ void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
     // Reset preview skip flag for new track
     m_preview_skip_triggered = false;
 
+    // Check if we should skip this track due to low rating
+    if (check_and_skip_low_rating(p_track)) {
+        return;  // Track is being skipped, don't update UI
+    }
+
+    // Reset consecutive skip counter on successful playback
+    m_consecutive_rating_skips = 0;
+
     update_track_info(p_track);
     notify_track_changed();
     notify_state_changed();
@@ -450,6 +458,67 @@ void PlaybackStateManager::check_preview_skip(double current_time) {
         auto mtcm = main_thread_callback_manager::get();
         mtcm->add_callback(fb2k::service_new<PreviewSkipCallback>());
     }
+}
+
+// Callback to skip to next track on main thread (for low rating skip)
+class LowRatingSkipCallback : public main_thread_callback {
+public:
+    void callback_run() override {
+        playback_control::get()->next();
+    }
+};
+
+bool PlaybackStateManager::check_and_skip_low_rating(metadb_handle_ptr p_track) {
+    // Check if skip low rating is enabled
+    if (!get_nowbar_skip_low_rating_enabled()) {
+        return false;
+    }
+
+    // Check if we've hit the consecutive skip limit (prevent infinite loops)
+    const int MAX_CONSECUTIVE_SKIPS = 10;
+    if (m_consecutive_rating_skips >= MAX_CONSECUTIVE_SKIPS) {
+        // Reset counter and allow this track to play
+        m_consecutive_rating_skips = 0;
+        return false;
+    }
+
+    // Validate track handle
+    if (!p_track.is_valid()) {
+        return false;
+    }
+
+    // Get the rating threshold
+    int threshold = get_nowbar_skip_low_rating_threshold();
+
+    // Evaluate %rating% using title formatting
+    // foo_playcount exposes rating through title formatting
+    try {
+        static_api_ptr_t<titleformat_compiler> compiler;
+        titleformat_object::ptr format;
+        if (compiler->compile(format, "%rating%")) {
+            pfc::string8 rating_str;
+            p_track->format_title(nullptr, rating_str, format, nullptr);
+
+            // rating_str will be "1", "2", "3", "4", "5", or empty (no rating)
+            // Only skip if there's a valid rating that's at or below threshold
+            if (!rating_str.is_empty()) {
+                int rating = atoi(rating_str.c_str());
+                if (rating >= 1 && rating <= threshold) {
+                    // Increment consecutive skip counter
+                    m_consecutive_rating_skips++;
+
+                    // Skip to next track using main thread callback
+                    auto mtcm = main_thread_callback_manager::get();
+                    mtcm->add_callback(fb2k::service_new<LowRatingSkipCallback>());
+                    return true;
+                }
+            }
+        }
+    } catch (...) {
+        // If title formatting fails, don't skip
+    }
+
+    return false;
 }
 
 } // namespace nowbar
