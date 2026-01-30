@@ -143,6 +143,49 @@ static void execute_cbutton_action(int button_index) {
     } else if (action == 3 && !path.is_empty()) {
         // Foobar2k Action
         execute_fb2k_action_by_path(path.c_str());
+    } else if (action == 4) {
+        // Open Folder - open the directory containing the currently playing track
+        metadb_handle_ptr track;
+        bool has_track = false;
+
+        // Try the focused/selected track from the active playlist first
+        auto pm = playlist_manager::get();
+        t_size active_playlist = pm->get_active_playlist();
+        if (active_playlist != pfc_infinite) {
+            t_size focus = pm->playlist_get_focus_item(active_playlist);
+            if (focus != pfc_infinite) {
+                has_track = pm->playlist_get_item_handle(track, active_playlist, focus);
+            }
+        }
+
+        // Fallback to the currently playing track
+        if (!has_track || !track.is_valid()) {
+            auto pc = playback_control::get();
+            has_track = pc->get_now_playing(track);
+        }
+
+        if (has_track && track.is_valid()) {
+            const char* file_path = track->get_path();
+            if (file_path) {
+                pfc::string8 display_path;
+                filesystem::g_get_display_path(file_path, display_path);
+
+                // Extract the directory by finding the last backslash or forward slash
+                pfc::string8 dir_path(display_path);
+                t_size last_sep = dir_path.find_last('\\');
+                if (last_sep == pfc::infinite_size) {
+                    last_sep = dir_path.find_last('/');
+                }
+                if (last_sep != pfc::infinite_size) {
+                    dir_path.truncate(last_sep);
+                }
+
+                if (!dir_path.is_empty()) {
+                    pfc::stringcvt::string_wide_from_utf8 wideDir(dir_path);
+                    ShellExecuteW(nullptr, L"open", wideDir, nullptr, nullptr, SW_SHOWNORMAL);
+                }
+            }
+        }
     }
 }
 
@@ -203,6 +246,9 @@ public:
                         break;
                     case 3:
                         p_out << "foobar2000 action: " << (path.is_empty() ? "(not configured)" : path.c_str());
+                        break;
+                    case 4:
+                        p_out << "Open folder of playing track";
                         break;
                     default:
                         p_out << "No action configured";
