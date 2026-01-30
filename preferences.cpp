@@ -132,7 +132,7 @@ static cfg_int cfg_nowbar_skip_low_rating_threshold(
 
 static cfg_int cfg_nowbar_custom_button_action(
     GUID{0xABCDEF0A, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x92}},
-    0  // Default: None (0=None, 1=Open URL, 2=Run Executable)
+    0  // Default: None (0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder)
 );
 
 static cfg_string cfg_nowbar_custom_button_url(
@@ -399,6 +399,7 @@ static int parse_action_string(const char* str) {
     if (stricmp_utf8(action, "url") == 0) return 1;
     if (stricmp_utf8(action, "executable") == 0) return 2;
     if (stricmp_utf8(action, "foobar2k") == 0) return 3;
+    if (stricmp_utf8(action, "open_folder") == 0) return 4;
     return 0;  // none
 }
 
@@ -408,6 +409,7 @@ static const char* action_to_string(int action) {
         case 1: return "url";
         case 2: return "executable";
         case 3: return "foobar2k";
+        case 4: return "open_folder";
         default: return "none";
     }
 }
@@ -436,9 +438,10 @@ static void create_default_config_file() {
     file << "# Buttons 1-6: Visible on panel + keyboard shortcuts\n";
     file << "# Buttons 7-12: Hidden (keyboard shortcuts only)\n";
     file << "#\n";
-    file << "# Action values: none, url, executable, foobar2k\n";
+    file << "# Action values: none, url, executable, foobar2k, open_folder\n";
     file << "# Path: URL for 'url', executable path for 'executable',\n";
-    file << "#       or menu path like 'Library/Search' for 'foobar2k'\n";
+    file << "#       menu path like 'Library/Search' for 'foobar2k',\n";
+    file << "#       or leave empty for 'open_folder' (opens the playing track's folder)\n";
     file << "#\n";
     file << "# Title formatting is supported in URLs and paths (e.g., %artist%, %title%)\n";
     file << "\n";
@@ -576,9 +579,10 @@ static void save_config_file() {
     file << "# Buttons 1-6: Visible on panel + keyboard shortcuts\n";
     file << "# Buttons 7-12: Hidden (keyboard shortcuts only)\n";
     file << "#\n";
-    file << "# Action values: none, url, executable, foobar2k\n";
+    file << "# Action values: none, url, executable, foobar2k, open_folder\n";
     file << "# Path: URL for 'url', executable path for 'executable',\n";
-    file << "#       or menu path like 'Library/Search' for 'foobar2k'\n";
+    file << "#       menu path like 'Library/Search' for 'foobar2k',\n";
+    file << "#       or leave empty for 'open_folder' (opens the playing track's folder)\n";
     file << "#\n";
     file << "# Title formatting is supported in URLs and paths (e.g., %artist%, %title%)\n";
     file << "\n";
@@ -1356,7 +1360,7 @@ bool get_nowbar_custom_button_visible() {
 int get_nowbar_custom_button_action() {
     int action = cfg_nowbar_custom_button_action;
     if (action < 0) action = 0;
-    if (action > 3) action = 3;  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action
+    if (action > 4) action = 4;  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder
     return action;
 }
 
@@ -1395,7 +1399,7 @@ int get_nowbar_cbutton_action(int button_index) {
         case 5: action = cfg_cbutton6_action; break;
     }
     if (action < 0) action = 0;
-    if (action > 3) action = 3;
+    if (action > 4) action = 4;
     return action;
 }
 
@@ -2001,7 +2005,7 @@ static void update_cbutton_path_state(HWND hwnd, int action_id, int path_id, int
     HWND hPath = GetDlgItem(hwnd, path_id);
     HWND hBrowse = GetDlgItem(hwnd, browse_id);
     
-    // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action
+    // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder
     switch (action) {
         case 0:  // None - disable both
             EnableWindow(hPath, FALSE);
@@ -2017,6 +2021,10 @@ static void update_cbutton_path_state(HWND hwnd, int action_id, int path_id, int
             break;
         case 3:  // Foobar2k Action - enable path edit, hide browse
             EnableWindow(hPath, TRUE);
+            EnableWindow(hBrowse, FALSE);
+            break;
+        case 4:  // Open Folder - no path needed, disable both
+            EnableWindow(hPath, FALSE);
             EnableWindow(hBrowse, FALSE);
             break;
     }
@@ -2195,6 +2203,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Open URL");
             SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Run Executable");
             SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Foobar2k Action");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Open Folder");
         }
         
         // Set checkbox and combobox states from config
