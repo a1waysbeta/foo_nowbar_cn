@@ -29,7 +29,7 @@ COLORREF get_nowbar_button_accent_color();    // Button accent color for shuffle
 COLORREF get_nowbar_progress_accent_color();  // Progress bar fill color
 COLORREF get_nowbar_volume_accent_color();    // Volume bar fill color
 bool get_nowbar_custom_button_visible();  // true=Show, false=Hidden
-int get_nowbar_custom_button_action();  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action
+int get_nowbar_custom_button_action();  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder
 pfc::string8 get_nowbar_custom_button_url();
 pfc::string8 get_nowbar_custom_button_executable();
 pfc::string8 get_nowbar_custom_button_fb2k_action();
