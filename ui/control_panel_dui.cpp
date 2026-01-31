@@ -138,8 +138,8 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
     info.m_max_height = static_cast<t_uint32>(1.12 * dpi);
     
     // Fixed minimum width that accommodates all elements at any height
-    // Including Super button after Repeat
-    info.m_min_width = 1265;
+    // Including Super button, spectrum visualizer after Repeat
+    info.m_min_width = 1481;
     
     return info;
 }
