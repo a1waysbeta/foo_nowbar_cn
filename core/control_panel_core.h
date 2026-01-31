@@ -43,6 +43,8 @@ enum class HitRegion {
     RepeatButton,
     SuperButton,   // Super button (cosmetic)
     SeekBar,
+    ThinProgressBar,  // Mode 1: thin bar at top edge
+    WaveformBar,      // Mode 2: waveform progress bar
     CustomButton,  // Legacy - kept for compatibility
     CButton1,      // Custom button #1
     CButton2,      // Custom button #2
@@ -199,6 +201,7 @@ private:
     RECT m_rect_next = {};
     RECT m_rect_shuffle = {};
     RECT m_rect_repeat = {};
+    RECT m_rect_spectrum = {}; // Spectrum visualizer area
     RECT m_rect_super = {};   // Super button
     RECT m_rect_seekbar = {};
     RECT m_rect_custom = {};   // Legacy - kept for compatibility
@@ -211,6 +214,9 @@ private:
     RECT m_rect_volume = {};
     RECT m_rect_miniplayer = {};
     RECT m_rect_time = {};
+    RECT m_rect_thin_progress = {};    // Mode 1: thin progress bar at top
+    RECT m_rect_waveform = {};         // Mode 2: waveform area
+    RECT m_rect_spectrum_full = {};    // Mode 1: full-width spectrum at bottom
     
     // Interaction state
     HitRegion m_hover_region = HitRegion::None;
@@ -246,6 +252,46 @@ private:
     bool m_cbutton_fade_active = false;  // Animation in progress
     static constexpr float CBUTTON_FADE_DURATION_MS = 300.0f;  // Fade duration in milliseconds
     
+    // Spectrum visualizer
+    static constexpr int SPECTRUM_BAR_COUNT = 20;
+    static constexpr int SPECTRUM_FFT_SIZE = 2048;
+    static constexpr float SPECTRUM_FADE_DURATION_MS = 300.0f;
+    service_ptr_t<visualisation_stream_v3> m_vis_stream;
+    float m_spectrum_bars[SPECTRUM_BAR_COUNT] = {};
+    float m_spectrum_opacity = 0.0f;
+    float m_spectrum_target_opacity = 0.0f;
+    float m_spectrum_start_opacity = 0.0f;
+    std::chrono::steady_clock::time_point m_spectrum_fade_start_time;
+    bool m_spectrum_fade_active = false;
+
+    void draw_spectrum(Gdiplus::Graphics& g);
+    void update_spectrum_data();
+    void create_vis_stream();
+    void release_vis_stream();
+
+    // Spectrum hover fade for mode 1
+    float m_spectrum_hover_opacity = 1.0f;  // Dims when hovering buttons in mode 1
+
+    // Mode 1 drawing methods
+    void draw_thin_progress_bar(Gdiplus::Graphics& g);
+    void draw_full_spectrum(Gdiplus::Graphics& g);
+    void draw_time_display_top_right(Gdiplus::Graphics& g);
+
+    // Mode 2: Waveform pre-computation
+    static constexpr int WAVEFORM_SEGMENTS = 400;
+    std::vector<float> m_waveform_peaks;
+    std::mutex m_waveform_mutex;
+    std::atomic<bool> m_waveform_computing{false};
+    std::atomic<bool> m_waveform_cancel{false};
+    std::thread m_waveform_thread;
+    pfc::string8 m_waveform_track_path;
+    bool m_waveform_valid = false;
+    bool m_waveform_is_stream = false;
+
+    void draw_waveform_bar(Gdiplus::Graphics& g);
+    void start_waveform_computation();
+    void cancel_waveform_computation();
+
     // Smooth progress bar animation
     double m_animated_progress = 0.0;      // Current animated progress (0.0 - 1.0)
     double m_target_progress = 0.0;        // Target progress position
@@ -271,6 +317,8 @@ private:
     bool m_hover_animating = false;
     bool m_cbutton_animating = false;
     bool m_bg_animating = false;
+    bool m_spectrum_animating = false;
+    bool m_waveform_animating = false;
     
     // Timer-based animation scheduling
     static constexpr UINT_PTR ANIMATION_TIMER_ID = 1001;
