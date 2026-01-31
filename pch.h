@@ -30,6 +30,8 @@
 #include <set>
 #include <functional>
 #include <mutex>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <format>
 #include <cstdlib>
