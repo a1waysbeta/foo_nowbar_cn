@@ -91,7 +91,7 @@ static cfg_int cfg_nowbar_background_style(
 );
 
 static cfg_int cfg_nowbar_smooth_animations(
-    GUID{0xABCDEF52, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE2}},
+    GUID{0xABCDEF80, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x80}},
     0  // Default: Disabled
 );
 
@@ -136,28 +136,33 @@ static cfg_int cfg_nowbar_visualization_mode(
 );
 
 static cfg_int cfg_nowbar_spectrum_color(
-    GUID{0xABCDEF60, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF0}},
+    GUID{0xABCDEF81, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x81}},
     RGB(100, 180, 255)  // Default: light blue
 );
 
 static cfg_int cfg_nowbar_spectrum_width(
-    GUID{0xABCDEF61, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF1}},
+    GUID{0xABCDEF82, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x82}},
     1  // Default: Normal (0=Thin, 1=Normal, 2=Wide)
 );
 
 static cfg_int cfg_nowbar_spectrum_shape(
-    GUID{0xABCDEF62, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF2}},
+    GUID{0xABCDEF83, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x83}},
     0  // Default: Pill (0=Pill, 1=Rectangle)
 );
 
 static cfg_int cfg_nowbar_waveform_color(
-    GUID{0xABCDEF63, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF3}},
+    GUID{0xABCDEF84, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x84}},
     RGB(255, 85, 0)  // Default: SoundCloud orange
 );
 
 static cfg_int cfg_nowbar_waveform_width(
-    GUID{0xABCDEF64, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF4}},
+    GUID{0xABCDEF85, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x85}},
     1  // Default: Normal (0=Thin, 1=Normal, 2=Wide)
+);
+
+static cfg_int cfg_nowbar_waveform_unplayed_color(
+    GUID{0xABCDEF66, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF6}},
+    RGB(60, 60, 60)  // Default: dim gray (fully opaque)
 );
 
 static cfg_int cfg_nowbar_custom_button_action(
@@ -1386,6 +1391,10 @@ COLORREF get_nowbar_waveform_color() {
     return static_cast<COLORREF>(cfg_nowbar_waveform_color.get_value());
 }
 
+COLORREF get_nowbar_waveform_unplayed_color() {
+    return static_cast<COLORREF>(cfg_nowbar_waveform_unplayed_color.get_value());
+}
+
 int get_nowbar_waveform_width() {
     int w = cfg_nowbar_waveform_width;
     if (w < 0) w = 0;
@@ -1939,6 +1948,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_COLOR_BTN), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_LABEL), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN), show_general);
 
     // Appearance tab controls (Tab 1)
     BOOL show_appearance = (tab == 1) ? SW_SHOW : SW_HIDE;
@@ -2086,6 +2097,20 @@ static void update_vis_section_state(HWND hwnd) {
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_COLOR_BTN), wave_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), wave_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), wave_on);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_LABEL), wave_on);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN), wave_on);
+}
+
+// Hook procedure to ensure color picker dialog appears on top
+static UINT_PTR CALLBACK ColorPickerHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam) {
+    if (uiMsg == WM_INITDIALOG) {
+        // Bring the dialog to the foreground and make it topmost temporarily
+        SetWindowPos(hdlg, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        SetForegroundWindow(hdlg);
+        // Remove topmost flag so it behaves normally after appearing
+        SetWindowPos(hdlg, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    }
+    return 0;
 }
 
 // Helper to show the Windows color picker dialog
@@ -2096,7 +2121,8 @@ static bool show_color_picker(HWND hwnd, COLORREF& color) {
     cc.hwndOwner = hwnd;
     cc.rgbResult = color;
     cc.lpCustColors = custom_colors;
-    cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+    cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_ENABLEHOOK;
+    cc.lpfnHook = ColorPickerHookProc;
     if (ChooseColor(&cc)) {
         color = cc.rgbResult;
         return true;
@@ -2461,6 +2487,17 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 if (show_color_picker(hwnd, color)) {
                     cfg_nowbar_waveform_color = color;
                     InvalidateRect(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_COLOR_BTN), nullptr, TRUE);
+                    p_this->on_changed();
+                }
+            }
+            break;
+
+        case IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN:
+            if (HIWORD(wp) == BN_CLICKED) {
+                COLORREF color = static_cast<COLORREF>(cfg_nowbar_waveform_unplayed_color.get_value());
+                if (show_color_picker(hwnd, color)) {
+                    cfg_nowbar_waveform_unplayed_color = color;
+                    InvalidateRect(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN), nullptr, TRUE);
                     p_this->on_changed();
                 }
             }
@@ -3035,7 +3072,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         {
             DRAWITEMSTRUCT* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
             if (dis->CtlID == IDC_BUTTON_ACCENT_BTN || dis->CtlID == IDC_PROGRESS_ACCENT_BTN || dis->CtlID == IDC_VOLUME_ACCENT_BTN ||
-                dis->CtlID == IDC_VIS_SPECTRUM_COLOR_BTN || dis->CtlID == IDC_VIS_WAVEFORM_COLOR_BTN) {
+                dis->CtlID == IDC_VIS_SPECTRUM_COLOR_BTN || dis->CtlID == IDC_VIS_WAVEFORM_COLOR_BTN || dis->CtlID == IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN) {
                 COLORREF color;
                 if (dis->CtlID == IDC_BUTTON_ACCENT_BTN) {
                     color = static_cast<COLORREF>(cfg_nowbar_button_accent_color.get_value());
@@ -3045,6 +3082,8 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     color = static_cast<COLORREF>(cfg_nowbar_spectrum_color.get_value());
                 } else if (dis->CtlID == IDC_VIS_WAVEFORM_COLOR_BTN) {
                     color = static_cast<COLORREF>(cfg_nowbar_waveform_color.get_value());
+                } else if (dis->CtlID == IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN) {
+                    color = static_cast<COLORREF>(cfg_nowbar_waveform_unplayed_color.get_value());
                 } else {
                     color = static_cast<COLORREF>(cfg_nowbar_volume_accent_color.get_value());
                 }
@@ -3264,6 +3303,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_spectrum_width = 1;  // Default: Normal
             cfg_nowbar_spectrum_shape = 0;  // Default: Pill
             cfg_nowbar_waveform_color = RGB(255, 85, 0);  // Default: SoundCloud orange
+            cfg_nowbar_waveform_unplayed_color = RGB(60, 60, 60);  // Default: dim gray (fully opaque)
             cfg_nowbar_waveform_width = 1;  // Default: Normal
 
             // Update General tab UI
@@ -3282,6 +3322,7 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), CB_SETCURSEL, 1, 0);  // Normal
             InvalidateRect(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), nullptr, TRUE);
             InvalidateRect(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_COLOR_BTN), nullptr, TRUE);
+            InvalidateRect(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN), nullptr, TRUE);
             update_vis_section_state(m_hwnd);
         } else if (m_current_tab == 1) {
             // Reset Appearance tab settings
