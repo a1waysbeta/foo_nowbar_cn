@@ -380,7 +380,7 @@ void ControlPanelCore::on_settings_changed() {
 
   // Handle visualization mode setting changes
   int settings_vis_mode = get_nowbar_visualization_mode();
-  bool spectrum_needed = (settings_vis_mode == 1) || (settings_vis_mode == 0 && get_nowbar_spectrum_visible());
+  bool spectrum_needed = (settings_vis_mode == 1);
 
   if (spectrum_needed) {
     bool is_playing_now = m_state.is_playing && !m_state.is_paused;
@@ -913,21 +913,6 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       : m_rect_repeat.right + spacing;
   int cbutton_right_edge = vol_x - spacing;
 
-  // Spectrum visualizer rect - positioned just left of custom buttons (right-aligned in gap)
-  m_rect_spectrum = {};
-  if (get_nowbar_spectrum_visible()) {
-    int spectrum_width = button_size * 2;  // 2x button width
-    int space_for_spectrum = cbutton_right_edge - min_cbutton_left;
-    if (space_for_spectrum >= spectrum_width + spacing) {
-      int spectrum_height = button_size;  // Match button height
-      int spectrum_y = right_btn_y;
-      int spectrum_x = cbutton_right_edge - spectrum_width;
-      m_rect_spectrum = {spectrum_x, spectrum_y,
-                         spectrum_x + spectrum_width, spectrum_y + spectrum_height};
-      cbutton_right_edge = spectrum_x - spacing;
-    }
-  }
-
   int available_width = cbutton_right_edge - min_cbutton_left;
   
   // Determine layout mode based on panel height (size scale)
@@ -1231,9 +1216,8 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     draw_playback_buttons(g);
     draw_time_display(g);
   } else {
-    // Mode 0: existing order unchanged
+    // Mode 0: normal seekbar, no visualization
     draw_playback_buttons(g);
-    draw_spectrum(g);
     draw_seekbar(g);
     draw_time_display(g);
   }
@@ -1347,21 +1331,26 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
   }
   
   // Lambda to draw current background content to a Graphics context
-  auto draw_current_bg = [&](Gdiplus::Graphics& target) {
+  // use_local_coords: true when drawing to a cache bitmap (0,0 origin), false for screen coordinates
+  auto draw_current_bg = [&](Gdiplus::Graphics& target, bool use_local_coords = false) {
+    int draw_x = use_local_coords ? 0 : rect.left;
+    int draw_y = use_local_coords ? 0 : rect.top;
+    Gdiplus::Rect draw_rect(draw_x, draw_y, width, height);
+    
     if (bg_style == 1 && m_artwork_colors_valid) {
       // Artwork Colors mode: horizontal gradient
       Gdiplus::LinearGradientBrush gradientBrush(
-          Gdiplus::Point(rect.left, 0),
-          Gdiplus::Point(rect.right, 0),
+          Gdiplus::Point(draw_x, 0),
+          Gdiplus::Point(draw_x + width, 0),
           m_artwork_color_secondary,
           m_artwork_color_primary
       );
-      target.FillRectangle(&gradientBrush, r);
+      target.FillRectangle(&gradientBrush, draw_rect);
       
       BYTE overlay_alpha = m_dark_mode ? 120 : 80;
       Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
       Gdiplus::SolidBrush overlayBrush(overlayColor);
-      target.FillRectangle(&overlayBrush, r);
+      target.FillRectangle(&overlayBrush, draw_rect);
     } else if (bg_style == 2 && m_artwork_bitmap) {
       // Blurred Artwork mode
       if (!m_blurred_artwork || 
@@ -1371,23 +1360,23 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
       }
       
       if (m_blurred_artwork) {
-        target.DrawImage(m_blurred_artwork.get(), r.X, r.Y);
+        target.DrawImage(m_blurred_artwork.get(), draw_x, draw_y);
       }
       
       BYTE overlay_alpha = m_dark_mode ? 140 : 180;
       Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
       Gdiplus::SolidBrush overlayBrush(overlayColor);
-      target.FillRectangle(&overlayBrush, r);
+      target.FillRectangle(&overlayBrush, draw_rect);
     } else if (m_glass_effect_enabled) {
       // Glass effect
       BYTE glass_alpha = m_dark_mode ? 150 : 200;
       Gdiplus::Color glassColor(glass_alpha, m_bg_color.GetR(), m_bg_color.GetG(), m_bg_color.GetB());
       Gdiplus::SolidBrush brush(glassColor);
-      target.FillRectangle(&brush, r);
+      target.FillRectangle(&brush, draw_rect);
     } else {
       // Solid background
       Gdiplus::SolidBrush brush(m_bg_color);
-      target.FillRectangle(&brush, r);
+      target.FillRectangle(&brush, draw_rect);
     }
   };
   
@@ -1408,8 +1397,8 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
       target_g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
       target_g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
       
-      // Draw current background content to target cache ONCE
-      draw_current_bg(target_g);
+      // Draw current background content to target cache ONCE (use local coords for bitmap)
+      draw_current_bg(target_g, true);
     }
 
     // 2. Draw cached previous background (opaque)
@@ -1497,6 +1486,12 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
           Gdiplus::SolidBrush overlayBrush(overlayColor);
           cache_g.FillRectangle(&overlayBrush, cache_r);
         } else if (bg_style == 2 && m_artwork_bitmap) {
+          // Ensure blurred artwork is created if it doesn't exist or needs resize
+          if (!m_blurred_artwork || 
+              m_blurred_artwork_size.cx != width || 
+              m_blurred_artwork_size.cy != height) {
+            create_blurred_artwork(width, height);
+          }
           if (m_blurred_artwork) {
             cache_g.DrawImage(m_blurred_artwork.get(), 0, 0);
           }
@@ -1538,8 +1533,16 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
     g.FillRectangle(&brush, artR);
 
     // Check if the current track is a remote stream (http://, https://, etc.)
-    bool is_stream = m_state.current_track.is_valid() &&
-        (strstr(m_state.current_track->get_path(), "://") != nullptr);
+    // Note: file:// URLs are local files, not streams
+    bool is_stream = false;
+    if (m_state.current_track.is_valid()) {
+      const char* path = m_state.current_track->get_path();
+      is_stream = (strstr(path, "http://") == path) ||
+                  (strstr(path, "https://") == path) ||
+                  (strstr(path, "mms://") == path) ||
+                  (strstr(path, "rtsp://") == path) ||
+                  (strstr(path, "rtmp://") == path);
+    }
 
     if (is_stream) {
       RECT iconRect = m_rect_artwork;
@@ -2288,27 +2291,26 @@ void ControlPanelCore::update_spectrum_data() {
     if (bin_hi >= (int)sample_count) bin_hi = (int)sample_count - 1;
     if (bin_lo > bin_hi) bin_lo = bin_hi;
 
-    // Average the magnitude across bins
-    float sum = 0.0f;
-    int count = 0;
+    // Use peak (max) across bins so bars react to any energy in their band
+    float magnitude = 0.0f;
     for (int b = bin_lo; b <= bin_hi; b++) {
-      sum += data[b];
-      count++;
+      if (data[b] > magnitude) magnitude = data[b];
     }
-    float magnitude = (count > 0) ? sum / count : 0.0f;
 
     // KStreamFlagNewFFT normalizes output to 0..1 range
-    // Apply sqrt for perceptual scaling (compresses dynamic range)
-    float normalized = std::sqrt(magnitude);
-    if (normalized < 0.0f) normalized = 0.0f;
+    // Apply power curve for perceptual scaling; steeper than sqrt so quiet
+    // bands drop closer to zero instead of hovering at a visible floor.
+    float normalized = std::pow(magnitude, 0.75f);
+    // Noise gate: values below threshold are silenced so bars can vanish
+    if (normalized < 0.02f) normalized = 0.0f;
     if (normalized > 1.0f) normalized = 1.0f;
 
-    // Asymmetric smoothing: fast attack, slow decay
+    // Asymmetric smoothing: snappy attack, moderate decay for lively movement
     float current = m_spectrum_bars[i];
     if (normalized > current) {
-      m_spectrum_bars[i] = current + (normalized - current) * 0.6f;  // Fast attack
+      m_spectrum_bars[i] = current + (normalized - current) * 0.8f;  // Snappy attack
     } else {
-      m_spectrum_bars[i] = current + (normalized - current) * 0.3f;  // Slow decay
+      m_spectrum_bars[i] = current + (normalized - current) * 0.45f;  // Moderate decay
     }
   }
 }
@@ -2355,7 +2357,6 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   float gap = std::max(1.0f, bar_total_w * 0.2f);
   float bar_w = bar_total_w - gap;
   if (bar_w < 1.0f) bar_w = 1.0f;
-  float min_bar_h = 2.0f * m_dpi_scale;
   float radius = bar_w * 0.5f;
 
   // Determine colors - always use user's spectrum color setting
@@ -2368,9 +2369,15 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   // Get shape setting (0=Pill, 1=Rectangle)
   int spec_shape = get_nowbar_spectrum_shape();
 
+  // Disable anti-aliasing so bar edges don't bleed into the 1px gaps
+  Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
+  Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
+  g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+
   for (int i = 0; i < SPECTRUM_BAR_COUNT; i++) {
     float height = m_spectrum_bars[i] * (float)area_h;
-    if (height < min_bar_h) height = min_bar_h;
+    if (height < 1.0f) continue;  // Skip bars with no visible energy
 
     float x = m_rect_spectrum.left + i * bar_total_w + gap * 0.5f;
     float y = m_rect_spectrum.bottom - height;
@@ -2393,6 +2400,9 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
       g.FillRectangle(&barBrush, x, y, bar_w, height);
     }
   }
+
+  g.SetSmoothingMode(oldSmoothing);
+  g.SetPixelOffsetMode(oldPixelOffset);
 }
 
 void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
@@ -2521,7 +2531,6 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
   float gap = std::max(1.0f, bar_total_w * 0.2f);
   float bar_w = bar_total_w - gap;
   if (bar_w < 1.0f) bar_w = 1.0f;
-  float min_bar_h = 2.0f * m_dpi_scale;
   float radius = bar_w * 0.5f;
 
   // Determine colors - always use user's spectrum color setting
@@ -2536,6 +2545,12 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
   // Get shape setting (0=Pill, 1=Rectangle)
   int spec_shape = get_nowbar_spectrum_shape();
 
+  // Disable anti-aliasing so bar edges don't bleed into the 1px gaps
+  Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
+  Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
+  g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+
   // Map the SPECTRUM_BAR_COUNT (20) source bars to bar_count display bars via interpolation
   for (int i = 0; i < bar_count; i++) {
     // Map display bar index to source bar index
@@ -2548,7 +2563,7 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
     float value = m_spectrum_bars[lo] * (1.0f - frac) + m_spectrum_bars[hi] * frac;
 
     float height = value * (float)area_h;
-    if (height < min_bar_h) height = min_bar_h;
+    if (height < 1.0f) continue;  // Skip bars with no visible energy
 
     float x = m_rect_spectrum_full.left + i * bar_total_w + gap * 0.5f;
     float y = m_rect_spectrum_full.bottom - height;
@@ -2571,6 +2586,9 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
       g.FillRectangle(&barBrush, x, y, bar_w, height);
     }
   }
+
+  g.SetSmoothingMode(oldSmoothing);
+  g.SetPixelOffsetMode(oldPixelOffset);
 }
 
 void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
@@ -2594,7 +2612,8 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
   // Get colors - use waveform color setting for played segments
   COLORREF wave_color = get_nowbar_waveform_color();
   Gdiplus::Color accentColor(255, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color));
-  Gdiplus::Color dimColor(80, 140, 140, 140);
+  COLORREF unplayed_color = get_nowbar_waveform_unplayed_color();
+  Gdiplus::Color dimColor(255, GetRValue(unplayed_color), GetGValue(unplayed_color), GetBValue(unplayed_color));
 
   // Lock and read waveform data
   std::vector<float> peaks;
@@ -2643,15 +2662,26 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     // Fall through to seek handle below
   } else {
     // Draw waveform bars (half-waveform, top half only, bottom-aligned)
+    // Fixed bar widths: Thin=0.5px, Normal=1px, Wide=2px
+    int wave_w_setting = get_nowbar_waveform_width();
+    float bar_w_f = (wave_w_setting == 0) ? 0.5f : (wave_w_setting == 2) ? 2.0f : 1.0f;
+    float gap = 1.0f;
+    float bar_total_w = bar_w_f + gap;
+    int display_count = (int)((float)w / bar_total_w);
+    if (display_count < 1) display_count = 1;
     int num_segments = (int)peaks.size();
-    float bar_total_w = (float)w / num_segments;
-    float gap = std::max(0.5f, bar_total_w * 0.15f);
-    float bar_w_f = bar_total_w - gap;
-    if (bar_w_f < 1.0f) bar_w_f = 1.0f;
     float min_bar_h = 1.0f * m_dpi_scale;
 
-    for (int i = 0; i < num_segments; i++) {
-      float peak = peaks[i];
+    for (int i = 0; i < display_count; i++) {
+      // Resample from peaks using linear interpolation
+      float src = (float)i / display_count * num_segments;
+      int lo = (int)src;
+      int hi = lo + 1;
+      if (lo >= num_segments) lo = num_segments - 1;
+      if (hi >= num_segments) hi = num_segments - 1;
+      float frac = src - lo;
+      float peak = peaks[lo] * (1.0f - frac) + peaks[hi] * frac;
+
       float bar_h = peak * (float)h;
       if (bar_h < min_bar_h) bar_h = min_bar_h;
 
@@ -2659,7 +2689,7 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
       float by = m_rect_waveform.bottom - bar_h;
 
       // Determine if this segment is played or unplayed
-      float seg_progress = (float)(i + 0.5f) / num_segments;
+      float seg_progress = (float)(i + 0.5f) / display_count;
       bool played = (seg_progress <= (float)progress);
 
       Gdiplus::SolidBrush barBrush(played ? accentColor : dimColor);
@@ -3916,25 +3946,22 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
     m_cbutton_fade_active = true;
   }
 
-  // Spectrum visualizer fade animation (mode 0 and mode 1 both use spectrum)
+  // Spectrum visualizer fade animation (mode 1 only)
   int vis_mode = get_nowbar_visualization_mode();
-  if (vis_mode == 0 || vis_mode == 1) {
-    bool spectrum_enabled = (vis_mode == 0) ? get_nowbar_spectrum_visible() : true;
-    if (spectrum_enabled) {
-      if (is_playing_now) {
-        create_vis_stream();
-        m_spectrum_start_opacity = m_spectrum_opacity;
-        m_spectrum_target_opacity = 1.0f;
-        m_spectrum_fade_start_time = std::chrono::steady_clock::now();
-        m_spectrum_fade_active = true;
-        m_spectrum_animating = true;
-      } else {
-        m_spectrum_start_opacity = m_spectrum_opacity;
-        m_spectrum_target_opacity = 0.0f;
-        m_spectrum_fade_start_time = std::chrono::steady_clock::now();
-        m_spectrum_fade_active = true;
-        m_spectrum_animating = true;
-      }
+  if (vis_mode == 1) {
+    if (is_playing_now) {
+      create_vis_stream();
+      m_spectrum_start_opacity = m_spectrum_opacity;
+      m_spectrum_target_opacity = 1.0f;
+      m_spectrum_fade_start_time = std::chrono::steady_clock::now();
+      m_spectrum_fade_active = true;
+      m_spectrum_animating = true;
+    } else {
+      m_spectrum_start_opacity = m_spectrum_opacity;
+      m_spectrum_target_opacity = 0.0f;
+      m_spectrum_fade_start_time = std::chrono::steady_clock::now();
+      m_spectrum_fade_active = true;
+      m_spectrum_animating = true;
     }
   }
 
@@ -5378,16 +5405,15 @@ void ControlPanelCore::start_waveform_computation() {
       input_entry::g_open_for_decoding(decoder, nullptr, path.c_str(), abort_cb);
       decoder->initialize(0, input_flag_simpledecode, abort_cb);
 
-      // Derive segment count from waveform width setting (0=Thin->600, 1=Normal->400, 2=Wide->250)
-      int wave_w = get_nowbar_waveform_width();
-      int num_segments = (wave_w == 0) ? 600 : (wave_w == 2) ? 250 : WAVEFORM_SEGMENTS;
+      int num_segments = WAVEFORM_SEGMENTS;
       double segment_duration = track_length / num_segments;
       std::vector<float> peaks(num_segments, 0.0f);
+      std::vector<double> rms_sums(num_segments, 0.0);
+      std::vector<int> rms_counts(num_segments, 0);
 
       audio_chunk_impl_temporary chunk;
       int current_segment = 0;
       double segment_start = 0.0;
-      float segment_peak = 0.0f;
 
       while (current_segment < num_segments) {
         if (m_waveform_cancel.load()) return;
@@ -5412,43 +5438,39 @@ void ControlPanelCore::start_waveform_computation() {
         double chunk_duration = (double)samples / sample_rate;
         double chunk_end_time = segment_start + chunk_duration;
 
-        // Process all samples, assigning to appropriate segments
-        for (t_size s = 0; s < samples && current_segment < num_segments; s++) {
+        // Accumulate squared sample values for RMS per segment
+        for (t_size s = 0; s < samples; s++) {
           double sample_time = segment_start + (double)s / sample_rate;
           int seg = (int)(sample_time / segment_duration);
           if (seg >= num_segments) seg = num_segments - 1;
           if (seg < 0) seg = 0;
 
-          // If we've moved past the current segment, save peak and advance
-          while (current_segment < seg && current_segment < num_segments) {
-            peaks[current_segment] = segment_peak;
-            current_segment++;
-            segment_peak = 0.0f;
-          }
-
-          // Find peak across all channels for this sample
+          // Average across channels, then accumulate squared value
+          float sum_ch = 0.0f;
           for (int ch = 0; ch < channels; ch++) {
-            float val = std::abs(data[s * channels + ch]);
-            if (val > segment_peak) segment_peak = val;
+            sum_ch += std::abs(data[s * channels + ch]);
           }
+          float val = sum_ch / channels;
+          rms_sums[seg] += (double)(val * val);
+          rms_counts[seg]++;
+
+          // Track segment progress for early exit
+          if (seg > current_segment) current_segment = seg;
         }
 
         segment_start = chunk_end_time;
       }
 
-      // Save last segment
-      if (current_segment < num_segments) {
-        peaks[current_segment] = segment_peak;
-        current_segment++;
-      }
-      // Zero-fill remaining segments
-      for (int i = current_segment; i < num_segments; i++) {
-        peaks[i] = 0.0f;
+      // Compute RMS for each segment
+      for (int i = 0; i < num_segments; i++) {
+        if (rms_counts[i] > 0) {
+          peaks[i] = std::sqrt((float)(rms_sums[i] / rms_counts[i]));
+        }
       }
 
       if (m_waveform_cancel.load()) return;
 
-      // Normalize peaks to 0.0-1.0
+      // Normalize to 0.0-1.0 with gentle perceptual scaling
       float max_peak = 0.0f;
       for (float p : peaks) {
         if (p > max_peak) max_peak = p;
@@ -5456,6 +5478,8 @@ void ControlPanelCore::start_waveform_computation() {
       if (max_peak > 0.0f) {
         for (float& p : peaks) {
           p /= max_peak;
+          // Gentle power curve to slightly expand quieter segments
+          p = std::pow(p, 0.65f);
         }
       }
 
