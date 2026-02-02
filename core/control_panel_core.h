@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "playback_state.h"
+#include <unordered_map>
 
 namespace nowbar {
 
@@ -108,6 +109,37 @@ public:
     // MiniPlayer state (for icon color)
     void set_miniplayer_active(bool active);
     
+    // Force a full repaint on the next WM_PAINT (disables spectrum-only fast path for one frame)
+    void force_full_repaint() { m_needs_full_repaint = true; }
+
+    // Spectrum-only repaint: redraws spectrum, thin progress bar, time display, and buttons
+    void paint_spectrum_only(HDC hdc, const RECT& panel_rect);
+    const RECT& get_spectrum_full_rect() const { return m_rect_spectrum_full; }
+    // Clears only the individual rects that paint_spectrum_only will redraw,
+    // preserving artwork, track info, custom buttons, and volume on the cached bitmap
+    void clear_spectrum_dirty_rects(HDC hdc, COLORREF bg) const {
+        HBRUSH brush = CreateSolidBrush(bg);
+        FillRect(hdc, &m_rect_spectrum_full, brush);
+        FillRect(hdc, &m_rect_thin_progress, brush);
+        FillRect(hdc, &m_rect_time, brush);
+        DeleteObject(brush);
+    }
+    bool is_spectrum_animating_only() const {
+        if (!m_spectrum_animating) return false;
+        if (m_needs_full_repaint) return false;
+        if (m_seekbar_animating || m_hover_animating || m_cbutton_animating ||
+            m_bg_animating || m_waveform_animating) return false;
+        // Fall back to full paint when user is interacting with the progress bar
+        if (m_seeking || m_hover_region == HitRegion::ThinProgressBar) return false;
+        return true;
+    }
+
+    // Animation dirty rect for partial invalidation from WM_TIMER handlers
+    const RECT* get_animation_dirty_rect() const {
+        return m_animation_dirty_partial ? &m_animation_dirty_rect : nullptr;
+    }
+    void clear_animation_dirty() { m_animation_dirty_partial = false; }
+
     // Settings change notification
     void on_settings_changed();
     static void notify_all_settings_changed();
@@ -289,8 +321,17 @@ private:
     bool m_waveform_is_stream = false;
 
     void draw_waveform_bar(Gdiplus::Graphics& g);
+    void draw_waveform_tooltip(Gdiplus::Graphics& g);
     void start_waveform_computation();
     void cancel_waveform_computation();
+
+    // Waveform cache
+    std::unordered_map<std::string, std::vector<float>> m_waveform_cache;
+    bool m_waveform_cache_loaded = false;
+
+    void load_waveform_cache();
+    void save_waveform_entry(const char* path, const std::vector<float>& peaks);
+    bool lookup_waveform_cache(const char* path, std::vector<float>& out_peaks);
 
     // Smooth progress bar animation
     double m_animated_progress = 0.0;      // Current animated progress (0.0 - 1.0)
@@ -319,12 +360,15 @@ private:
     bool m_bg_animating = false;
     bool m_spectrum_animating = false;
     bool m_waveform_animating = false;
+    bool m_needs_full_repaint = true;  // Forces full paint instead of spectrum-only fast path
     
     // Timer-based animation scheduling
     static constexpr UINT_PTR ANIMATION_TIMER_ID = 1001;
     bool m_animation_timer_active = false;
     
-    void request_animation();  // Request an animation frame (throttled)
+    void request_animation(const RECT* dirty = nullptr);  // Request an animation frame (throttled)
+    RECT m_animation_dirty_rect = {};   // Dirty region for partial invalidation
+    bool m_animation_dirty_partial = false;  // true = use m_animation_dirty_rect, false = full repaint
     
     // Artwork
     std::unique_ptr<Gdiplus::Bitmap> m_artwork_bitmap;
