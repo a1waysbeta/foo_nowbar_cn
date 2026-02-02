@@ -123,6 +123,10 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         m_colour_callback.reset();
         m_colour_manager.release();
         m_core.reset();
+        // Release cached offscreen bitmap
+        if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
+        if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
+        m_cache_w = m_cache_h = 0;
         return 0;
         
     case WM_SIZE: {
@@ -135,33 +139,41 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(wnd, &ps);
-        
-        // Double buffering
+
         RECT rect;
         GetClientRect(wnd, &rect);
-        
-        HDC memDC = CreateCompatibleDC(hdc);
-        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
-        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
-        
-        // Pre-fill the off-screen bitmap with the background color using GDI.
-        // GDI+ can leave edge pixels unfilled at the top and left edges due to
-        // internal coordinate rounding, resulting in a 1px lighter border.
-        {
+
+        // Recreate cached offscreen bitmap only when window size changes
+        if (rect.right != m_cache_w || rect.bottom != m_cache_h || !m_cache_dc) {
+            if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
+            if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
+            m_cache_dc = CreateCompatibleDC(hdc);
+            m_cache_bitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+            m_cache_old_bitmap = (HBITMAP)SelectObject(m_cache_dc, m_cache_bitmap);
+            m_cache_w = rect.right;
+            m_cache_h = rect.bottom;
+            if (m_core) m_core->force_full_repaint();
+        }
+
+        // Spectrum-only fast path: skip background/artwork/text/buttons redraw
+        bool spectrum_fast = m_core && m_core->is_spectrum_animating_only() &&
+                             get_nowbar_visualization_mode() == 1;
+        if (spectrum_fast) {
+            // Clear only the individual areas that will be redrawn,
+            // preserving artwork, track info, custom buttons, and volume
+            m_core->clear_spectrum_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color());
+            m_core->paint_spectrum_only(m_cache_dc, rect);
+        } else {
+            // Full repaint
             HBRUSH bgBrush = CreateSolidBrush(get_nowbar_initial_bg_color());
-            FillRect(memDC, &rect, bgBrush);
+            FillRect(m_cache_dc, &rect, bgBrush);
             DeleteObject(bgBrush);
+            if (m_core) {
+                m_core->paint(m_cache_dc, rect);
+            }
         }
 
-        if (m_core) {
-            m_core->paint(memDC, rect);
-        }
-
-        BitBlt(hdc, 0, 0, rect.right, rect.bottom, memDC, 0, 0, SRCCOPY);
-
-        SelectObject(memDC, oldBitmap);
-        DeleteObject(memBitmap);
-        DeleteDC(memDC);
+        BitBlt(hdc, 0, 0, rect.right, rect.bottom, m_cache_dc, 0, 0, SRCCOPY);
 
         EndPaint(wnd, &ps);
         return 0;
@@ -231,10 +243,13 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
         
-    case WM_TIMER:
+    case WM_TIMER: {
         // Animation timer fired - trigger a repaint to continue the animation
-        InvalidateRect(wnd, nullptr, FALSE);
+        const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
+        InvalidateRect(wnd, dirty, FALSE);
+        if (m_core) m_core->clear_animation_dirty();
         return 0;
+    }
 
     }
 
