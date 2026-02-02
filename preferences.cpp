@@ -229,6 +229,22 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_track_font(
     }()
 );
 
+static cfg_struct_t<LOGFONT> cfg_nowbar_time_font(
+    GUID{0xABCDEF05, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8D}},
+    []() {
+        LOGFONT lf = {};
+        lf.lfHeight = -12;  // ~9pt at 96 DPI
+        lf.lfWeight = FW_NORMAL;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        return lf;
+    }()
+);
+
 static cfg_int cfg_nowbar_use_custom_fonts(
     GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8C}},
     0  // Default: use built-in fonts
@@ -393,7 +409,7 @@ static bool g_config_loaded = false;
 static pfc::string8 g_config_file_path;
 
 // Get the config file directory path
-static pfc::string8 get_config_dir_path() {
+pfc::string8 get_config_dir_path() {
     pfc::string8 profile_path = core_api::get_profile_path();
     // Remove "file://" prefix if present
     if (profile_path.has_prefix("file://")) {
@@ -450,7 +466,7 @@ static const char* action_to_string(int action) {
 }
 
 // Create the foo_nowbar_data directory if it doesn't exist
-static void ensure_config_dir_exists() {
+void ensure_config_dir_exists() {
     pfc::string8 dir_path = get_config_dir_path();
     pfc::stringcvt::string_wide_from_utf8 wide_path(dir_path);
     CreateDirectoryW(wide_path, NULL);  // Ignore error if already exists
@@ -1812,6 +1828,10 @@ LOGFONT get_nowbar_track_font() {
     return cfg_nowbar_track_font.get_value();
 }
 
+LOGFONT get_nowbar_time_font() {
+    return cfg_nowbar_time_font.get_value();
+}
+
 void set_nowbar_artist_font(const LOGFONT& font) {
     cfg_nowbar_artist_font = font;
     cfg_nowbar_use_custom_fonts = 1;
@@ -1822,10 +1842,16 @@ void set_nowbar_track_font(const LOGFONT& font) {
     cfg_nowbar_use_custom_fonts = 1;
 }
 
+void set_nowbar_time_font(const LOGFONT& font) {
+    cfg_nowbar_time_font = font;
+    cfg_nowbar_use_custom_fonts = 1;
+}
+
 void reset_nowbar_fonts() {
     cfg_nowbar_use_custom_fonts = 0;
     cfg_nowbar_artist_font = get_nowbar_default_font(true);
     cfg_nowbar_track_font = get_nowbar_default_font(false);
+    cfg_nowbar_time_font = get_nowbar_default_time_font();
 }
 
 LOGFONT get_nowbar_default_font(bool is_artist) {
@@ -1846,12 +1872,31 @@ LOGFONT get_nowbar_default_font(bool is_artist) {
     lf.lfQuality = CLEARTYPE_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
     wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
-    
+
+    return lf;
+}
+
+LOGFONT get_nowbar_default_time_font() {
+    LOGFONT lf = {};
+
+    HDC hdc = GetDC(nullptr);
+    int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(nullptr, hdc);
+
+    lf.lfHeight = -MulDiv(9, dpi, 72);
+    lf.lfWeight = FW_NORMAL;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfOutPrecision = OUT_TT_PRECIS;
+    lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    lf.lfQuality = CLEARTYPE_QUALITY;
+    lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+
     return lf;
 }
 
 // GUID for preferences page
-static const GUID guid_nowbar_preferences_page = 
+const GUID guid_nowbar_preferences_page =
 { 0xABCDEF00, 0x1234, 0x5678, { 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x88 } };
 
 //=============================================================================
@@ -2070,6 +2115,9 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_LABEL), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_DISPLAY), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_SELECT), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_LABEL), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_DISPLAY), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_SELECT), show_fonts);
 }
 
 // Helper to update Visualization section enable/disable states
@@ -3033,6 +3081,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             }
             break;
 
+        case IDC_TIME_FONT_SELECT:
+            if (HIWORD(wp) == BN_CLICKED) {
+                p_this->select_time_font();
+            }
+            break;
+
         case IDC_BUTTON_ACCENT_BTN:
             if (HIWORD(wp) == BN_CLICKED) {
                 COLORREF color = static_cast<COLORREF>(cfg_nowbar_button_accent_color.get_value());
@@ -3437,6 +3491,15 @@ void nowbar_preferences::update_font_displays() {
     } else {
         uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, "Microsoft YaHei, 13pt, Regular (Default)");
     }
+
+    // Time font
+    if (get_nowbar_use_custom_fonts()) {
+        LOGFONT lf = get_nowbar_time_font();
+        pfc::string8 desc = format_font_name(lf);
+        uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, desc);
+    } else {
+        uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, "Microsoft YaHei, 9pt, Regular (Default)");
+    }
 }
 
 void nowbar_preferences::select_track_font() {
@@ -3466,6 +3529,22 @@ void nowbar_preferences::select_artist_font() {
     
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
+        update_font_displays();
+        on_changed();
+    }
+}
+
+void nowbar_preferences::select_time_font() {
+    LOGFONT lf = get_nowbar_use_custom_fonts() ? get_nowbar_time_font() : get_nowbar_default_time_font();
+
+    CHOOSEFONT cf = {};
+    cf.lStructSize = sizeof(cf);
+    cf.hwndOwner = m_hwnd;
+    cf.lpLogFont = &lf;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS;
+
+    if (ChooseFont(&cf)) {
+        set_nowbar_time_font(lf);
         update_font_displays();
         on_changed();
     }
