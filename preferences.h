@@ -3,6 +3,9 @@
 #include "pch.h"
 #include "resource.h"
 
+// GUID for the Now Bar preferences page (defined in preferences.cpp)
+extern const GUID guid_nowbar_preferences_page;
+
 // Configuration access functions
 int get_nowbar_theme_mode();  // 0=Auto, 1=Dark, 2=Light
 bool get_nowbar_cover_margin();  // true=Yes (margin), false=No (edge-to-edge)
@@ -59,6 +62,10 @@ void reload_custom_button_config();  // Reload config file from disk
 pfc::string8 get_nowbar_line1_format();
 pfc::string8 get_nowbar_line2_format();
 
+// Config directory helpers
+pfc::string8 get_config_dir_path();
+void ensure_config_dir_exists();
+
 // Execute a foobar2000 main menu command by path
 bool execute_fb2k_action_by_path(const char* path);
 
@@ -70,10 +77,13 @@ COLORREF get_nowbar_initial_bg_color();
 bool get_nowbar_use_custom_fonts();
 LOGFONT get_nowbar_artist_font();
 LOGFONT get_nowbar_track_font();
+LOGFONT get_nowbar_time_font();
 void set_nowbar_artist_font(const LOGFONT& font);
 void set_nowbar_track_font(const LOGFONT& font);
+void set_nowbar_time_font(const LOGFONT& font);
 void reset_nowbar_fonts();
 LOGFONT get_nowbar_default_font(bool is_artist);
+LOGFONT get_nowbar_default_time_font();
 
 // Preferences page instance - the actual dialog
 class nowbar_preferences : public preferences_page_instance {
@@ -103,6 +113,7 @@ private:
     void update_font_displays();
     void select_artist_font();
     void select_track_font();
+    void select_time_font();
     pfc::string8 format_font_name(const LOGFONT& lf);
     
     // Tab control methods
