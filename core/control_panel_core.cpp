@@ -7,7 +7,9 @@
 #include <dwmapi.h>
 #include <memory>
 #include <mutex>
+#include <fstream>
 #include <shellapi.h>
+#include <string>
 #include <vector>
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -357,6 +359,8 @@ void ControlPanelCore::apply_theme() {
 }
 
 void ControlPanelCore::on_settings_changed() {
+  m_needs_full_repaint = true;
+
   // Apply theme based on current settings and playback state
   apply_theme();
 
@@ -485,21 +489,21 @@ void ControlPanelCore::update_fonts() {
                           ? get_nowbar_artist_font()
                           : get_nowbar_default_font(true);
 
+  // Time font
+  LOGFONT lf_time = get_nowbar_use_custom_fonts()
+                        ? get_nowbar_time_font()
+                        : get_nowbar_default_time_font();
+
   // Create GDI+ fonts from LOGFONT
-  // Track title font
   HDC hdc = GetDC(m_hwnd);
   Gdiplus::Font *titleFont = new Gdiplus::Font(hdc, &lf_track);
   Gdiplus::Font *artistFont = new Gdiplus::Font(hdc, &lf_artist);
+  Gdiplus::Font *timeFont = new Gdiplus::Font(hdc, &lf_time);
   ReleaseDC(m_hwnd, hdc);
 
   m_font_title.reset(titleFont);
   m_font_artist.reset(artistFont);
-
-  // Time font - always use default Microsoft YaHei
-  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei");
-  m_font_time.reset(new Gdiplus::Font(&fontFamily, 9.0f * m_dpi_scale,
-                                      Gdiplus::FontStyleRegular,
-                                      Gdiplus::UnitPoint));
+  m_font_time.reset(timeFont);
 
   invalidate();
 }
@@ -728,15 +732,22 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int y_center = rect.top + h / 2;
 
   // Artwork (left side) - size based on panel height with margins
+  // When spectrum visualizer is active and artwork has no margin,
+  // reserve space for the thin progress bar at the top of the panel
   int art_margin = get_nowbar_cover_margin() ? m_metrics.artwork_margin : 0;
-  int art_size = h - (art_margin * 2); // Fit within panel height with margins
+  int art_top_offset = 0;
+  if (get_nowbar_visualization_mode() == 1 && art_margin == 0) {
+    art_top_offset = static_cast<int>(3 * m_dpi_scale); // thin progress bar height
+  }
+  int art_available_h = h - art_top_offset;
+  int art_size = art_available_h - (art_margin * 2); // Fit within available height with margins
   if (art_size > m_metrics.artwork_size) {
     art_size = m_metrics.artwork_size; // Cap at max size
   }
   if (art_size < 32) {
     art_size = 32; // Minimum size
   }
-  int art_y = y_center - art_size / 2;
+  int art_y = rect.top + art_top_offset + (art_available_h - art_size) / 2;
   if (get_nowbar_cover_artwork_visible()) {
     m_rect_artwork = {rect.left + art_margin, art_y,
                       rect.left + art_margin + art_size, art_y + art_size};
@@ -1179,6 +1190,8 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     on_settings_changed();
   }
   
+  m_needs_full_repaint = false;
+
   update_layout(rect);
 
   Gdiplus::Graphics g(hdc);
@@ -1211,9 +1224,10 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     draw_thin_progress_bar(g);
     draw_time_display_top_right(g);
   } else if (paint_vis_mode == 2) {
-    // Mode 2: waveform behind buttons, then buttons, then normal time display
+    // Mode 2: waveform behind buttons, then buttons, then tooltip on top, then time display
     draw_waveform_bar(g);
     draw_playback_buttons(g);
+    draw_waveform_tooltip(g);
     draw_time_display(g);
   } else {
     // Mode 0: normal seekbar, no visualization
@@ -1237,8 +1251,8 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
         ? Gdiplus::Color(40, 255, 255, 255) : m_button_hover_color;
     Gdiplus::Color mp_secondary_color = use_light_foreground 
         ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-    Gdiplus::Color mp_accent_override = use_light_foreground
-        ? Gdiplus::Color(255, 120, 200, 255) : m_accent_color;
+    COLORREF mp_btn_accent = get_nowbar_button_accent_color();
+    Gdiplus::Color mp_accent_override(255, GetRValue(mp_btn_accent), GetGValue(mp_btn_accent), GetBValue(mp_btn_accent));
     
     if (mp_hovered && get_nowbar_hover_circles_enabled()) {
       Gdiplus::SolidBrush hoverBrush(mp_hover_color);
@@ -1261,10 +1275,17 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     bool any_animation_active = m_seekbar_animating || m_hover_animating ||
                                  m_cbutton_animating || m_bg_animating ||
                                  m_spectrum_animating || m_waveform_animating;
-    
+
     if (any_animation_active) {
-      // Animations are running - request next frame
-      request_animation();
+      // If only spectrum is animating, use partial invalidation for its rect
+      bool spectrum_only = m_spectrum_animating && !m_seekbar_animating &&
+                           !m_hover_animating && !m_cbutton_animating &&
+                           !m_bg_animating && !m_waveform_animating;
+      if (spectrum_only) {
+        request_animation(&m_rect_spectrum_full);
+      } else {
+        request_animation();
+      }
     } else {
       // No animations active - make sure timer is stopped to avoid wasting CPU
       if (m_animation_timer_active) {
@@ -1273,6 +1294,51 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
       }
       m_animation_requested = false;
     }
+  }
+}
+
+void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
+  update_layout(panel_rect);
+
+  Gdiplus::Graphics g(hdc);
+  g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+  g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+
+  // Clip to the union of spectrum area + thin progress bar + time display
+  // so we skip artwork, track info, and volume but still update playback-related elements
+  // Note: progress bar hover expansion (2x height) triggers a full repaint via
+  // is_spectrum_animating_only() returning false, so no expansion needed here
+  Gdiplus::Region clip;
+  clip.MakeEmpty();
+  clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
+      m_rect_spectrum_full.right - m_rect_spectrum_full.left,
+      m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
+  clip.Union(Gdiplus::Rect(m_rect_thin_progress.left, m_rect_thin_progress.top,
+      m_rect_thin_progress.right - m_rect_thin_progress.left,
+      m_rect_thin_progress.bottom - m_rect_thin_progress.top));
+  clip.Union(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
+      m_rect_time.right - m_rect_time.left,
+      m_rect_time.bottom - m_rect_time.top));
+  g.SetClip(&clip);
+
+  // Redraw background within the clipped areas
+  draw_background(g, panel_rect);
+
+  g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+  g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
+  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+
+  draw_full_spectrum(g);
+  draw_playback_buttons(g);
+  draw_thin_progress_bar(g);
+  draw_time_display_top_right(g);
+
+  g.ResetClip();
+
+  // Continue the animation loop
+  if (get_nowbar_smooth_animations_enabled() && m_spectrum_animating) {
+    request_animation(&m_rect_spectrum_full);
   }
 }
 
@@ -1640,9 +1706,7 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   // Get custom button accent color from preferences
   COLORREF btn_accent = get_nowbar_button_accent_color();
   Gdiplus::Color custom_accent(255, GetRValue(btn_accent), GetGValue(btn_accent), GetBValue(btn_accent));
-  Gdiplus::Color icon_accent_color = use_light_foreground
-      ? Gdiplus::Color(255, 120, 200, 255)  // Bright accent for visibility on dark backgrounds
-      : custom_accent;
+  Gdiplus::Color icon_accent_color = custom_accent;
   Gdiplus::Color icon_hover_color = use_light_foreground
       ? Gdiplus::Color(40, 255, 255, 255)   // White hover for dark backgrounds
       : m_button_hover_color;
@@ -2188,12 +2252,6 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   sfRight.SetAlignment(Gdiplus::StringAlignmentFar);
   sfRight.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
-  // Create a scaled time font based on current size scale
-  float time_font_size = 9.0f * m_dpi_scale * m_size_scale;
-  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei");
-  Gdiplus::Font timeFont(&fontFamily, time_font_size, Gdiplus::FontStyleRegular,
-                         Gdiplus::UnitPoint);
-
   // Position time at the ends of the seekbar (vertically centered with seekbar)
   int seekbar_center_y = (m_rect_seekbar.top + m_rect_seekbar.bottom) / 2;
   int time_height = static_cast<int>(m_metrics.text_height * m_size_scale);
@@ -2202,11 +2260,11 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   // Use "9:59:59" as reference for elapsed time and "-9:59:59" for remaining time
   // This handles tracks over 59 minutes that use h:mm:ss format
   Gdiplus::RectF refBoundRect;
-  g.MeasureString(L"9:59:59", -1, &timeFont, Gdiplus::PointF(0, 0), &refBoundRect);
+  g.MeasureString(L"9:59:59", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &refBoundRect);
   float time_width = refBoundRect.Width + 4 * m_dpi_scale; // Add small padding
-  
+
   Gdiplus::RectF refBoundRectRemaining;
-  g.MeasureString(L"-9:59:59", -1, &timeFont, Gdiplus::PointF(0, 0), &refBoundRectRemaining);
+  g.MeasureString(L"-9:59:59", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &refBoundRectRemaining);
   float time_offset = refBoundRectRemaining.Width + 4 * m_dpi_scale; // Add small padding
 
   // Left side: elapsed time (before seekbar)
@@ -2227,7 +2285,7 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   Gdiplus::RectF leftTimeRect(timer_left,
                               (float)(seekbar_center_y - time_height / 2),
                               time_width, (float)time_height);
-  g.DrawString(elapsed.c_str(), -1, &timeFont, leftTimeRect, &sfRight,
+  g.DrawString(elapsed.c_str(), -1, m_font_time.get(), leftTimeRect, &sfRight,
                &timeBrush);
 
   // Right side: remaining time (after seekbar)
@@ -2236,7 +2294,7 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
       (float)(m_rect_seekbar.right + timer_gap),
       (float)(seekbar_center_y - time_height / 2), time_offset,
       (float)time_height);
-  g.DrawString(remaining_str.c_str(), -1, &timeFont, rightTimeRect, &sfLeft,
+  g.DrawString(remaining_str.c_str(), -1, m_font_time.get(), rightTimeRect, &sfLeft,
                &timeBrush);
 }
 
@@ -2305,12 +2363,12 @@ void ControlPanelCore::update_spectrum_data() {
     if (normalized < 0.02f) normalized = 0.0f;
     if (normalized > 1.0f) normalized = 1.0f;
 
-    // Asymmetric smoothing: snappy attack, moderate decay for lively movement
+    // Asymmetric smoothing: responsive attack, gentle decay for natural movement
     float current = m_spectrum_bars[i];
     if (normalized > current) {
-      m_spectrum_bars[i] = current + (normalized - current) * 0.8f;  // Snappy attack
+      m_spectrum_bars[i] = current + (normalized - current) * 0.5f;  // Responsive attack
     } else {
-      m_spectrum_bars[i] = current + (normalized - current) * 0.45f;  // Moderate decay
+      m_spectrum_bars[i] = current + (normalized - current) * 0.25f;  // Gentle decay
     }
   }
 }
@@ -2348,7 +2406,7 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   // Keep animating while spectrum is visible (need continuous redraws for FFT data)
   if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
     m_spectrum_animating = true;
-    request_animation();
+    request_animation(&m_rect_spectrum_full);
   }
 
   int area_w = m_rect_spectrum.right - m_rect_spectrum.left;
@@ -2518,7 +2576,7 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
 
   if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
     m_spectrum_animating = true;
-    request_animation();
+    request_animation(&m_rect_spectrum_full);
   }
 
   int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
@@ -2536,11 +2594,33 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
   // Determine colors - always use user's spectrum color setting
   COLORREF spec_color = get_nowbar_spectrum_color();
   Gdiplus::Color accent(255, GetRValue(spec_color), GetGValue(spec_color), GetBValue(spec_color));
+  // RGB-inverted colour for the lower half
+  BYTE inv_r = 255 - GetRValue(spec_color);
+  BYTE inv_g = 255 - GetGValue(spec_color);
+  BYTE inv_b = 255 - GetBValue(spec_color);
 
   // Modulate by spectrum opacity AND hover opacity
   int alpha = (int)(192 * m_spectrum_opacity * m_spectrum_hover_opacity);
 
-  Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, accent.GetR(), accent.GetG(), accent.GetB()));
+  // 3-stop gradient: top = accent (dimmed), 2/3 mark = accent (full), bottom = inverse (full)
+  int alpha_top = (int)(alpha * 0.55f);
+  int alpha_mid = alpha;
+  int alpha_bot = alpha;
+
+  Gdiplus::LinearGradientBrush gradBrush(
+      Gdiplus::PointF(0, (float)m_rect_spectrum_full.top),
+      Gdiplus::PointF(0, (float)m_rect_spectrum_full.bottom),
+      Gdiplus::Color(alpha_top, accent.GetR(), accent.GetG(), accent.GetB()),
+      Gdiplus::Color(alpha_bot, inv_r, inv_g, inv_b));
+
+  // Top 2/3 = chosen colour (dimmed to full), bottom 1/3 = inverse colour
+  Gdiplus::Color blendColors[3] = {
+      Gdiplus::Color(alpha_top, accent.GetR(), accent.GetG(), accent.GetB()),
+      Gdiplus::Color(alpha_mid, accent.GetR(), accent.GetG(), accent.GetB()),
+      Gdiplus::Color(alpha_bot, inv_r, inv_g, inv_b)
+  };
+  float blendPositions[3] = { 0.0f, 0.667f, 1.0f };
+  gradBrush.SetInterpolationColors(blendColors, blendPositions, 3);
 
   // Get shape setting (0=Pill, 1=Rectangle)
   int spec_shape = get_nowbar_spectrum_shape();
@@ -2580,10 +2660,10 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
         path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
       }
       path.CloseFigure();
-      g.FillPath(&barBrush, &path);
+      g.FillPath(&gradBrush, &path);
     } else {
       // Rectangle bars
-      g.FillRectangle(&barBrush, x, y, bar_w, height);
+      g.FillRectangle(&gradBrush, x, y, bar_w, height);
     }
   }
 
@@ -2698,39 +2778,53 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     m_waveform_animating = false;
   }
 
-  // Tooltip (reuse same logic as seekbar tooltip)
-  if ((m_hover_region == HitRegion::SeekBar || m_seeking) && m_state.track_length > 0) {
-    std::wstring timeStr = format_time(m_seeking ? m_state.playback_time : m_preview_time);
-    Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Gdiplus::RectF textBounds;
-    g.MeasureString(timeStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
-    int padding_h = static_cast<int>(6 * m_dpi_scale);
-    int padding_v = static_cast<int>(3 * m_dpi_scale);
-    int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
-    int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
-    int progress_w = static_cast<int>(w * progress);
-    int cursor_x = m_seeking ? (m_rect_waveform.left + progress_w) : m_seekbar_hover_x;
-    int tooltip_x = cursor_x - tooltip_w / 2;
-    int tooltip_y = m_rect_waveform.top - tooltip_h - static_cast<int>(6 * m_dpi_scale);
-    tooltip_x = std::max((int)m_rect_waveform.left, std::min(tooltip_x, (int)m_rect_waveform.right - tooltip_w));
-    Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
-    Gdiplus::SolidBrush bgBrush(bgColor);
-    int corner = static_cast<int>(4 * m_dpi_scale);
-    Gdiplus::GraphicsPath tooltipPath;
-    tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
-    tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
-    tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
-    tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
-    tooltipPath.CloseFigure();
-    g.FillPath(&bgBrush, &tooltipPath);
-    Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
-    Gdiplus::StringFormat sf;
-    sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-    sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
-                            static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
-    g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
+}
+
+void ControlPanelCore::draw_waveform_tooltip(Gdiplus::Graphics& g) {
+  if (m_rect_waveform.right <= m_rect_waveform.left) return;
+  if (!((m_hover_region == HitRegion::SeekBar || m_seeking) && m_state.track_length > 0)) return;
+
+  int w = m_rect_waveform.right - m_rect_waveform.left;
+  double progress;
+  if (m_seeking) {
+    progress = (m_state.track_length > 0)
+                   ? (m_state.playback_time / m_state.track_length)
+                   : 0.0;
+  } else {
+    progress = m_target_progress;
   }
+  progress = std::max(0.0, std::min(1.0, progress));
+
+  std::wstring timeStr = format_time(m_seeking ? m_state.playback_time : m_preview_time);
+  Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::RectF textBounds;
+  g.MeasureString(timeStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
+  int padding_h = static_cast<int>(6 * m_dpi_scale);
+  int padding_v = static_cast<int>(3 * m_dpi_scale);
+  int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
+  int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
+  int progress_w = static_cast<int>(w * progress);
+  int cursor_x = m_seeking ? (m_rect_waveform.left + progress_w) : m_seekbar_hover_x;
+  int tooltip_x = cursor_x - tooltip_w / 2;
+  int tooltip_y = m_rect_waveform.top - tooltip_h - static_cast<int>(6 * m_dpi_scale);
+  tooltip_x = std::max((int)m_rect_waveform.left, std::min(tooltip_x, (int)m_rect_waveform.right - tooltip_w));
+  Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
+  Gdiplus::SolidBrush bgBrush(bgColor);
+  int corner = static_cast<int>(4 * m_dpi_scale);
+  Gdiplus::GraphicsPath tooltipPath;
+  tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
+  tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
+  tooltipPath.CloseFigure();
+  g.FillPath(&bgBrush, &tooltipPath);
+  Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
+  Gdiplus::StringFormat sf;
+  sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
+                          static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
+  g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
 }
 
 void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
@@ -2749,11 +2843,6 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
   std::wstring total = format_time(m_state.track_length);
   std::wstring display = elapsed + L" / " + total;
 
-  float time_font_size = 9.0f * m_dpi_scale * m_size_scale;
-  Gdiplus::FontFamily fontFamily(L"Microsoft YaHei");
-  Gdiplus::Font timeFont(&fontFamily, time_font_size, Gdiplus::FontStyleRegular,
-                         Gdiplus::UnitPoint);
-
   Gdiplus::StringFormat sf;
   sf.SetAlignment(Gdiplus::StringAlignmentFar);  // Right-aligned
   sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
@@ -2762,7 +2851,7 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
       (float)m_rect_time.left, (float)m_rect_time.top,
       (float)(m_rect_time.right - m_rect_time.left),
       (float)(m_rect_time.bottom - m_rect_time.top));
-  g.DrawString(display.c_str(), -1, &timeFont, timeRect, &sf, &timeBrush);
+  g.DrawString(display.c_str(), -1, m_font_time.get(), timeRect, &sf, &timeBrush);
 }
 
 void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
@@ -2956,6 +3045,7 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     m_prev_hover_region = m_hover_region;
     m_hover_change_time = std::chrono::steady_clock::now();
     m_hover_region = new_region;
+    m_needs_full_repaint = true;
     invalidate();
   }
 
@@ -3072,6 +3162,7 @@ void ControlPanelCore::on_mouse_leave() {
 
   if (m_hover_region != HitRegion::None) {
     m_hover_region = HitRegion::None;
+    m_needs_full_repaint = true;
     invalidate();
   }
 
@@ -3467,7 +3558,8 @@ void ControlPanelCore::show_autoplaylist_menu() {
     ID_PREVIEW_OFF,
     ID_PREVIEW_35_PERCENT,
     ID_PREVIEW_50_PERCENT,
-    ID_PREVIEW_60_SECONDS
+    ID_PREVIEW_60_SECONDS,
+    ID_SETTINGS
   };
   
   // Create popup menu
@@ -3557,6 +3649,12 @@ void ControlPanelCore::show_autoplaylist_menu() {
 
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)preview_submenu, L"Playback Preview");
   }
+
+  // Separator before Settings
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+  // Settings option - opens Now Bar preferences page
+  AppendMenuW(menu, MF_STRING, ID_SETTINGS, L"Settings");
 
   // Get Super button position for menu placement
   POINT pt;
@@ -3700,6 +3798,9 @@ void ControlPanelCore::show_autoplaylist_menu() {
       break;
     case ID_PREVIEW_60_SECONDS:
       set_nowbar_preview_mode(3);
+      break;
+    case ID_SETTINGS:
+      ui_control::get()->show_preferences(guid_nowbar_preferences_page);
       break;
     default:
       break;
@@ -4007,6 +4108,8 @@ void ControlPanelCore::on_volume_changed(float volume_db) {
 }
 
 void ControlPanelCore::on_track_changed() {
+  m_needs_full_repaint = true;
+
   // Update mood state for new track
   update_mood_state();
 
@@ -4035,6 +4138,7 @@ void ControlPanelCore::on_track_changed() {
 }
 
 void ControlPanelCore::set_artwork(album_art_data_ptr data) {
+  m_needs_full_repaint = true;
   if (!data.is_valid() || data->get_size() == 0) {
     clear_artwork();
     return;
@@ -4079,6 +4183,7 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
 }
 
 void ControlPanelCore::clear_artwork() {
+  m_needs_full_repaint = true;
   m_artwork_bitmap.reset();
   m_artwork_colors_valid = false;
   m_blurred_artwork.reset();
@@ -4089,44 +4194,61 @@ void ControlPanelCore::clear_artwork() {
 }
 
 void ControlPanelCore::invalidate() {
+  m_needs_full_repaint = true;
   if (m_hwnd) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
   }
 }
 
 void ControlPanelCore::invalidate_rect(const RECT& rect) {
+  m_needs_full_repaint = true;
   if (m_hwnd) {
     InvalidateRect(m_hwnd, &rect, FALSE);
   }
 }
 
-void ControlPanelCore::request_animation() {
+void ControlPanelCore::request_animation(const RECT* dirty) {
   // Throttled animation request - schedules frames at ~60 FPS
   // Uses SetTimer to ensure the animation loop continues even without mouse events
   if (!m_hwnd) return;
-  
+
+  // Track dirty region: if any caller requests full repaint, stay full
+  if (dirty && m_animation_dirty_partial) {
+    // Merge with existing partial rect
+    UnionRect(&m_animation_dirty_rect, &m_animation_dirty_rect, dirty);
+  } else if (dirty && !m_animation_requested) {
+    // First partial request this cycle
+    m_animation_dirty_rect = *dirty;
+    m_animation_dirty_partial = true;
+  } else if (!dirty) {
+    // Full repaint requested
+    m_animation_dirty_partial = false;
+  }
+
   auto now = std::chrono::steady_clock::now();
   float elapsed_ms = std::chrono::duration<float, std::milli>(now - m_last_invalidate_time).count();
-  
+
   if (elapsed_ms >= TARGET_FRAME_INTERVAL_MS) {
     // Enough time has passed, perform actual invalidation
     m_last_invalidate_time = now;
     m_animation_requested = false;
-    
+
     // Kill any pending timer since we're painting now
     if (m_animation_timer_active) {
       KillTimer(m_hwnd, ANIMATION_TIMER_ID);
       m_animation_timer_active = false;
     }
-    
-    InvalidateRect(m_hwnd, nullptr, FALSE);
+
+    const RECT* inv_rect = m_animation_dirty_partial ? &m_animation_dirty_rect : nullptr;
+    InvalidateRect(m_hwnd, inv_rect, FALSE);
+    m_animation_dirty_partial = false;
   } else if (!m_animation_timer_active) {
     // Not enough time has passed - schedule a timer to fire when it's time
     // Calculate how long until we should paint again
     UINT delay_ms = static_cast<UINT>(TARGET_FRAME_INTERVAL_MS - elapsed_ms + 1);
     if (delay_ms < 1) delay_ms = 1;
     if (delay_ms > 17) delay_ms = 17;  // Cap at ~60 FPS
-    
+
     SetTimer(m_hwnd, ANIMATION_TIMER_ID, delay_ms, nullptr);
     m_animation_timer_active = true;
     m_animation_requested = true;
@@ -5390,6 +5512,22 @@ void ControlPanelCore::start_waveform_computation() {
   // Don't recompute if same track is already valid
   if (m_waveform_valid && m_waveform_track_path == path) return;
 
+  // Check waveform cache before spawning a decoding thread
+  {
+    std::vector<float> cached_peaks;
+    if (lookup_waveform_cache(path.c_str(), cached_peaks)) {
+      std::lock_guard<std::mutex> lock(m_waveform_mutex);
+      m_waveform_peaks = std::move(cached_peaks);
+      m_waveform_valid = true;
+      m_waveform_is_stream = false;
+      m_waveform_track_path = path.c_str();
+      if (m_hwnd && ::IsWindow(m_hwnd)) {
+        ::InvalidateRect(m_hwnd, nullptr, FALSE);
+      }
+      return;
+    }
+  }
+
   m_waveform_cancel = false;
   m_waveform_computing = true;
 
@@ -5483,6 +5621,9 @@ void ControlPanelCore::start_waveform_computation() {
         }
       }
 
+      // Save to disk cache before moving peaks
+      save_waveform_entry(path.c_str(), peaks);
+
       // Store result
       {
         std::lock_guard<std::mutex> lock(m_waveform_mutex);
@@ -5510,6 +5651,131 @@ void ControlPanelCore::cancel_waveform_computation() {
   }
   m_waveform_computing = false;
   m_waveform_cancel = false;
+}
+
+// Waveform cache magic and version
+static constexpr char WAVECACHE_MAGIC[4] = {'N', 'W', 'W', 'C'};
+static constexpr uint32_t WAVECACHE_VERSION = 1;
+
+static pfc::string8 get_wavecache_path() {
+  pfc::string8 dir = get_config_dir_path();
+  dir << "\\wavecache.db";
+  return dir;
+}
+
+void ControlPanelCore::load_waveform_cache() {
+  if (m_waveform_cache_loaded) return;
+  m_waveform_cache_loaded = true;
+
+  pfc::string8 cache_path = get_wavecache_path();
+  pfc::stringcvt::string_wide_from_utf8 wide_path(cache_path);
+  std::ifstream file(wide_path.get_ptr(), std::ios::binary);
+  if (!file.is_open()) return;
+
+  // Read and validate header
+  char magic[4];
+  uint32_t version = 0;
+  uint32_t entry_count = 0;
+
+  file.read(magic, 4);
+  if (!file || memcmp(magic, WAVECACHE_MAGIC, 4) != 0) return;
+
+  file.read(reinterpret_cast<char*>(&version), 4);
+  if (!file || version != WAVECACHE_VERSION) return;
+
+  file.read(reinterpret_cast<char*>(&entry_count), 4);
+  if (!file) return;
+
+  // Read entries
+  for (uint32_t i = 0; i < entry_count; i++) {
+    uint32_t path_len = 0;
+    file.read(reinterpret_cast<char*>(&path_len), 4);
+    if (!file || path_len > 4096) return;  // Sanity limit
+
+    std::string path(path_len, '\0');
+    file.read(&path[0], path_len);
+    if (!file) return;
+
+    uint32_t peak_count = 0;
+    file.read(reinterpret_cast<char*>(&peak_count), 4);
+    if (!file || peak_count > 10000) return;  // Sanity limit
+
+    std::vector<float> peaks(peak_count);
+    file.read(reinterpret_cast<char*>(peaks.data()), peak_count * sizeof(float));
+    if (!file) return;
+
+    m_waveform_cache[path] = std::move(peaks);
+  }
+}
+
+void ControlPanelCore::save_waveform_entry(const char* path, const std::vector<float>& peaks) {
+  ensure_config_dir_exists();
+
+  pfc::string8 cache_path = get_wavecache_path();
+  pfc::stringcvt::string_wide_from_utf8 wide_path(cache_path);
+
+  // Check if file exists
+  bool file_exists = false;
+  {
+    std::ifstream test(wide_path.get_ptr(), std::ios::binary);
+    file_exists = test.is_open();
+  }
+
+  std::fstream file(wide_path.get_ptr(),
+                    std::ios::binary | std::ios::in | std::ios::out |
+                    (file_exists ? std::ios::openmode(0) : std::ios::trunc));
+
+  if (!file.is_open()) {
+    // File doesn't exist yet or can't open with in|out — create fresh
+    file.open(wide_path.get_ptr(), std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!file.is_open()) return;
+    file_exists = false;
+  }
+
+  uint32_t new_count = 1;
+
+  if (!file_exists) {
+    // Write header
+    file.write(WAVECACHE_MAGIC, 4);
+    file.write(reinterpret_cast<const char*>(&WAVECACHE_VERSION), 4);
+    file.write(reinterpret_cast<const char*>(&new_count), 4);
+  } else {
+    // Read current entry count
+    uint32_t current_count = 0;
+    file.seekg(8, std::ios::beg);
+    file.read(reinterpret_cast<char*>(&current_count), 4);
+    new_count = current_count + 1;
+
+    // Update entry count in header
+    file.seekp(8, std::ios::beg);
+    file.write(reinterpret_cast<const char*>(&new_count), 4);
+
+    // Seek to end for appending
+    file.seekp(0, std::ios::end);
+  }
+
+  // Write entry
+  uint32_t path_len = static_cast<uint32_t>(strlen(path));
+  file.write(reinterpret_cast<const char*>(&path_len), 4);
+  file.write(path, path_len);
+
+  uint32_t peak_count = static_cast<uint32_t>(peaks.size());
+  file.write(reinterpret_cast<const char*>(&peak_count), 4);
+  file.write(reinterpret_cast<const char*>(peaks.data()), peak_count * sizeof(float));
+
+  // Insert into in-memory map
+  m_waveform_cache[std::string(path)] = peaks;
+}
+
+bool ControlPanelCore::lookup_waveform_cache(const char* path, std::vector<float>& out_peaks) {
+  load_waveform_cache();
+
+  auto it = m_waveform_cache.find(std::string(path));
+  if (it != m_waveform_cache.end()) {
+    out_peaks = it->second;
+    return true;
+  }
+  return false;
 }
 
 } // namespace nowbar
