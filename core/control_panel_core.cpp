@@ -271,8 +271,8 @@ SIZE ControlPanelCore::get_min_size() const {
   // - Volume bar: ~200px  
   // - MiniPlayer button: ~50px
   // - Margins and spacing: ~125px
-  // Total: ~1481px to accommodate all elements including spectrum visualizer
-  LONG min_width = 1481;
+  // Total: ~1232px to accommodate all elements including spectrum visualizer
+  LONG min_width = 1232;
   
   return {min_width, min_height};
 }
