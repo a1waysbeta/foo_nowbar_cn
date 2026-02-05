@@ -30,6 +30,11 @@ static cfg_int cfg_nowbar_cover_artwork_visible(
     1  // Default: Yes (show artwork)
 );
 
+static cfg_int cfg_nowbar_online_artwork(
+    GUID{0xABCDEF90, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF0}},
+    0  // Default: Disabled
+);
+
 static cfg_int cfg_nowbar_bar_style(
     GUID{0xABCDEF06, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8E}},
     0  // Default: Pill-shaped
@@ -1306,6 +1311,10 @@ bool get_nowbar_cover_artwork_visible() {
     return cfg_nowbar_cover_artwork_visible != 0;
 }
 
+bool get_nowbar_online_artwork() {
+    return cfg_nowbar_online_artwork != 0;
+}
+
 int get_nowbar_bar_style() {
     int style = cfg_nowbar_bar_style;
     if (style < 0) style = 0;
@@ -2033,6 +2042,7 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_PROGRESS_ACCENT_BTN), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ACCENT_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ACCENT_BTN), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_ONLINE_ARTWORK_CHECK), show_appearance);
 
     // Icons tab controls (Tab 2)
     BOOL show_icons = (tab == 2) ? SW_SHOW : SW_HIDE;
@@ -2274,6 +2284,9 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hCoverArtworkCombo, CB_ADDSTRING, 0, (LPARAM)L"Yes");
         SendMessage(hCoverArtworkCombo, CB_ADDSTRING, 0, (LPARAM)L"No");
         SendMessage(hCoverArtworkCombo, CB_SETCURSEL, cfg_nowbar_cover_artwork_visible ? 0 : 1, 0);
+
+        // Initialize online artwork checkbox
+        CheckDlgButton(hwnd, IDC_ONLINE_ARTWORK_CHECK, cfg_nowbar_online_artwork ? BST_CHECKED : BST_UNCHECKED);
 
         // Initialize smooth animations combobox (moved from end of list, now after Theme Mode)
         HWND hSmoothAnimCombo = GetDlgItem(hwnd, IDC_SMOOTH_ANIMATIONS_COMBO);
@@ -2571,6 +2584,9 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 update_cover_margin_state(hwnd);
                 p_this->on_changed();
             }
+            break;
+        case IDC_ONLINE_ARTWORK_CHECK:
+            p_this->on_changed();
             break;
 
         case IDC_LINE1_FORMAT_EDIT:
@@ -3209,6 +3225,9 @@ void nowbar_preferences::apply_settings() {
         int coverArtworkSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_cover_artwork_visible = (coverArtworkSel == 0) ? 1 : 0;
 
+        // Save online artwork setting
+        cfg_nowbar_online_artwork = (IsDlgButtonChecked(m_hwnd, IDC_ONLINE_ARTWORK_CHECK) == BST_CHECKED) ? 1 : 0;
+
         // Save bar style (0=Pill-shaped, 1=Rectangular)
         cfg_nowbar_bar_style = (int)SendMessage(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), CB_GETCURSEL, 0, 0);
 
@@ -3405,6 +3424,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_button_accent_color = RGB(100, 180, 255);  // Default: Light blue
             cfg_nowbar_progress_accent_color = RGB(140, 140, 140);  // Default: Gray
             cfg_nowbar_volume_accent_color = RGB(140, 140, 140);  // Default: Gray
+            cfg_nowbar_online_artwork = 0;  // Default: Disabled
 
             // Update Appearance tab UI
             SendMessage(GetDlgItem(m_hwnd, IDC_THEME_MODE_COMBO), CB_SETCURSEL, 0, 0);
@@ -3417,6 +3437,7 @@ void nowbar_preferences::reset_settings() {
             InvalidateRect(GetDlgItem(m_hwnd, IDC_BUTTON_ACCENT_BTN), nullptr, TRUE);
             InvalidateRect(GetDlgItem(m_hwnd, IDC_PROGRESS_ACCENT_BTN), nullptr, TRUE);
             InvalidateRect(GetDlgItem(m_hwnd, IDC_VOLUME_ACCENT_BTN), nullptr, TRUE);
+            CheckDlgButton(m_hwnd, IDC_ONLINE_ARTWORK_CHECK, BST_UNCHECKED);
             update_cover_margin_state(m_hwnd);  // Re-enable Cover Margin (Cover Artwork is Yes)
         } else if (m_current_tab == 2) {
             // Reset Icons tab settings
