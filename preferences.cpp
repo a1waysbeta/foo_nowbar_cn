@@ -77,7 +77,7 @@ static cfg_int cfg_nowbar_alternate_icons(
 
 static cfg_int cfg_nowbar_cbutton_autohide(
     GUID{0xABCDEF1E, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xAE}},
-    1  // Default: Yes (auto-hide during playback)
+    0  // Default: No (don't auto-hide)
 );
 
 static cfg_int cfg_nowbar_glass_effect(
@@ -230,7 +230,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_track_font(
 );
 
 static cfg_struct_t<LOGFONT> cfg_nowbar_time_font(
-    GUID{0xABCDEF05, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8D}},
+    GUID{0xABCDEF0E, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x96}},
     []() {
         LOGFONT lf = {};
         lf.lfHeight = -12;  // ~9pt at 96 DPI
@@ -1833,16 +1833,31 @@ LOGFONT get_nowbar_time_font() {
 }
 
 void set_nowbar_artist_font(const LOGFONT& font) {
+    // When enabling custom fonts for the first time, preserve other fonts' current appearance
+    if (cfg_nowbar_use_custom_fonts == 0) {
+        cfg_nowbar_track_font = get_nowbar_default_font(false);
+        cfg_nowbar_time_font = get_nowbar_default_time_font();
+    }
     cfg_nowbar_artist_font = font;
     cfg_nowbar_use_custom_fonts = 1;
 }
 
 void set_nowbar_track_font(const LOGFONT& font) {
+    // When enabling custom fonts for the first time, preserve other fonts' current appearance
+    if (cfg_nowbar_use_custom_fonts == 0) {
+        cfg_nowbar_artist_font = get_nowbar_default_font(true);
+        cfg_nowbar_time_font = get_nowbar_default_time_font();
+    }
     cfg_nowbar_track_font = font;
     cfg_nowbar_use_custom_fonts = 1;
 }
 
 void set_nowbar_time_font(const LOGFONT& font) {
+    // When enabling custom fonts for the first time, preserve other fonts' current appearance
+    if (cfg_nowbar_use_custom_fonts == 0) {
+        cfg_nowbar_artist_font = get_nowbar_default_font(true);
+        cfg_nowbar_track_font = get_nowbar_default_font(false);
+    }
     cfg_nowbar_time_font = font;
     cfg_nowbar_use_custom_fonts = 1;
 }
@@ -3348,7 +3363,7 @@ void nowbar_preferences::reset_settings() {
             // Reset General tab settings (Display Format, Auto-hide C-buttons, Mood Tag, Skip Low Rating)
             cfg_nowbar_line1_format = "%title%";  // Default format
             cfg_nowbar_line2_format = "%artist%";  // Default format
-            cfg_nowbar_cbutton_autohide = 1;  // Yes (default)
+            cfg_nowbar_cbutton_autohide = 0;  // No (default)
             cfg_nowbar_mood_tag_mode = 0;  // FEEDBACK (default)
             cfg_nowbar_skip_low_rating_enabled = 0;  // Disabled (default)
             cfg_nowbar_skip_low_rating_threshold = 1;  // 1 (default)
@@ -3502,15 +3517,37 @@ void nowbar_preferences::update_font_displays() {
     }
 }
 
+// Hook procedure to filter out vertical fonts (those starting with "@")
+static UINT_PTR CALLBACK font_hook_proc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_INITDIALOG) {
+        // The font name combo box has control ID 0x470 (cmb1 in common dialog)
+        HWND hCombo = GetDlgItem(hdlg, 0x470);
+        if (hCombo) {
+            // Remove all fonts starting with "@" (vertical writing fonts)
+            int count = (int)SendMessage(hCombo, CB_GETCOUNT, 0, 0);
+            for (int i = count - 1; i >= 0; i--) {
+                wchar_t fontName[LF_FACESIZE];
+                if (SendMessageW(hCombo, CB_GETLBTEXT, i, (LPARAM)fontName) != CB_ERR) {
+                    if (fontName[0] == L'@') {
+                        SendMessage(hCombo, CB_DELETESTRING, i, 0);
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 void nowbar_preferences::select_track_font() {
     LOGFONT lf = get_nowbar_use_custom_fonts() ? get_nowbar_track_font() : get_nowbar_default_font(false);
-    
+
     CHOOSEFONT cf = {};
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS;
-    
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
+    cf.lpfnHook = font_hook_proc;
+
     if (ChooseFont(&cf)) {
         set_nowbar_track_font(lf);
         update_font_displays();
@@ -3520,13 +3557,14 @@ void nowbar_preferences::select_track_font() {
 
 void nowbar_preferences::select_artist_font() {
     LOGFONT lf = get_nowbar_use_custom_fonts() ? get_nowbar_artist_font() : get_nowbar_default_font(true);
-    
+
     CHOOSEFONT cf = {};
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS;
-    
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
+    cf.lpfnHook = font_hook_proc;
+
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
         update_font_displays();
@@ -3541,7 +3579,8 @@ void nowbar_preferences::select_time_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
+    cf.lpfnHook = font_hook_proc;
 
     if (ChooseFont(&cf)) {
         set_nowbar_time_font(lf);
