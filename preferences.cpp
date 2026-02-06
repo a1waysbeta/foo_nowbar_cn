@@ -55,6 +55,11 @@ static cfg_int cfg_nowbar_stop_icon_visible(
     0  // Default: Hidden
 );
 
+static cfg_int cfg_nowbar_stop_after_current_icon_visible(
+    GUID{0xABCDEF5D, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xED}},
+    0  // Default: Hidden
+);
+
 static cfg_int cfg_nowbar_super_icon_visible(
     GUID{0xABCDEF52, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE2}},
     1  // Default: Show
@@ -1334,6 +1339,10 @@ bool get_nowbar_stop_icon_visible() {
     return cfg_nowbar_stop_icon_visible != 0;
 }
 
+bool get_nowbar_stop_after_current_icon_visible() {
+    return cfg_nowbar_stop_after_current_icon_visible != 0;
+}
+
 bool get_nowbar_super_icon_visible() {
     return cfg_nowbar_super_icon_visible != 0;
 }
@@ -1797,6 +1806,233 @@ bool execute_fb2k_action_by_path(const char* path) {
     return false;
 }
 
+// Query the state of a foobar2000 menu command without executing it
+// Returns checked/disabled flags for toggle-type commands
+CommandState get_fb2k_action_state_by_path(const char* path) {
+    CommandState result;
+    if (!path || !*path) return result;
+
+    pfc::string8 target_path(path);
+
+    // Search main menu commands (same traversal logic as execute_fb2k_action_by_path)
+    service_enum_t<mainmenu_commands> enumerator;
+    service_ptr_t<mainmenu_commands> commands;
+
+    while (enumerator.next(commands)) {
+        service_ptr_t<mainmenu_commands_v2> commands_v2;
+        commands->service_query_t(commands_v2);
+
+        const auto command_count = commands->get_command_count();
+        for (uint32_t command_index = 0; command_index < command_count; command_index++) {
+            // Build the full path for this command
+            pfc::string8 command_name;
+            commands->get_name(command_index, command_name);
+
+            // Get parent group names
+            std::list<pfc::string8> name_parts;
+            name_parts.push_back(command_name);
+
+            GUID parent_id = commands->get_parent();
+            while (parent_id != pfc::guid_null) {
+                service_enum_t<mainmenu_group> group_enum;
+                service_ptr_t<mainmenu_group> group;
+                bool found = false;
+
+                while (group_enum.next(group)) {
+                    if (group->get_guid() == parent_id) {
+                        service_ptr_t<mainmenu_group_popup> popup;
+                        if (group->service_query_t(popup)) {
+                            pfc::string8 group_name;
+                            popup->get_display_string(group_name);
+                            name_parts.push_front(group_name);
+                        }
+                        parent_id = group->get_parent();
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) break;
+            }
+
+            // Build full path string
+            pfc::string8 full_path;
+            bool first = true;
+            for (const auto& part : name_parts) {
+                if (!first) full_path << "/";
+                full_path << part;
+                first = false;
+            }
+
+            // Check for match (case-insensitive)
+            if (stricmp_utf8(full_path.c_str(), target_path.c_str()) == 0) {
+                result.found = true;
+
+                // Query display state for flags
+                pfc::string8 display_text;
+                t_uint32 flags = 0;
+                commands->get_display(command_index, display_text, flags);
+
+                result.checked = (flags & mainmenu_commands::flag_checked) != 0;
+                result.disabled = (flags & mainmenu_commands::flag_disabled) != 0;
+                return result;
+            }
+
+            // For dynamic commands, check sub-items
+            if (commands_v2.is_valid() && commands_v2->is_command_dynamic(command_index)) {
+                mainmenu_node::ptr node = commands_v2->dynamic_instantiate(command_index);
+
+                // Recursive lambda to search dynamic nodes
+                std::function<bool(const mainmenu_node::ptr&, std::list<pfc::string8>)> search_node;
+                search_node = [&](const mainmenu_node::ptr& n, std::list<pfc::string8> parts) -> bool {
+                    if (!n.is_valid()) return false;
+
+                    pfc::string8 display_name;
+                    uint32_t node_flags;
+                    n->get_display(display_name, node_flags);
+
+                    switch (n->get_type()) {
+                    case mainmenu_node::type_command: {
+                        parts.push_back(display_name);
+
+                        pfc::string8 node_path;
+                        bool first_part = true;
+                        for (const auto& p : parts) {
+                            if (!first_part) node_path << "/";
+                            node_path << p;
+                            first_part = false;
+                        }
+
+                        if (stricmp_utf8(node_path.c_str(), target_path.c_str()) == 0) {
+                            result.found = true;
+                            result.checked = (node_flags & mainmenu_commands::flag_checked) != 0;
+                            result.disabled = (node_flags & mainmenu_commands::flag_disabled) != 0;
+                            return true;
+                        }
+                        return false;
+                    }
+                    case mainmenu_node::type_group: {
+                        if (!display_name.is_empty()) {
+                            parts.push_back(display_name);
+                        }
+
+                        for (size_t i = 0, count = n->get_children_count(); i < count; i++) {
+                            if (search_node(n->get_child(i), parts)) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    default:
+                        return false;
+                    }
+                };
+
+                // Start search from root with parent path
+                std::list<pfc::string8> base_parts;
+                for (const auto& p : name_parts) {
+                    if (&p != &name_parts.back()) {
+                        base_parts.push_back(p);
+                    }
+                }
+                if (search_node(node, base_parts)) {
+                    return result;
+                }
+            }
+        }
+    }
+
+    // Main menu command not found - try context menu commands
+    // Get selected tracks from the active playlist
+    auto pm = playlist_manager::get();
+    metadb_handle_list tracks;
+    
+    t_size active_playlist = pm->get_active_playlist();
+    if (active_playlist != pfc_infinite) {
+        bit_array_bittable selection(pm->playlist_get_item_count(active_playlist));
+        pm->playlist_get_selection_mask(active_playlist, selection);
+        
+        bool has_selection = false;
+        for (t_size i = 0; i < pm->playlist_get_item_count(active_playlist); i++) {
+            if (selection.get(i)) {
+                has_selection = true;
+                break;
+            }
+        }
+        
+        if (has_selection) {
+            pm->playlist_get_selected_items(active_playlist, tracks);
+        } else {
+            t_size focus = pm->playlist_get_focus_item(active_playlist);
+            if (focus != pfc_infinite) {
+                metadb_handle_ptr track;
+                if (pm->playlist_get_item_handle(track, active_playlist, focus)) {
+                    tracks.add_item(track);
+                }
+            }
+        }
+    }
+    
+    if (tracks.get_count() == 0) {
+        return result;  // No tracks to operate on
+    }
+    
+    // Create context menu manager and search for the command
+    contextmenu_manager::ptr cm;
+    contextmenu_manager::g_create(cm);
+    cm->init_context(tracks, contextmenu_manager::flag_show_shortcuts);
+    
+    // Recursive function to search context menu nodes
+    std::function<bool(contextmenu_node*, pfc::string8)> search_context_node;
+    search_context_node = [&](contextmenu_node* node, pfc::string8 parent_path) -> bool {
+        if (!node) return false;
+        
+        t_size child_count = node->get_num_children();
+        for (t_size i = 0; i < child_count; i++) {
+            contextmenu_node* child = node->get_child(i);
+            if (!child) continue;
+            
+            // Get node info using contextmenu_node API
+            const char* child_name = child->get_name();
+            if (!child_name) continue;
+            
+            contextmenu_item_node::t_type child_type = child->get_type();
+            
+            // Skip separators
+            if (child_type == contextmenu_item_node::type_separator) continue;
+            
+            // Build full path for this node
+            pfc::string8 full_path;
+            if (!parent_path.is_empty()) {
+                full_path << parent_path << "/";
+            }
+            full_path << child_name;
+            
+            if (child_type == contextmenu_item_node::type_command) {
+                if (stricmp_utf8(full_path.c_str(), target_path.c_str()) == 0) {
+                    result.found = true;
+                    unsigned child_flags = child->get_display_flags();
+                    result.checked = (child_flags & contextmenu_item_node::FLAG_CHECKED) != 0;
+                    result.disabled = (child_flags & contextmenu_item_node::FLAG_DISABLED) != 0;
+                    return true;
+                }
+            } else if (child_type == contextmenu_item_node::type_group) {
+                if (search_context_node(child, full_path)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    
+    // Start search from root
+    contextmenu_node* root = cm->get_root();
+    if (root && search_context_node(root, "")) {
+        return result;
+    }
+    
+    return result;
+}
+
 COLORREF get_nowbar_initial_bg_color() {
     int theme_mode = get_nowbar_theme_mode();
     bool dark;
@@ -1990,9 +2226,6 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_LINE1_FORMAT_EDIT), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_LINE2_FORMAT_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_LINE2_FORMAT_EDIT), show_general);
-    // Auto-hide C-buttons (behavior setting)
-    ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), show_general);
     // Mood Tag setting
     ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), show_general);
@@ -2050,6 +2283,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_ICON_COMBO), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_ICON_LABEL), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_ICON_COMBO), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_AFTER_CURRENT_LABEL), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_AFTER_CURRENT_COMBO), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SUPER_ICON_LABEL), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SUPER_ICON_COMBO), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_MINIPLAYER_ICON_LABEL), show_icons);
@@ -2058,6 +2293,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_HOVER_CIRCLES_COMBO), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ALTERNATE_ICONS_LABEL), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ALTERNATE_ICONS_COMBO), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_LABEL), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), show_icons);
 
     // Custom Button tab controls (Tab 3)
     BOOL show_cbutton = (tab == 3) ? SW_SHOW : SW_HIDE;
@@ -2328,6 +2565,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hStopIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
         SendMessage(hStopIconCombo, CB_SETCURSEL, cfg_nowbar_stop_icon_visible ? 0 : 1, 0);
 
+        // Initialize stop after current icon visibility combobox
+        HWND hStopAfterCurrentCombo = GetDlgItem(hwnd, IDC_STOP_AFTER_CURRENT_COMBO);
+        SendMessage(hStopAfterCurrentCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
+        SendMessage(hStopAfterCurrentCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hStopAfterCurrentCombo, CB_SETCURSEL, cfg_nowbar_stop_after_current_icon_visible ? 0 : 1, 0);
+
         // Initialize super icon visibility combobox
         HWND hSuperIconCombo = GetDlgItem(hwnd, IDC_SUPER_ICON_COMBO);
         SendMessage(hSuperIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
@@ -2512,6 +2755,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_COVER_MARGIN_COMBO:
         case IDC_MOOD_ICON_COMBO:
         case IDC_STOP_ICON_COMBO:
+        case IDC_STOP_AFTER_CURRENT_COMBO:
         case IDC_SUPER_ICON_COMBO:
         case IDC_MINIPLAYER_ICON_COMBO:
         case IDC_HOVER_CIRCLES_COMBO:
@@ -3243,6 +3487,10 @@ void nowbar_preferences::apply_settings() {
         int stopIconSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_STOP_ICON_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_stop_icon_visible = (stopIconSel == 0) ? 1 : 0;
 
+        // Save stop after current icon visibility (0=Show, 1=Hidden in combobox -> config 1=Show, 0=Hidden)
+        int stopAfterCurrentSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_STOP_AFTER_CURRENT_COMBO), CB_GETCURSEL, 0, 0);
+        cfg_nowbar_stop_after_current_icon_visible = (stopAfterCurrentSel == 0) ? 1 : 0;
+
         // Save super icon visibility (0=Show, 1=Hidden in combobox -> config 1=Show, 0=Hidden)
         int superIconSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SUPER_ICON_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_super_icon_visible = (superIconSel == 0) ? 1 : 0;
@@ -3382,7 +3630,6 @@ void nowbar_preferences::reset_settings() {
             // Reset General tab settings (Display Format, Auto-hide C-buttons, Mood Tag, Skip Low Rating)
             cfg_nowbar_line1_format = "%title%";  // Default format
             cfg_nowbar_line2_format = "%artist%";  // Default format
-            cfg_nowbar_cbutton_autohide = 0;  // No (default)
             cfg_nowbar_mood_tag_mode = 0;  // FEEDBACK (default)
             cfg_nowbar_skip_low_rating_enabled = 0;  // Disabled (default)
             cfg_nowbar_skip_low_rating_threshold = 1;  // 1 (default)
@@ -3397,7 +3644,6 @@ void nowbar_preferences::reset_settings() {
             // Update General tab UI
             uSetDlgItemText(m_hwnd, IDC_LINE1_FORMAT_EDIT, "%title%");
             uSetDlgItemText(m_hwnd, IDC_LINE2_FORMAT_EDIT, "%artist%");
-            SendMessage(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), CB_SETCURSEL, 0, 0);  // Default: Yes
             SendMessage(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), CB_SETCURSEL, 0, 0);  // Default: FEEDBACK
             SendMessage(GetDlgItem(m_hwnd, IDC_SKIP_LOW_RATING_COMBO), CB_SETCURSEL, 0, 0);  // Default: Disabled
             SendMessage(GetDlgItem(m_hwnd, IDC_SKIP_RATING_THRESHOLD_COMBO), CB_SETCURSEL, 0, 0);  // Default: 1
@@ -3443,18 +3689,22 @@ void nowbar_preferences::reset_settings() {
             // Reset Icons tab settings
             cfg_nowbar_mood_icon_visible = 1;  // Show (visible)
             cfg_nowbar_stop_icon_visible = 0;  // Hidden (default)
+            cfg_nowbar_stop_after_current_icon_visible = 0;  // Hidden (default)
             cfg_nowbar_super_icon_visible = 1;  // Show (default)
             cfg_nowbar_miniplayer_icon_visible = 1;  // Show (visible)
             cfg_nowbar_hover_circles = 1;  // Show (default)
             cfg_nowbar_alternate_icons = 0;  // Disabled
+            cfg_nowbar_cbutton_autohide = 0;  // No (default)
 
             // Update Icons tab UI
             SendMessage(GetDlgItem(m_hwnd, IDC_MOOD_ICON_COMBO), CB_SETCURSEL, 0, 0);
             SendMessage(GetDlgItem(m_hwnd, IDC_STOP_ICON_COMBO), CB_SETCURSEL, 1, 0);  // Default: Hidden
+            SendMessage(GetDlgItem(m_hwnd, IDC_STOP_AFTER_CURRENT_COMBO), CB_SETCURSEL, 1, 0);  // Default: Hidden
             SendMessage(GetDlgItem(m_hwnd, IDC_SUPER_ICON_COMBO), CB_SETCURSEL, 0, 0);  // Default: Show
             SendMessage(GetDlgItem(m_hwnd, IDC_MINIPLAYER_ICON_COMBO), CB_SETCURSEL, 0, 0);
             SendMessage(GetDlgItem(m_hwnd, IDC_HOVER_CIRCLES_COMBO), CB_SETCURSEL, 0, 0);  // Default: Show
             SendMessage(GetDlgItem(m_hwnd, IDC_ALTERNATE_ICONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: Disabled
+            SendMessage(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: No
         } else if (m_current_tab == 3) {
             // Reset Custom Button tab settings
             cfg_cbutton1_enabled = 0;
