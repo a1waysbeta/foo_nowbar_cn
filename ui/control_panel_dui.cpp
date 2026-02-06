@@ -287,11 +287,15 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         // Spectrum-only fast path: skip background/artwork/text/buttons redraw
         bool spectrum_fast = m_core && m_core->is_spectrum_animating_only() &&
                              get_nowbar_visualization_mode() == 1;
+        // Waveform-only fast path: skip background/artwork/text/buttons redraw
+        bool waveform_fast = m_core && m_core->is_waveform_progress_only() &&
+                             get_nowbar_visualization_mode() == 2;
         if (spectrum_fast) {
-            // Clear only the individual areas that will be redrawn,
-            // preserving artwork, track info, custom buttons, and volume
-            m_core->clear_spectrum_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color());
+            // Background cache in paint_spectrum_only covers the dirty areas — no clear needed
             m_core->paint_spectrum_only(m_cache_dc, rect);
+        } else if (waveform_fast) {
+            m_core->clear_waveform_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color());
+            m_core->paint_waveform_only(m_cache_dc, rect);
         } else {
             // Full repaint
             HBRUSH bgBrush = CreateSolidBrush(get_nowbar_initial_bg_color());
@@ -365,10 +369,17 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
         
     case WM_TIMER: {
-        // Animation timer fired - trigger a repaint to continue the animation
-        const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
-        InvalidateRect(m_hwnd, dirty, FALSE);
-        if (m_core) m_core->clear_animation_dirty();
+        // Handle different timers
+        UINT_PTR timer_id = static_cast<UINT_PTR>(wp);
+        if (timer_id == ControlPanelCore::COMMAND_STATE_TIMER_ID) {
+            // Command state polling timer - poll for fb2k action states
+            if (m_core) m_core->poll_custom_button_states();
+        } else {
+            // Animation timer fired - trigger a repaint to continue the animation
+            const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
+            InvalidateRect(m_hwnd, dirty, FALSE);
+            if (m_core) m_core->clear_animation_dirty();
+        }
         return 0;
     }
 
