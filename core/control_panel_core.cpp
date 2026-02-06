@@ -13,6 +13,7 @@
 #include <vector>
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "msimg32.lib")
 
 namespace nowbar {
 
@@ -147,11 +148,18 @@ ControlPanelCore::ControlPanelCore() {
 }
 
 ControlPanelCore::~ControlPanelCore() {
+  // Stop command state polling timer
+  stop_command_state_timer();
+  
   // Cancel any running waveform computation
   cancel_waveform_computation();
 
   // Release spectrum visualizer stream
   release_vis_stream();
+
+  // Clean up GDI caches
+  destroy_spectrum_bg_cache();
+  destroy_spectrum_overlay();
 
   // Destroy tooltip control
   if (m_tooltip_hwnd) {
@@ -165,6 +173,49 @@ ControlPanelCore::~ControlPanelCore() {
   if (PlaybackStateManager::is_available()) {
     PlaybackStateManager::get().unregister_callback(this);
   }
+}
+
+void ControlPanelCore::destroy_spectrum_bg_cache() {
+  if (m_spectrum_bg_hdc) {
+    SelectObject(m_spectrum_bg_hdc, m_spectrum_bg_old);
+    DeleteObject(m_spectrum_bg_hbitmap);
+    DeleteDC(m_spectrum_bg_hdc);
+    m_spectrum_bg_hdc = nullptr;
+    m_spectrum_bg_hbitmap = nullptr;
+    m_spectrum_bg_old = nullptr;
+  }
+  m_spectrum_bg_cache_valid = false;
+}
+
+void ControlPanelCore::destroy_spectrum_overlay() {
+  if (m_spectrum_overlay_hdc) {
+    SelectObject(m_spectrum_overlay_hdc, m_spectrum_overlay_old);
+    DeleteObject(m_spectrum_overlay_hbitmap);
+    DeleteDC(m_spectrum_overlay_hdc);
+    m_spectrum_overlay_hdc = nullptr;
+    m_spectrum_overlay_hbitmap = nullptr;
+    m_spectrum_overlay_old = nullptr;
+    m_spectrum_overlay_bits = nullptr;
+  }
+}
+
+void ControlPanelCore::ensure_spectrum_overlay(HDC ref_dc, int w, int h) {
+  if (m_spectrum_overlay_hdc && m_spectrum_overlay_cx == w && m_spectrum_overlay_cy == h)
+    return;
+  destroy_spectrum_overlay();
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = w;
+  bmi.bmiHeader.biHeight = -h;  // top-down
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+  m_spectrum_overlay_hdc = CreateCompatibleDC(ref_dc);
+  m_spectrum_overlay_hbitmap = CreateDIBSection(
+      ref_dc, &bmi, DIB_RGB_COLORS, (void**)&m_spectrum_overlay_bits, nullptr, 0);
+  m_spectrum_overlay_old = (HBITMAP)SelectObject(m_spectrum_overlay_hdc, m_spectrum_overlay_hbitmap);
+  m_spectrum_overlay_cx = w;
+  m_spectrum_overlay_cy = h;
 }
 
 void ControlPanelCore::initialize(HWND hwnd) {
@@ -213,6 +264,9 @@ void ControlPanelCore::initialize(HWND hwnd) {
 
   // Initialize mood state for current track
   update_mood_state();
+  
+  // Start command state polling timer for custom button toggle states
+  start_command_state_timer();
 }
 
 void ControlPanelCore::set_dark_mode(bool dark) {
@@ -374,9 +428,13 @@ void ControlPanelCore::apply_theme() {
 
 void ControlPanelCore::on_settings_changed() {
   m_needs_full_repaint = true;
+  m_spectrum_bg_cache_valid = false;
+  m_time_display_cache.reset();
 
   // Apply theme based on current settings and playback state
   apply_theme();
+
+  m_waveform_brushes_dirty = true;
 
   // Update fonts from preferences
   update_fonts();
@@ -816,10 +874,13 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Heart and custom buttons appear at the edges without shifting the core
   // controls
 
-  // Calculate fixed width for core controls only (shuffle, prev, play, next, [stop], repeat)
-  // Stop button is optional and same size as other buttons (not Play)
+  // Calculate fixed width for core controls only (shuffle, prev, play, next, [stop], [stop_after_current], repeat)
+  // Stop and Stop After Current buttons are optional and same size as other buttons (not Play)
   bool stop_visible = get_nowbar_stop_icon_visible();
-  int core_buttons = stop_visible ? 6 : 5; // shuffle, prev, play, next, [stop], repeat
+  bool stop_after_current_visible = get_nowbar_stop_after_current_icon_visible();
+  int core_buttons = 5; // shuffle, prev, play, next, repeat (base)
+  if (stop_visible) core_buttons++;
+  if (stop_after_current_visible) core_buttons++;
   int core_width = button_size * (core_buttons - 1) + play_button_size +
                    spacing * (core_buttons - 1);
   int core_start_x = rect.left + (w - core_width) / 2;
@@ -892,6 +953,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     controls_x += button_size + spacing;
   } else {
     m_rect_stop = {};  // Clear when hidden
+  }
+
+  // Stop After Current button - optional, positioned after Stop, same size
+  if (stop_after_current_visible) {
+    m_rect_stop_after_current = {controls_x, btn_y, controls_x + button_size,
+                                 btn_y + button_size};
+    controls_x += button_size + spacing;
+  } else {
+    m_rect_stop_after_current = {};  // Clear when hidden
   }
 
   m_rect_repeat = {controls_x, btn_y, controls_x + button_size,
@@ -1205,6 +1275,7 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   }
   
   m_needs_full_repaint = false;
+  m_spectrum_bg_cache_valid = false;
 
   update_layout(rect);
 
@@ -1233,7 +1304,7 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   int paint_vis_mode = get_nowbar_visualization_mode();
   if (paint_vis_mode == 1) {
     // Mode 1: spectrum behind buttons, then buttons, then thin progress bar + time
-    draw_full_spectrum(g);
+    draw_full_spectrum_gdiplus(g);
     draw_playback_buttons(g);
     draw_thin_progress_bar(g);
     draw_time_display_top_right(g);
@@ -1308,53 +1379,148 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
       }
       m_animation_requested = false;
     }
+  } else if (m_animation_timer_active) {
+    // Spectrum uses the animation timer even when smooth animations is disabled.
+    // Kill the timer when spectrum is no longer animating to prevent orphaned timers
+    // (e.g., after switching from spectrum to waveform mode).
+    if (!m_spectrum_animating) {
+      KillTimer(m_hwnd, ANIMATION_TIMER_ID);
+      m_animation_timer_active = false;
+      m_animation_requested = false;
+    }
   }
 }
 
 void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   update_layout(panel_rect);
 
-  Gdiplus::Graphics g(hdc);
-  g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
-  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
-  g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+  // Cache rect = union of spectrum + progress bar + time display
+  RECT cache_rect;
+  UnionRect(&cache_rect, &m_rect_spectrum_full, &m_rect_thin_progress);
+  RECT cache_union;
+  UnionRect(&cache_union, &cache_rect, &m_rect_time);
+  cache_rect = cache_union;
+  int cache_w = cache_rect.right - cache_rect.left;
+  int cache_h = cache_rect.bottom - cache_rect.top;
 
-  // Clip to the union of spectrum area + thin progress bar + time display
-  // so we skip artwork, track info, and volume but still update playback-related elements
-  // Note: progress bar hover expansion (2x height) triggers a full repaint via
-  // is_spectrum_animating_only() returning false, so no expansion needed here
-  Gdiplus::Region clip;
-  clip.MakeEmpty();
-  clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
-      m_rect_spectrum_full.right - m_rect_spectrum_full.left,
-      m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
-  clip.Union(Gdiplus::Rect(m_rect_thin_progress.left, m_rect_thin_progress.top,
-      m_rect_thin_progress.right - m_rect_thin_progress.left,
-      m_rect_thin_progress.bottom - m_rect_thin_progress.top));
-  clip.Union(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
-      m_rect_time.right - m_rect_time.left,
-      m_rect_time.bottom - m_rect_time.top));
-  g.SetClip(&clip);
+  // First, restore the cached background (without spectrum or buttons)
+  if (m_spectrum_bg_cache_valid && m_spectrum_bg_hdc) {
+    // Fast path: raw GDI BitBlt from cached background
+    BitBlt(hdc, cache_rect.left, cache_rect.top, cache_w, cache_h,
+           m_spectrum_bg_hdc, 0, 0, SRCCOPY);
+  } else if (cache_w > 0 && cache_h > 0) {
+    // Slow path: draw background via GDI+, then capture into GDI cache
+    // Note: we do NOT draw buttons here - they will be drawn after the spectrum
+    Gdiplus::Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+    g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
 
-  // Redraw background within the clipped areas
-  draw_background(g, panel_rect);
+    Gdiplus::Region clip;
+    clip.MakeEmpty();
+    clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
+        m_rect_spectrum_full.right - m_rect_spectrum_full.left,
+        m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
+    clip.Union(Gdiplus::Rect(m_rect_thin_progress.left, m_rect_thin_progress.top,
+        m_rect_thin_progress.right - m_rect_thin_progress.left,
+        m_rect_thin_progress.bottom - m_rect_thin_progress.top));
+    clip.Union(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
+        m_rect_time.right - m_rect_time.left,
+        m_rect_time.bottom - m_rect_time.top));
+    g.SetClip(&clip);
 
-  g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-  g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
-  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-  g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    draw_background(g, panel_rect);
+    g.ResetClip();
 
-  draw_full_spectrum(g);
-  draw_playback_buttons(g);
-  draw_thin_progress_bar(g);
-  draw_time_display_top_right(g);
+    // Ensure GDI+ flushes to the HDC before we capture
+    g.Flush();
 
-  g.ResetClip();
-
-  // Continue the animation loop
-  if (get_nowbar_smooth_animations_enabled() && m_spectrum_animating) {
-    request_animation(&m_rect_spectrum_full);
+    // Create or resize the GDI cache DC
+    if (m_spectrum_bg_cache_cx != cache_w || m_spectrum_bg_cache_cy != cache_h) {
+      destroy_spectrum_bg_cache();
+      m_spectrum_bg_hdc = CreateCompatibleDC(hdc);
+      m_spectrum_bg_hbitmap = CreateCompatibleBitmap(hdc, cache_w, cache_h);
+      m_spectrum_bg_old = (HBITMAP)SelectObject(m_spectrum_bg_hdc, m_spectrum_bg_hbitmap);
+      m_spectrum_bg_cache_cx = cache_w;
+      m_spectrum_bg_cache_cy = cache_h;
+    }
+    BitBlt(m_spectrum_bg_hdc, 0, 0, cache_w, cache_h,
+           hdc, cache_rect.left, cache_rect.top, SRCCOPY);
+    m_spectrum_bg_cache_valid = true;
   }
+
+  // Spectrum bars rendered via direct pixel writes (no per-bar GDI+ calls)
+  // This is drawn BEFORE buttons so spectrum appears behind them
+  draw_full_spectrum(hdc);
+
+  // Now draw buttons ON TOP of the spectrum
+  {
+    Gdiplus::Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+    g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+    g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    
+    // Clip to the spectrum area to only redraw buttons that overlap
+    Gdiplus::Region clip;
+    clip.MakeEmpty();
+    clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
+        m_rect_spectrum_full.right - m_rect_spectrum_full.left,
+        m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
+    g.SetClip(&clip);
+    
+    draw_playback_buttons(g);
+    g.ResetClip();
+  }
+
+  // Progress bar and time display still use GDI+ (lightweight, few calls)
+  Gdiplus::Graphics g2(hdc);
+  g2.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+  g2.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+  g2.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+  draw_thin_progress_bar(g2);
+  draw_time_display_top_right(g2);
+}
+
+void ControlPanelCore::paint_waveform_only(HDC hdc, const RECT& panel_rect) {
+    update_layout(panel_rect);
+
+    Gdiplus::Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+    g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+
+    // Clip to waveform + time display regions only
+    Gdiplus::Region clip;
+    clip.MakeEmpty();
+    clip.Union(Gdiplus::Rect(m_rect_waveform.left, m_rect_waveform.top,
+        m_rect_waveform.right - m_rect_waveform.left,
+        m_rect_waveform.bottom - m_rect_waveform.top));
+    clip.Union(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
+        m_rect_time.right - m_rect_time.left,
+        m_rect_time.bottom - m_rect_time.top));
+    g.SetClip(&clip);
+
+    // Redraw background within clipped areas
+    draw_background(g, panel_rect);
+
+    g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+    g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+    g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+
+    draw_waveform_bar(g);
+    draw_playback_buttons(g);
+    draw_waveform_tooltip(g);
+    draw_time_display(g);
+
+    // Kill orphaned animation timer — waveform mode doesn't use continuous animation,
+    // but a timer may still be running from a previous spectrum mode session.
+    if (m_animation_timer_active) {
+        KillTimer(m_hwnd, ANIMATION_TIMER_ID);
+        m_animation_timer_active = false;
+        m_animation_requested = false;
+    }
 }
 
 float ControlPanelCore::get_hover_opacity(HitRegion region) {
@@ -1886,6 +2052,35 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     draw_stop_icon(g, stopRect, icon_secondary_color, false);
   }
 
+  // Stop After Current button (optional - toggle with accent color when active)
+  if (get_nowbar_stop_after_current_icon_visible()) {
+    bool sac_hovered = (m_hover_region == HitRegion::StopAfterCurrentButton);
+    int sac_w = m_rect_stop_after_current.right - m_rect_stop_after_current.left;
+    int sac_h = m_rect_stop_after_current.bottom - m_rect_stop_after_current.top;
+
+    // Calculate enlarged rect when hovered
+    float sac_scale = sac_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+    int sac_inset = static_cast<int>(sac_w * (1.0f - sac_scale) / 2.0f);
+    RECT sacRect = {
+        m_rect_stop_after_current.left + sac_inset, m_rect_stop_after_current.top + sac_inset,
+        m_rect_stop_after_current.right - sac_inset, m_rect_stop_after_current.bottom - sac_inset};
+    int sac_rect_w = sacRect.right - sacRect.left;
+    int sac_rect_h = sacRect.bottom - sacRect.top;
+
+    // Draw hover circle effect if hovered
+    float sac_opacity = get_hover_opacity(HitRegion::StopAfterCurrentButton);
+    if (sac_opacity > 0.01f && show_hover) {
+      BYTE alpha = static_cast<BYTE>(sac_opacity * icon_hover_color.GetA());
+      Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
+      Gdiplus::SolidBrush hoverBrush(hoverColor);
+      g.FillEllipse(&hoverBrush, sacRect.left, sacRect.top, sac_rect_w, sac_rect_h);
+    }
+
+    // Accent color when active, secondary when inactive
+    Gdiplus::Color sacColor = m_stop_after_current_active ? icon_accent_color : icon_secondary_color;
+    draw_stop_after_current_icon(g, sacRect, sacColor);
+  }
+
   // Repeat button
   bool repeat_active =
       (m_state.playback_order == 1 || m_state.playback_order == 2);
@@ -2002,6 +2197,22 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     // Calculate alpha from opacity
     BYTE alpha = static_cast<BYTE>(m_cbutton_opacity * 255.0f);
     
+    // Determine icon color based on command state (for fb2k actions)
+    Gdiplus::Color baseIconColor = icon_secondary_color;
+    bool is_fb2k_action = (get_nowbar_cbutton_action(index) == 3);
+    if (is_fb2k_action) {
+      const auto& state = m_cbutton_states[index];
+      if (state.disabled) {
+        // Dimmed appearance for disabled commands (30% opacity)
+        baseIconColor = Gdiplus::Color(80, icon_secondary_color.GetR(), 
+                                            icon_secondary_color.GetG(), 
+                                            icon_secondary_color.GetB());
+      } else if (state.checked) {
+        // Accent color for active toggle commands
+        baseIconColor = icon_accent_color;
+      }
+    }
+    
     if (hovered && show_hover && m_cbutton_opacity > 0.5f) {
       // Use get_hover_opacity for consistent animated hover effect like other buttons
       float hover_opacity = get_hover_opacity(region);
@@ -2021,16 +2232,35 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     
     // Check if custom icon is available for this button
     if (m_cbutton_icons[index] && m_cbutton_icons[index]->GetLastStatus() == Gdiplus::Ok) {
-      // Draw custom icon with opacity
+      // Draw custom icon with opacity and state-based tinting
       int icon_w = iconRect.right - iconRect.left;
       int icon_h = iconRect.bottom - iconRect.top;
       
-      // Create color matrix for alpha blending
+      // For fb2k actions with checked state, apply a color tint to the icon
+      // We'll use a color matrix to tint the image towards the accent color
+      float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
+      float iconAlpha = m_cbutton_opacity;
+      
+      if (is_fb2k_action) {
+        const auto& state = m_cbutton_states[index];
+        if (state.disabled) {
+          // Reduce brightness for disabled state
+          tintR = tintG = tintB = 0.4f;
+          iconAlpha *= 0.5f;
+        } else if (state.checked) {
+          // Tint towards accent color for checked state
+          tintR = icon_accent_color.GetR() / 255.0f;
+          tintG = icon_accent_color.GetG() / 255.0f;
+          tintB = icon_accent_color.GetB() / 255.0f;
+        }
+      }
+      
+      // Create color matrix for alpha blending and optional tinting
       Gdiplus::ColorMatrix cm = {
-        1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, m_cbutton_opacity, 0.0f,
+        tintR, 0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, tintG, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, tintB, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, iconAlpha, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f, 1.0f
       };
       Gdiplus::ImageAttributes ia;
@@ -2047,8 +2277,8 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       
       g.SetInterpolationMode(oldMode);  // Restore original mode
     } else {
-      // Fallback to default numbered square icon with opacity
-      Gdiplus::Color iconColor(alpha, icon_secondary_color.GetR(), icon_secondary_color.GetG(), icon_secondary_color.GetB());
+      // Fallback to default numbered square icon with state-based color
+      Gdiplus::Color iconColor(alpha, baseIconColor.GetR(), baseIconColor.GetG(), baseIconColor.GetB());
       draw_numbered_square_icon(g, iconRect, iconColor, index + 1);  // 1-based number
     }
   };
@@ -2581,10 +2811,12 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
   }
 }
 
-void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
+// High-performance spectrum renderer using direct pixel writes + AlphaBlend.
+// Eliminates all per-bar GDI+ calls (the main CPU bottleneck).
+void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   if (m_rect_spectrum_full.right <= m_rect_spectrum_full.left) return;
 
-  // Process fade animation (same as draw_spectrum)
+  // Process fade animation
   if (m_spectrum_fade_active) {
     auto now = std::chrono::steady_clock::now();
     float elapsed = std::chrono::duration<float, std::milli>(now - m_spectrum_fade_start_time).count();
@@ -2605,7 +2837,6 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
 
   if (m_spectrum_opacity <= 0.001f) return;
 
-  // Update spectrum data from vis stream
   update_spectrum_data();
 
   if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
@@ -2615,8 +2846,154 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
 
   int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
   int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
+  if (area_w <= 0 || area_h <= 0) return;
 
-  // Derive bar count from spectrum width setting (0=Thin->60, 1=Normal->40, 2=Wide->25)
+  // Ensure overlay DIBSECTION exists at the right size
+  ensure_spectrum_overlay(hdc, area_w, area_h);
+  if (!m_spectrum_overlay_bits) return;
+
+  // Clear overlay to fully transparent
+  memset(m_spectrum_overlay_bits, 0, area_w * area_h * 4);
+
+  int spec_width = get_nowbar_spectrum_width();
+  int bar_count = (spec_width == 0) ? 60 : (spec_width == 2) ? 25 : 40;
+  float bar_total_w = (float)area_w / bar_count;
+  float gap_f = std::max(1.0f, bar_total_w * 0.2f);
+  float bar_w_f = bar_total_w - gap_f;
+  if (bar_w_f < 1.0f) bar_w_f = 1.0f;
+  float radius_f = bar_w_f * 0.5f;
+
+  COLORREF spec_color = get_nowbar_spectrum_color();
+  int alpha = (int)(192 * m_spectrum_opacity * m_spectrum_hover_opacity);
+  if (alpha > 255) alpha = 255;
+  BYTE ar = GetRValue(spec_color);
+  BYTE ag = GetGValue(spec_color);
+  BYTE ab = GetBValue(spec_color);
+  BYTE wr = 255 - ar;
+  BYTE wg = 255 - ag;
+  BYTE wb = 255 - ab;
+
+  // Pre-multiply alpha for DIBSECTION (BGRA, premultiplied)
+  uint32_t accent_pixel = ((uint32_t)alpha << 24) |
+      ((uint32_t)((ar * alpha) / 255) << 16) |
+      ((uint32_t)((ag * alpha) / 255) << 8) |
+      ((uint32_t)((ab * alpha) / 255));
+  uint32_t water_pixel = ((uint32_t)alpha << 24) |
+      ((uint32_t)((wr * alpha) / 255) << 16) |
+      ((uint32_t)((wg * alpha) / 255) << 8) |
+      ((uint32_t)((wb * alpha) / 255));
+
+  int spec_shape = get_nowbar_spectrum_shape();
+  int stride = area_w;  // pixels per row (DIBSECTION is tightly packed)
+
+  for (int i = 0; i < bar_count; i++) {
+    float src_idx = (float)i / bar_count * SPECTRUM_BAR_COUNT;
+    int lo = (int)src_idx;
+    int hi = lo + 1;
+    if (lo >= SPECTRUM_BAR_COUNT) lo = SPECTRUM_BAR_COUNT - 1;
+    if (hi >= SPECTRUM_BAR_COUNT) hi = SPECTRUM_BAR_COUNT - 1;
+    float frac = src_idx - lo;
+    float value = m_spectrum_bars[lo] * (1.0f - frac) + m_spectrum_bars[hi] * frac;
+
+    int bar_h = (int)(value * area_h);
+    if (bar_h < 1) continue;
+
+    int bx = (int)(i * bar_total_w + gap_f * 0.5f);
+    int bw = (int)bar_w_f;
+    if (bx + bw > area_w) bw = area_w - bx;
+    if (bw < 1) continue;
+    int by = area_h - bar_h;
+
+    // Water portion height
+    float water_frac = value * 0.5f;
+    if (water_frac > 0.5f) water_frac = 0.5f;
+    int water_h = (int)(bar_h * water_frac);
+    int accent_h = bar_h - water_h;
+    int water_top = area_h - water_h;
+    int radius = (int)radius_f;
+
+    // Fill accent portion
+    int accent_start = by;
+    int accent_end = by + accent_h;
+    for (int row = accent_start; row < accent_end; row++) {
+      if (row < 0 || row >= area_h) continue;
+      int left = bx;
+      int right = bx + bw;
+
+      // Pill shape: narrow the top rows to form a rounded cap
+      if (spec_shape == 0 && radius > 0 && row < by + radius) {
+        float dy = (float)(by + radius) - (float)row - 0.5f;
+        if (dy > radius_f) continue;
+        float dx = sqrtf(radius_f * radius_f - dy * dy);
+        int center = bx + bw / 2;
+        int pl = center - (int)dx;
+        int pr = center + (int)dx;
+        if (pl < bx) pl = bx;
+        if (pr > bx + bw) pr = bx + bw;
+        left = pl;
+        right = pr;
+      }
+
+      uint32_t* pixel = m_spectrum_overlay_bits + row * stride + left;
+      for (int col = left; col < right; col++) {
+        *pixel++ = accent_pixel;
+      }
+    }
+
+    // Fill water portion
+    if (water_h >= 1) {
+      for (int row = water_top; row < area_h; row++) {
+        if (row < 0) continue;
+        uint32_t* pixel = m_spectrum_overlay_bits + row * stride + bx;
+        for (int col = 0; col < bw; col++) {
+          *pixel++ = water_pixel;
+        }
+      }
+    }
+  }
+
+  // Single AlphaBlend call composites the entire spectrum overlay onto the paint surface
+  BLENDFUNCTION bf;
+  bf.BlendOp = AC_SRC_OVER;
+  bf.BlendFlags = 0;
+  bf.SourceConstantAlpha = 255;
+  bf.AlphaFormat = AC_SRC_ALPHA;
+  AlphaBlend(hdc, m_rect_spectrum_full.left, m_rect_spectrum_full.top, area_w, area_h,
+             m_spectrum_overlay_hdc, 0, 0, area_w, area_h, bf);
+}
+
+// GDI+ version used by paint() for full repaints (not performance-critical)
+void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
+  if (m_rect_spectrum_full.right <= m_rect_spectrum_full.left) return;
+
+  if (m_spectrum_fade_active) {
+    auto now = std::chrono::steady_clock::now();
+    float elapsed = std::chrono::duration<float, std::milli>(now - m_spectrum_fade_start_time).count();
+    float t = elapsed / SPECTRUM_FADE_DURATION_MS;
+    if (t >= 1.0f) {
+      t = 1.0f;
+      m_spectrum_fade_active = false;
+      m_spectrum_opacity = m_spectrum_target_opacity;
+      if (m_spectrum_target_opacity == 0.0f) {
+        release_vis_stream();
+        m_spectrum_animating = false;
+      }
+    } else {
+      float ease = 1.0f - (1.0f - t) * (1.0f - t);
+      m_spectrum_opacity = m_spectrum_start_opacity + (m_spectrum_target_opacity - m_spectrum_start_opacity) * ease;
+    }
+  }
+
+  if (m_spectrum_opacity <= 0.001f) return;
+  update_spectrum_data();
+
+  if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
+    m_spectrum_animating = true;
+    request_animation(&m_rect_spectrum_full);
+  }
+
+  int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
+  int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
   int spec_width = get_nowbar_spectrum_width();
   int bar_count = (spec_width == 0) ? 60 : (spec_width == 2) ? 25 : 40;
   float bar_total_w = (float)area_w / bar_count;
@@ -2625,31 +3002,23 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
   if (bar_w < 1.0f) bar_w = 1.0f;
   float radius = bar_w * 0.5f;
 
-  // Determine colors - always use user's spectrum color setting
   COLORREF spec_color = get_nowbar_spectrum_color();
-  Gdiplus::Color accent(255, GetRValue(spec_color), GetGValue(spec_color), GetBValue(spec_color));
-  // Modulate by spectrum opacity AND hover opacity
   int alpha = (int)(192 * m_spectrum_opacity * m_spectrum_hover_opacity);
-  int alpha_top = (int)(alpha * 0.70f);  // Slight dim at top
-  int alpha_bot = alpha;
-
-  // Water color is the RGB inversion of the main spectrum color
-  BYTE water_r = 255 - GetRValue(spec_color);
-  BYTE water_g = 255 - GetGValue(spec_color);
-  BYTE water_b = 255 - GetBValue(spec_color);
-
-  // Get shape setting (0=Pill, 1=Rectangle)
+  BYTE accent_r = GetRValue(spec_color), accent_g = GetGValue(spec_color), accent_b = GetBValue(spec_color);
+  BYTE water_r = 255 - accent_r, water_g = 255 - accent_g, water_b = 255 - accent_b;
   int spec_shape = get_nowbar_spectrum_shape();
 
-  // Disable anti-aliasing so bar edges don't bleed into the 1px gaps
   Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
   Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
   g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
   g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
 
-  // Map the SPECTRUM_BAR_COUNT (20) source bars to bar_count display bars via interpolation
+  Gdiplus::SolidBrush accentBrush(Gdiplus::Color(alpha, accent_r, accent_g, accent_b));
+  Gdiplus::SolidBrush waterBrush(Gdiplus::Color(alpha, water_r, water_g, water_b));
+  Gdiplus::GraphicsPath path;
+  float bottom_f = (float)m_rect_spectrum_full.bottom;
+
   for (int i = 0; i < bar_count; i++) {
-    // Map display bar index to source bar index
     float src_idx = (float)i / bar_count * SPECTRUM_BAR_COUNT;
     int lo = (int)src_idx;
     int hi = lo + 1;
@@ -2659,53 +3028,50 @@ void ControlPanelCore::draw_full_spectrum(Gdiplus::Graphics& g) {
     float value = m_spectrum_bars[lo] * (1.0f - frac) + m_spectrum_bars[hi] * frac;
 
     float height = value * (float)area_h;
-    if (height < 1.0f) continue;  // Skip bars with no visible energy
+    if (height < 1.0f) continue;
 
     float x = m_rect_spectrum_full.left + i * bar_total_w + gap * 0.5f;
-    float y = m_rect_spectrum_full.bottom - height;
-
-    // "Water rising" effect: blue portion rises with bar energy
-    // Higher energy = blue extends further up the bar (water level rises)
-    // The blend position determines where blue starts (1.0 = bottom only, 0.5 = halfway up)
-    float water_level = 1.0f - value * 0.5f;  // value 0->1 maps to blend pos 1.0->0.5
-    if (water_level < 0.5f) water_level = 0.5f;
-
-    // Create per-bar gradient brush with energy-based water level
-    Gdiplus::LinearGradientBrush barBrush(
-        Gdiplus::PointF(0, (float)m_rect_spectrum_full.top),
-        Gdiplus::PointF(0, (float)m_rect_spectrum_full.bottom),
-        Gdiplus::Color(alpha_top, accent.GetR(), accent.GetG(), accent.GetB()),
-        Gdiplus::Color(alpha_bot, water_r, water_g, water_b));
-
-    Gdiplus::Color blendColors[3] = {
-        Gdiplus::Color(alpha_top, accent.GetR(), accent.GetG(), accent.GetB()),
-        Gdiplus::Color(alpha, accent.GetR(), accent.GetG(), accent.GetB()),
-        Gdiplus::Color(alpha_bot, water_r, water_g, water_b)
-    };
-    float blendPositions[3] = { 0.0f, water_level, 1.0f };
-    barBrush.SetInterpolationColors(blendColors, blendPositions, 3);
+    float y = bottom_f - height;
+    float water_frac = value * 0.5f;
+    if (water_frac > 0.5f) water_frac = 0.5f;
+    float water_h = height * water_frac;
+    float accent_h = height - water_h;
+    float water_y = bottom_f - water_h;
 
     if (spec_shape == 0) {
-      // Pill-shaped bars
-      Gdiplus::GraphicsPath path;
-      if (height > radius * 2.0f) {
+      path.Reset();
+      if (accent_h > radius * 2.0f) {
         path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-        path.AddLine(x + bar_w, y + radius, x + bar_w, (float)m_rect_spectrum_full.bottom);
-        path.AddLine(x + bar_w, (float)m_rect_spectrum_full.bottom, x, (float)m_rect_spectrum_full.bottom);
-        path.AddLine(x, (float)m_rect_spectrum_full.bottom, x, y + radius);
+        path.AddLine(x + bar_w, y + radius, x + bar_w, water_y);
+        path.AddLine(x + bar_w, water_y, x, water_y);
+        path.AddLine(x, water_y, x, y + radius);
       } else {
-        path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        path.AddRectangle(Gdiplus::RectF(x, y, bar_w, accent_h));
       }
       path.CloseFigure();
-      g.FillPath(&barBrush, &path);
+      g.FillPath(&accentBrush, &path);
+      if (water_h >= 1.0f)
+        g.FillRectangle(&waterBrush, x, water_y, bar_w, water_h);
     } else {
-      // Rectangle bars
-      g.FillRectangle(&barBrush, x, y, bar_w, height);
+      if (accent_h >= 1.0f)
+        g.FillRectangle(&accentBrush, x, y, bar_w, accent_h);
+      if (water_h >= 1.0f)
+        g.FillRectangle(&waterBrush, x, water_y, bar_w, water_h);
     }
   }
 
   g.SetSmoothingMode(oldSmoothing);
   g.SetPixelOffsetMode(oldPixelOffset);
+}
+
+void ControlPanelCore::update_waveform_brushes() {
+    COLORREF wave_color = get_nowbar_waveform_color();
+    COLORREF unplayed_color = get_nowbar_waveform_unplayed_color();
+    m_waveform_brush_accent = std::make_unique<Gdiplus::SolidBrush>(
+        Gdiplus::Color(255, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color)));
+    m_waveform_brush_dim = std::make_unique<Gdiplus::SolidBrush>(
+        Gdiplus::Color(255, GetRValue(unplayed_color), GetGValue(unplayed_color), GetBValue(unplayed_color)));
+    m_waveform_brushes_dirty = false;
 }
 
 void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
@@ -2726,11 +3092,13 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
   }
   progress = std::max(0.0, std::min(1.0, progress));
 
-  // Get colors - use waveform color setting for played segments
+  // Ensure cached brushes are up to date
+  if (m_waveform_brushes_dirty || !m_waveform_brush_accent || !m_waveform_brush_dim) {
+      update_waveform_brushes();
+  }
+
+  // Keep color values for placeholder rendering (not a hot path)
   COLORREF wave_color = get_nowbar_waveform_color();
-  Gdiplus::Color accentColor(255, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color));
-  COLORREF unplayed_color = get_nowbar_waveform_unplayed_color();
-  Gdiplus::Color dimColor(255, GetRValue(unplayed_color), GetGValue(unplayed_color), GetBValue(unplayed_color));
 
   // Lock and read waveform data
   std::vector<float> peaks;
@@ -2809,8 +3177,8 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
       float seg_progress = (float)(i + 0.5f) / display_count;
       bool played = (seg_progress <= (float)progress);
 
-      Gdiplus::SolidBrush barBrush(played ? accentColor : dimColor);
-      g.FillRectangle(&barBrush, bx, by, bar_w_f, bar_h);
+      g.FillRectangle(played ? m_waveform_brush_accent.get() : m_waveform_brush_dim.get(),
+                      bx, by, bar_w_f, bar_h);
     }
     m_waveform_animating = false;
   }
@@ -2867,28 +3235,44 @@ void ControlPanelCore::draw_waveform_tooltip(Gdiplus::Graphics& g) {
 void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
   if (m_rect_time.right <= m_rect_time.left) return;
 
-  // Determine colors
-  int bg_style = get_nowbar_background_style();
-  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
-                              (bg_style == 2 && m_blurred_artwork);
-  Gdiplus::Color time_color = use_light_foreground
-      ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-  Gdiplus::SolidBrush timeBrush(time_color);
-
-  // Format: "0:00 / 0:00"
+  // Format: "0:00 / 0:00" — only re-render when the display string changes
   std::wstring elapsed = format_time(m_state.playback_time);
   std::wstring total = format_time(m_state.track_length);
   std::wstring display = elapsed + L" / " + total;
 
-  Gdiplus::StringFormat sf;
-  sf.SetAlignment(Gdiplus::StringAlignmentFar);  // Right-aligned
-  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  int time_w = m_rect_time.right - m_rect_time.left;
+  int time_h = m_rect_time.bottom - m_rect_time.top;
 
-  Gdiplus::RectF timeRect(
-      (float)m_rect_time.left, (float)m_rect_time.top,
-      (float)(m_rect_time.right - m_rect_time.left),
-      (float)(m_rect_time.bottom - m_rect_time.top));
-  g.DrawString(display.c_str(), -1, m_font_time.get(), timeRect, &sf, &timeBrush);
+  if (display != m_time_display_cache_str || !m_time_display_cache ||
+      m_time_display_cache_w != time_w || m_time_display_cache_h != time_h) {
+    // Re-render time text into a small cached bitmap
+    m_time_display_cache = std::make_unique<Gdiplus::Bitmap>(time_w, time_h, PixelFormat32bppPARGB);
+    Gdiplus::Graphics tg(m_time_display_cache.get());
+    tg.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+
+    int bg_style = get_nowbar_background_style();
+    bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
+                                (bg_style == 2 && m_blurred_artwork);
+    Gdiplus::Color time_color = use_light_foreground
+        ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+    Gdiplus::SolidBrush timeBrush(time_color);
+
+    Gdiplus::StringFormat sf;
+    sf.SetAlignment(Gdiplus::StringAlignmentFar);
+    sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+
+    Gdiplus::RectF timeRect(0.0f, 0.0f, (float)time_w, (float)time_h);
+    tg.DrawString(display.c_str(), -1, m_font_time.get(), timeRect, &sf, &timeBrush);
+
+    m_time_display_cache_str = display;
+    m_time_display_cache_w = time_w;
+    m_time_display_cache_h = time_h;
+  }
+
+  // Blit cached time text
+  g.DrawImage(m_time_display_cache.get(),
+              Gdiplus::Rect(m_rect_time.left, m_rect_time.top, time_w, time_h),
+              0, 0, time_w, time_h, Gdiplus::UnitPixel);
 }
 
 void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
@@ -2980,6 +3364,8 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
     return HitRegion::PlayButton;
   if (get_nowbar_stop_icon_visible() && pt_in_rect(m_rect_stop, x, y))
     return HitRegion::StopButton;
+  if (get_nowbar_stop_after_current_icon_visible() && pt_in_rect(m_rect_stop_after_current, x, y))
+    return HitRegion::StopAfterCurrentButton;
   if (pt_in_rect(m_rect_prev, x, y))
     return HitRegion::PrevButton;
   if (pt_in_rect(m_rect_next, x, y))
@@ -3259,6 +3645,9 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
       break;
     case HitRegion::StopButton:
       do_stop();
+      break;
+    case HitRegion::StopAfterCurrentButton:
+      do_stop_after_current();
       break;
     case HitRegion::PrevButton:
       do_prev();
@@ -3858,6 +4247,12 @@ void ControlPanelCore::do_next() { playback_control::get()->next(); }
 
 void ControlPanelCore::do_stop() { playback_control::get()->stop(); }
 
+void ControlPanelCore::do_stop_after_current() {
+  auto pc = playback_control::get();
+  pc->set_stop_after_current(!pc->get_stop_after_current());
+  m_stop_after_current_active = pc->get_stop_after_current();
+  invalidate();
+}
 
 void ControlPanelCore::do_shuffle_toggle() {
   auto pm = playlist_manager::get();
@@ -4071,6 +4466,9 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
 
     // Reset mood state
     m_mood_active = false;
+
+    // Reset stop-after-current state (SDK clears it when playback stops)
+    m_stop_after_current_active = false;
   }
 
   // Reapply theme when transitioning between stopped and playing/paused
@@ -4137,7 +4535,7 @@ void ControlPanelCore::on_playback_time_changed(double time) {
     
     // Always use direct invalidate for playback time updates
     // Progress bar does not use smooth animation for performance reasons
-    invalidate();
+    invalidate_progress();
   }
 }
 
@@ -4153,6 +4551,11 @@ void ControlPanelCore::on_track_changed() {
 
   // Update mood state for new track
   update_mood_state();
+
+  // Update stop-after-current state (may have been toggled externally)
+  if (get_nowbar_stop_after_current_icon_visible()) {
+    m_stop_after_current_active = playback_control::get()->get_stop_after_current();
+  }
 
   // Re-evaluate title formats for new track
   evaluate_title_formats();
@@ -4286,6 +4689,31 @@ void ControlPanelCore::invalidate_rect(const RECT& rect) {
   }
 }
 
+void ControlPanelCore::invalidate_progress() {
+    // Partial invalidation for progress updates only.
+    // Does NOT set m_needs_full_repaint, allowing fast paths in UI wrappers.
+    if (!m_hwnd) return;
+
+    int vis_mode = get_nowbar_visualization_mode();
+    RECT dirty = {};
+
+    if (vis_mode == 1) {
+        // Spectrum mode: spectrum area + thin progress bar + time display
+        UnionRect(&dirty, &m_rect_spectrum_full, &m_rect_thin_progress);
+        RECT combined;
+        UnionRect(&combined, &dirty, &m_rect_time);
+        dirty = combined;
+    } else if (vis_mode == 2) {
+        // Waveform mode: waveform area + time display
+        UnionRect(&dirty, &m_rect_waveform, &m_rect_time);
+    } else {
+        // Normal seekbar mode: seekbar + time display
+        UnionRect(&dirty, &m_rect_seekbar, &m_rect_time);
+    }
+
+    InvalidateRect(m_hwnd, &dirty, FALSE);
+}
+
 void ControlPanelCore::request_animation(const RECT* dirty) {
   // Throttled animation request - schedules frames at ~60 FPS
   // Uses SetTimer to ensure the animation loop continues even without mouse events
@@ -4304,10 +4732,17 @@ void ControlPanelCore::request_animation(const RECT* dirty) {
     m_animation_dirty_partial = false;
   }
 
+  // Use 30 FPS when only spectrum is animating (no other animations active)
+  bool spectrum_only = m_spectrum_animating && !m_seekbar_animating &&
+                       !m_hover_animating && !m_cbutton_animating &&
+                       !m_bg_animating && !m_waveform_animating;
+  float target_interval = spectrum_only ? SPECTRUM_FRAME_INTERVAL_MS : TARGET_FRAME_INTERVAL_MS;
+  UINT max_delay = spectrum_only ? 34 : 17;
+
   auto now = std::chrono::steady_clock::now();
   float elapsed_ms = std::chrono::duration<float, std::milli>(now - m_last_invalidate_time).count();
 
-  if (elapsed_ms >= TARGET_FRAME_INTERVAL_MS) {
+  if (elapsed_ms >= target_interval) {
     // Enough time has passed, perform actual invalidation
     m_last_invalidate_time = now;
     m_animation_requested = false;
@@ -4323,10 +4758,9 @@ void ControlPanelCore::request_animation(const RECT* dirty) {
     m_animation_dirty_partial = false;
   } else if (!m_animation_timer_active) {
     // Not enough time has passed - schedule a timer to fire when it's time
-    // Calculate how long until we should paint again
-    UINT delay_ms = static_cast<UINT>(TARGET_FRAME_INTERVAL_MS - elapsed_ms + 1);
+    UINT delay_ms = static_cast<UINT>(target_interval - elapsed_ms + 1);
     if (delay_ms < 1) delay_ms = 1;
-    if (delay_ms > 17) delay_ms = 17;  // Cap at ~60 FPS
+    if (delay_ms > max_delay) delay_ms = max_delay;
 
     SetTimer(m_hwnd, ANIMATION_TIMER_ID, delay_ms, nullptr);
     m_animation_timer_active = true;
@@ -5258,6 +5692,35 @@ void ControlPanelCore::draw_stop_icon(Gdiplus::Graphics &g, const RECT &rect,
   }
 }
 
+// Draw "Stop after current" icon from circle_24dp.svg
+// SVG viewBox: 0 -960 960 960
+// Circle outline: outer from (80,80) to (880,880), inner cutout creates ring
+void ControlPanelCore::draw_stop_after_current_icon(Gdiplus::Graphics &g, const RECT &rect,
+                                                     const Gdiplus::Color &color) {
+  float w = static_cast<float>(rect.right - rect.left);
+  float h = static_cast<float>(rect.bottom - rect.top);
+  float x = static_cast<float>(rect.left);
+  float y = static_cast<float>(rect.top);
+
+  g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+
+  // Circle outline - SVG outer edge at 80/960 inset, ~80px border in 960 space
+  // Pen stroke is centered on the path, so inset to the midpoint of the ring
+  float outer_inset = w * 0.0833f;   // 80/960
+  float stroke_width = w * 0.0833f;  // ~80px border in 960 space
+  float mid_inset = outer_inset + stroke_width / 2.0f;
+  float ellipse_size = w - mid_inset * 2.0f;
+
+  Gdiplus::Pen pen(color, stroke_width);
+  g.DrawEllipse(&pen, x + mid_inset, y + mid_inset, ellipse_size, ellipse_size);
+
+  // Center filled stop square
+  float sq_inset = w * 0.375f;
+  float sq_size = w * 0.25f;  // 0.625 - 0.375
+  Gdiplus::SolidBrush brush(color);
+  g.FillRectangle(&brush, x + sq_inset, y + sq_inset, sq_size, sq_size);
+}
+
 // Draw radio icon from Material Design SVG for internet radio streams
 // SVG path: M160-80q-33 0-56.5-23.5T80-160v-480q0-25 13.5-45t36.5-29l506-206 26 66-330 134h468q33 0 56.5 23.5T880-640v480q0 33-23.5 56.5T800-80H160Z
 // Plus sub-shapes for display panel, dial circle, etc.
@@ -5855,6 +6318,58 @@ bool ControlPanelCore::lookup_waveform_cache(const char* path, std::vector<float
     return true;
   }
   return false;
+}
+
+// Command state polling for custom buttons with fb2k actions
+void ControlPanelCore::start_command_state_timer() {
+  if (!m_hwnd || m_command_state_timer_active) return;
+  SetTimer(m_hwnd, COMMAND_STATE_TIMER_ID, COMMAND_STATE_POLL_INTERVAL_MS, nullptr);
+  m_command_state_timer_active = true;
+  
+  // Do an initial poll immediately
+  poll_custom_button_states();
+}
+
+void ControlPanelCore::stop_command_state_timer() {
+  if (!m_hwnd || !m_command_state_timer_active) return;
+  KillTimer(m_hwnd, COMMAND_STATE_TIMER_ID);
+  m_command_state_timer_active = false;
+}
+
+void ControlPanelCore::poll_custom_button_states() {
+  bool needs_repaint = false;
+  
+  for (int i = 0; i < 6; i++) {
+    // Only poll enabled buttons with fb2k action type (3)
+    if (!get_nowbar_cbutton_enabled(i)) continue;
+    if (get_nowbar_cbutton_action(i) != 3) continue;
+    
+    pfc::string8 path = get_nowbar_cbutton_path(i);
+    if (path.is_empty()) continue;
+    
+    CommandState new_state = get_fb2k_action_state_by_path(path.c_str());
+    
+    // Check if state changed
+    if (new_state.found != m_cbutton_states[i].found ||
+        new_state.checked != m_cbutton_states[i].checked ||
+        new_state.disabled != m_cbutton_states[i].disabled) {
+      m_cbutton_states[i] = new_state;
+      needs_repaint = true;
+    }
+  }
+
+  // Also poll stop-after-current state (catches external toggles via menu/hotkeys)
+  if (get_nowbar_stop_after_current_icon_visible()) {
+    bool new_sac = playback_control::get()->get_stop_after_current();
+    if (new_sac != m_stop_after_current_active) {
+      m_stop_after_current_active = new_sac;
+      needs_repaint = true;
+    }
+  }
+
+  if (needs_repaint) {
+    invalidate();
+  }
 }
 
 } // namespace nowbar
