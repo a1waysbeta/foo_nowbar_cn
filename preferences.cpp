@@ -3788,27 +3788,6 @@ void nowbar_preferences::update_font_displays() {
     }
 }
 
-// Hook procedure to filter out vertical fonts (those starting with "@")
-static UINT_PTR CALLBACK font_hook_proc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_INITDIALOG) {
-        // The font name combo box has control ID 0x470 (cmb1 in common dialog)
-        HWND hCombo = GetDlgItem(hdlg, 0x470);
-        if (hCombo) {
-            // Remove all fonts starting with "@" (vertical writing fonts)
-            int count = (int)SendMessage(hCombo, CB_GETCOUNT, 0, 0);
-            for (int i = count - 1; i >= 0; i--) {
-                wchar_t fontName[LF_FACESIZE];
-                if (SendMessageW(hCombo, CB_GETLBTEXT, i, (LPARAM)fontName) != CB_ERR) {
-                    if (fontName[0] == L'@') {
-                        SendMessage(hCombo, CB_DELETESTRING, i, 0);
-                    }
-                }
-            }
-        }
-    }
-    return 0;
-}
-
 void nowbar_preferences::select_track_font() {
     LOGFONT lf = get_nowbar_use_custom_fonts() ? get_nowbar_track_font() : get_nowbar_default_font(false);
 
@@ -3816,8 +3795,7 @@ void nowbar_preferences::select_track_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
-    cf.lpfnHook = font_hook_proc;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS;
 
     if (ChooseFont(&cf)) {
         set_nowbar_track_font(lf);
@@ -3833,8 +3811,7 @@ void nowbar_preferences::select_artist_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
-    cf.lpfnHook = font_hook_proc;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS;
 
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
@@ -3850,8 +3827,7 @@ void nowbar_preferences::select_time_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
-    cf.lpfnHook = font_hook_proc;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS;
 
     if (ChooseFont(&cf)) {
         set_nowbar_time_font(lf);
