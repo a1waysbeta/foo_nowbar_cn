@@ -1768,8 +1768,27 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
   int h = m_rect_artwork.bottom - m_rect_artwork.top;
 
   if (m_artwork_bitmap) {
-    g.DrawImage(m_artwork_bitmap.get(), m_rect_artwork.left, m_rect_artwork.top,
-                w, h);
+    int srcW = m_artwork_bitmap->GetWidth();
+    int srcH = m_artwork_bitmap->GetHeight();
+    float srcAspect = (float)srcW / (float)srcH;
+    float dstAspect = (float)w / (float)h;
+    int cropX, cropY, cropW, cropH;
+    if (srcAspect > dstAspect) {
+      // Source is wider than destination: crop sides
+      cropH = srcH;
+      cropW = (int)(srcH * dstAspect);
+      cropX = (srcW - cropW) / 2;
+      cropY = 0;
+    } else {
+      // Source is taller than destination: crop top/bottom
+      cropW = srcW;
+      cropH = (int)(srcW / dstAspect);
+      cropX = 0;
+      cropY = (srcH - cropH) / 2;
+    }
+    Gdiplus::Rect destRect(m_rect_artwork.left, m_rect_artwork.top, w, h);
+    g.DrawImage(m_artwork_bitmap.get(), destRect, cropX, cropY, cropW, cropH,
+                Gdiplus::UnitPixel);
   } else {
     // Draw placeholder - use theme-appropriate background color
     Gdiplus::Color placeholderBg = m_dark_mode
