@@ -1354,7 +1354,11 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
         m_rect_miniplayer.right - mp_inset, m_rect_miniplayer.bottom - mp_inset};
     draw_miniplayer_icon(g, miniplayerIconRect, mpColor);
   }
-  
+
+  // Draw tooltips last so they render on top of all other elements
+  draw_seekbar_tooltip(g);
+  draw_volume_tooltip(g);
+
   // Centralized animation loop: manage animation timer based on active animations
   if (get_nowbar_smooth_animations_enabled()) {
     bool any_animation_active = m_seekbar_animating || m_hover_animating ||
@@ -2443,53 +2447,69 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
     g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
   }
   
-  // Tooltip showing preview time at cursor position
-  if ((m_hover_region == HitRegion::SeekBar || m_seeking) && m_state.track_length > 0) {
-    // Format the preview time
-    std::wstring timeStr = format_time(m_seeking ? m_state.playback_time : m_preview_time);
-    
-    // Measure text size
-    Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Gdiplus::RectF textBounds;
-    g.MeasureString(timeStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
-    
-    // Tooltip dimensions with padding
-    int padding_h = static_cast<int>(6 * m_dpi_scale);
-    int padding_v = static_cast<int>(3 * m_dpi_scale);
-    int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
-    int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
-    
-    // Position: centered on cursor X, above seekbar
-    int cursor_x = m_seeking ? (m_rect_seekbar.left + progress_w) : m_seekbar_hover_x;
-    int tooltip_x = cursor_x - tooltip_w / 2;
-    int tooltip_y = m_rect_seekbar.top - tooltip_h - static_cast<int>(6 * m_dpi_scale);  // Gap above seekbar
-    
-    // Clamp to stay within seekbar bounds
-    int seekbar_left = static_cast<int>(m_rect_seekbar.left);
-    int seekbar_right = static_cast<int>(m_rect_seekbar.right);
-    tooltip_x = std::max(seekbar_left, std::min(tooltip_x, seekbar_right - tooltip_w));
-    
-    // Draw tooltip background (semi-transparent, themed)
-    Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
-    Gdiplus::SolidBrush bgBrush(bgColor);
-    int corner = static_cast<int>(4 * m_dpi_scale);
-    Gdiplus::GraphicsPath tooltipPath;
-    tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
-    tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
-    tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
-    tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
-    tooltipPath.CloseFigure();
-    g.FillPath(&bgBrush, &tooltipPath);
-    
-    // Draw tooltip text
-    Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
-    Gdiplus::StringFormat sf;
-    sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-    sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
-                            static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
-    g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
+}
+
+void ControlPanelCore::draw_seekbar_tooltip(Gdiplus::Graphics &g) {
+  if (!(m_hover_region == HitRegion::SeekBar || m_seeking) || m_state.track_length <= 0)
+    return;
+
+  // Recompute progress for cursor positioning
+  int w = m_rect_seekbar.right - m_rect_seekbar.left;
+  double progress;
+  if (m_seeking) {
+    progress = (m_state.track_length > 0)
+                   ? (m_state.playback_time / m_state.track_length)
+                   : 0.0;
+  } else {
+    progress = m_target_progress;
   }
+  progress = std::max(0.0, std::min(1.0, progress));
+  int progress_w = static_cast<int>(w * progress);
+
+  // Format the preview time
+  std::wstring timeStr = format_time(m_seeking ? m_state.playback_time : m_preview_time);
+
+  // Measure text size
+  Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::RectF textBounds;
+  g.MeasureString(timeStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
+
+  // Tooltip dimensions with padding
+  int padding_h = static_cast<int>(6 * m_dpi_scale);
+  int padding_v = static_cast<int>(3 * m_dpi_scale);
+  int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
+  int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
+
+  // Position: centered on cursor X, above seekbar
+  int cursor_x = m_seeking ? (m_rect_seekbar.left + progress_w) : m_seekbar_hover_x;
+  int tooltip_x = cursor_x - tooltip_w / 2;
+  int tooltip_y = m_rect_seekbar.top - tooltip_h - static_cast<int>(6 * m_dpi_scale);
+
+  // Clamp to stay within seekbar bounds
+  int seekbar_left = static_cast<int>(m_rect_seekbar.left);
+  int seekbar_right = static_cast<int>(m_rect_seekbar.right);
+  tooltip_x = std::max(seekbar_left, std::min(tooltip_x, seekbar_right - tooltip_w));
+
+  // Draw tooltip background (semi-transparent, themed)
+  Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
+  Gdiplus::SolidBrush bgBrush(bgColor);
+  int corner = static_cast<int>(4 * m_dpi_scale);
+  Gdiplus::GraphicsPath tooltipPath;
+  tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
+  tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
+  tooltipPath.CloseFigure();
+  g.FillPath(&bgBrush, &tooltipPath);
+
+  // Draw tooltip text
+  Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
+  Gdiplus::StringFormat sf;
+  sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
+                          static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
+  g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
 }
 
 void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
@@ -3310,10 +3330,12 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
 
   // Determine if we're using artwork-based background that needs light icons
   int bg_style = get_nowbar_background_style();
-  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) || 
+  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
                               (bg_style == 2 && m_blurred_artwork);
-  Gdiplus::Color volume_icon_color = use_light_foreground 
+  Gdiplus::Color volume_icon_color = use_light_foreground
       ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+  Gdiplus::Color vol_hover_color = use_light_foreground
+      ? Gdiplus::Color(40, 255, 255, 255) : m_button_hover_color;
 
   // Determine volume level based on bar position: 0=mute, 1=low, 2=full
   // Volume bar: -100dB=0%, 0dB=100%
@@ -3335,7 +3357,25 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
   int icon_y = m_rect_volume.top + (h - icon_size) / 2;
   int icon_gap = static_cast<int>(6 * m_dpi_scale *
                                   m_size_scale); // Extra gap to move icon left
-  draw_volume_icon(g, m_rect_volume.left - icon_gap, icon_y, icon_size,
+
+  // Hover circle on volume icon (same pattern as MiniPlayer button)
+  bool icon_hovered = (m_hover_region == HitRegion::VolumeIcon);
+  if (icon_hovered && get_nowbar_hover_circles_enabled()) {
+    Gdiplus::SolidBrush hoverBrush(vol_hover_color);
+    // Use full rect height for a proper circle, centered on icon
+    int circle_size = h;
+    int icon_center_x = m_rect_volume.left - icon_gap + icon_size / 2;
+    int icon_center_y = m_rect_volume.top + h / 2;
+    g.FillEllipse(&hoverBrush, icon_center_x - circle_size / 2,
+                  icon_center_y - circle_size / 2, circle_size, circle_size);
+  }
+
+  // Enlarge icon when hovered (same 15% pattern as other buttons)
+  float vol_icon_scale = icon_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+  int scaled_icon_size = static_cast<int>(icon_size * vol_icon_scale);
+  int icon_x = m_rect_volume.left - icon_gap + (icon_size - scaled_icon_size) / 2;
+  int scaled_icon_y = icon_y + (icon_size - scaled_icon_size) / 2;
+  draw_volume_icon(g, icon_x, scaled_icon_y, scaled_icon_size,
                    volume_icon_color, vol_level);
 
   // Volume bar - use same thickness as seekbar
@@ -3386,6 +3426,88 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
       g.FillRectangle(&levelBrush, bar_x, bar_y, level_w, bar_h);
     }
   }
+
+}
+
+void ControlPanelCore::draw_volume_tooltip(Gdiplus::Graphics &g) {
+  bool vol_bar_hovered = (m_hover_region == HitRegion::VolumeSlider) || m_volume_dragging;
+  if (!vol_bar_hovered)
+    return;
+
+  // Recompute bar geometry (same as draw_volume)
+  int w = m_rect_volume.right - m_rect_volume.left;
+  int h = m_rect_volume.bottom - m_rect_volume.top;
+  int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+  int bar_offset = icon_size + static_cast<int>(12 * m_dpi_scale * m_size_scale);
+  int bar_x = m_rect_volume.left + bar_offset;
+  int bar_w = w - bar_offset;
+  int bar_h = static_cast<int>(m_metrics.seekbar_height * m_size_scale);
+  int bar_y = m_rect_volume.top + (h - bar_h) / 2;
+
+  float bar_level = db_to_perceptual(m_state.volume_db);
+  int level_w = static_cast<int>(bar_w * bar_level);
+
+  // Calculate dB at cursor position for hover, or use current volume for drag
+  float tooltip_db;
+  int cursor_x;
+  if (m_volume_dragging) {
+    tooltip_db = m_state.volume_db;
+    cursor_x = bar_x + level_w;
+  } else {
+    cursor_x = m_volume_hover_x;
+    double pos = static_cast<double>(cursor_x - bar_x) / bar_w;
+    pos = std::max(0.0, std::min(1.0, pos));
+    tooltip_db = perceptual_to_db(static_cast<float>(pos));
+  }
+
+  // Format dB string
+  std::wstring dbStr;
+  if (tooltip_db <= -100.0f) {
+    dbStr = L"\u2212\u221E dB";  // −∞ dB
+  } else {
+    wchar_t buf[32];
+    swprintf_s(buf, L"%.1f dB", tooltip_db);
+    dbStr = buf;
+  }
+
+  // Measure text size
+  Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::RectF textBounds;
+  g.MeasureString(dbStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
+
+  // Tooltip dimensions with padding
+  int padding_h = static_cast<int>(6 * m_dpi_scale);
+  int padding_v = static_cast<int>(3 * m_dpi_scale);
+  int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
+  int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
+
+  // Position: centered on cursor X, above volume bar
+  int tooltip_x = cursor_x - tooltip_w / 2;
+  int tooltip_y = bar_y - tooltip_h - static_cast<int>(6 * m_dpi_scale);
+
+  // Clamp to stay within volume bar bounds
+  tooltip_x = std::max(bar_x, std::min(tooltip_x, bar_x + bar_w - tooltip_w));
+
+  // Draw tooltip background (semi-transparent, themed)
+  Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
+  Gdiplus::SolidBrush bgBrush(bgColor);
+  int corner = static_cast<int>(4 * m_dpi_scale);
+  Gdiplus::GraphicsPath tooltipPath;
+  tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
+  tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
+  tooltipPath.CloseFigure();
+  g.FillPath(&bgBrush, &tooltipPath);
+
+  // Draw tooltip text
+  Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
+  Gdiplus::StringFormat sf;
+  sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
+                          static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
+  g.DrawString(dbStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
 }
 
 HitRegion ControlPanelCore::hit_test(int x, int y) const {
@@ -3487,6 +3609,7 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     playback_control::get()->set_volume(db);
     // Update local state for immediate visual feedback
     m_state.volume_db = db;
+    m_volume_hover_x = x;
     invalidate();
     return;
   }
@@ -3566,7 +3689,13 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
       }
     }
   }
-  
+
+  // Track volume slider hover position for tooltip
+  if (new_region == HitRegion::VolumeSlider) {
+    m_volume_hover_x = x;
+    invalidate();
+  }
+
   // Update native tooltip for custom buttons
   if (m_tooltip_hwnd) {
     int new_tooltip_button = -1;
