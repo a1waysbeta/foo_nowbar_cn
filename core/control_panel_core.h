@@ -196,7 +196,9 @@ private:
     void draw_track_info(Gdiplus::Graphics& g);
     void draw_playback_buttons(Gdiplus::Graphics& g);
     void draw_seekbar(Gdiplus::Graphics& g);
+    void draw_seekbar_tooltip(Gdiplus::Graphics& g);
     void draw_volume(Gdiplus::Graphics& g);
+    void draw_volume_tooltip(Gdiplus::Graphics& g);
     void draw_time_display(Gdiplus::Graphics& g);
     
     // Button rendering
@@ -303,6 +305,9 @@ private:
     // Seekbar tooltip
     int m_seekbar_hover_x = 0;      // Current X position on seekbar (for tooltip)
     double m_preview_time = 0.0;    // Preview time at cursor position
+
+    // Volume bar tooltip
+    int m_volume_hover_x = 0;       // Current X position on volume bar (for tooltip)
     
 
     
