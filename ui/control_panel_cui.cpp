@@ -49,13 +49,13 @@ void ControlPanelCUI::initialize_core(HWND wnd) {
         });
         
         // Set color query callback for Custom theme mode (CUI global color scheme sync)
-        m_core->set_color_query_callback([](COLORREF& bg, COLORREF& text, COLORREF& highlight) -> bool {
+        m_core->set_color_query_callback([](COLORREF& bg, COLORREF& text, COLORREF& highlight, COLORREF& selection) -> bool {
             try {
-                // Use empty GUID to get global CUI colors
                 cui::colours::helper colour_helper;
                 bg = colour_helper.get_colour(cui::colours::colour_background);
                 text = colour_helper.get_colour(cui::colours::colour_text);
                 highlight = colour_helper.get_colour(cui::colours::colour_selection_background);
+                selection = colour_helper.get_colour(cui::colours::colour_selection_background);
                 return true;
             } catch (...) {
                 return false;
