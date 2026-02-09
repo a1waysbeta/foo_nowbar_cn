@@ -31,6 +31,7 @@ int get_nowbar_visualization_mode();  // 0=Disabled, 1=Spectrum, 2=Waveform
 COLORREF get_nowbar_spectrum_color();
 int get_nowbar_spectrum_width();     // 0=Thin, 1=Normal, 2=Wide
 int get_nowbar_spectrum_shape();     // 0=Pill, 1=Rectangle
+bool get_nowbar_vis_60fps();
 COLORREF get_nowbar_waveform_color();
 COLORREF get_nowbar_waveform_unplayed_color();
 int get_nowbar_waveform_width();     // 0=Thin, 1=Normal, 2=Wide
@@ -40,6 +41,16 @@ bool get_nowbar_smooth_animations_enabled();  // true=Enabled, false=Disabled
 COLORREF get_nowbar_button_accent_color();    // Button accent color for shuffle/repeat
 COLORREF get_nowbar_progress_accent_color();  // Progress bar fill color
 COLORREF get_nowbar_volume_accent_color();    // Volume bar fill color
+COLORREF get_nowbar_play_accent_color();      // Play/Pause button accent color
+COLORREF get_nowbar_hover_color();            // Button hover circle color
+bool get_nowbar_custom_button_accent_enabled();
+bool get_nowbar_custom_play_accent_enabled();
+bool get_nowbar_custom_progress_accent_enabled();
+bool get_nowbar_custom_volume_accent_enabled();
+bool get_nowbar_custom_hover_color_enabled();
+bool get_nowbar_custom_spectrum_color_enabled();
+bool get_nowbar_custom_waveform_color_enabled();
+bool get_nowbar_custom_waveform_unplayed_enabled();
 bool get_nowbar_online_artwork();  // true=Enabled, false=Disabled (requires foo_artwork)
 bool get_nowbar_custom_button_visible();  // true=Show, false=Hidden
 int get_nowbar_custom_button_action();  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder
