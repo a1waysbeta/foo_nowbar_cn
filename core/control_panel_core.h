@@ -171,7 +171,7 @@ public:
     void on_online_artwork_received();
     
     // Custom color scheme support (for DUI color sync)
-    using ColorQueryCallback = std::function<bool(COLORREF& bg, COLORREF& text, COLORREF& highlight)>;
+    using ColorQueryCallback = std::function<bool(COLORREF& bg, COLORREF& text, COLORREF& highlight, COLORREF& selection)>;
     void set_color_query_callback(ColorQueryCallback callback);
     void apply_custom_colors();  // Called when theme mode is "Custom"
     
@@ -462,7 +462,12 @@ private:
     Gdiplus::Color m_text_secondary_color;
     Gdiplus::Color m_accent_color;
     Gdiplus::Color m_button_hover_color;
-    
+
+    // Cached theme colors from DUI/CUI for preference fallback
+    COLORREF m_theme_highlight = RGB(0, 120, 215);  // DUI Highlight / CUI selection_bg
+    COLORREF m_theme_selection = RGB(0, 120, 215);   // DUI Selection / CUI selection_bg
+    COLORREF m_theme_text = RGB(255, 255, 255);       // DUI Text / CUI text
+
     // Artwork-extracted colors for dynamic background
     Gdiplus::Color m_artwork_color_primary;
     Gdiplus::Color m_artwork_color_secondary;
