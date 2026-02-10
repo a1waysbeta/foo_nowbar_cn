@@ -108,20 +108,24 @@ static bool pt_in_rect(const RECT &r, int x, int y) {
   return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 }
 
-// Convert dB (-50 to 0) to slider position (0.0 to 1.0)
-// Below -50 dB maps to 0 (mute). Linear in dB so each slider increment = equal dB change.
+// Convert dB to slider position (0.0 to 1.0) using the same logarithmic curve
+// as foobar2000's default volume control: position = 2^(dB/10).
+// This gives perceptually-even volume distribution (more resolution at lower volumes).
 static inline float db_to_slider(float db) {
-    if (db <= -50.0f) return 0.0f;
-    if (db >= 0.0f) return 1.0f;
-    return (db + 50.0f) / 50.0f;
+    auto position = std::pow(2.0, db / 10.0);
+    if (position < 0.0) position = 0.0;
+    if (position > 1.0) position = 1.0;
+    return static_cast<float>(position);
 }
 
-// Convert slider position (0.0 to 1.0) to dB (-50 to 0)
+// Convert slider position (0.0 to 1.0) to dB using the same logarithmic curve
+// as foobar2000's default volume control: dB = 10 * log2(position).
 // Position 0 = mute (-100 dB). Inverse of db_to_slider.
 static inline float slider_to_db(float slider_pos) {
     if (slider_pos <= 0.0f) return -100.0f;
-    if (slider_pos >= 1.0f) return 0.0f;
-    return (slider_pos * 50.0f) - 50.0f;
+    auto volume = 10.0 * std::log2(static_cast<double>(slider_pos));
+    if (volume < -100.0) volume = -100.0;
+    return static_cast<float>(volume);
 }
 
 ControlPanelCore::ControlPanelCore() {
@@ -280,12 +284,25 @@ void ControlPanelCore::set_dark_mode(bool dark) {
     // Dark hover circle for light mode
     m_button_hover_color = Gdiplus::Color(40, 0, 0, 0);
   }
-  
-  // Invalidate background cache to force redraw with new colors
-  m_bg_cache_valid = false;
-  m_prev_background.reset();
-  m_target_background.reset();
 
+  // Update theme colors from DUI/CUI for preference fallbacks
+  if (m_color_query_cb) {
+    COLORREF bg, text, highlight, selection;
+    if (m_color_query_cb(bg, text, highlight, selection)) {
+      m_theme_highlight = highlight;
+      m_theme_selection = selection;
+    }
+  }
+  // m_theme_text must match the panel's own text color, not the DUI text color,
+  // because Dark/Light mode uses hardcoded colors that may differ from the system theme.
+  m_theme_text = RGB(m_text_color.GetR(), m_text_color.GetG(), m_text_color.GetB());
+
+  // Invalidate caches but preserve m_prev_background for transitions
+  // The cached background may have different overlay colors, but transitions
+  // need it to crossfade smoothly. The draw code will regenerate a correct
+  // target background from the new theme colors.
+  m_bg_cache_valid = false;
+  m_target_background.reset();
   
   invalidate();
 }
@@ -2048,17 +2065,36 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       draw_alternate_play_icon(g, playRect, icon_secondary_color);
     }
   } else {
-    // Default icons: white/light background circle
+    // Default icons: background circle + icon
+    // Normal (style 0): light circle, dark icon
+    // Inverted (style 1): dark circle, light icon
+    bool inverted = (get_nowbar_play_icon_style() == 1);
     COLORREF play_accent = get_nowbar_custom_play_accent_enabled()
         ? get_nowbar_play_accent_color() : m_theme_highlight;
-    Gdiplus::Color bgColor = (play_hovered && show_hover)
-        ? Gdiplus::Color(255, 255, 255, 255)
-        : Gdiplus::Color(255, GetRValue(play_accent), GetGValue(play_accent), GetBValue(play_accent));
+    Gdiplus::Color bgColor;
+    if (play_hovered && show_hover) {
+      // Use hover color settings (same as other buttons but fully opaque)
+      if (use_light_foreground) {
+        bgColor = Gdiplus::Color(255, 255, 255, 255);
+      } else if (get_nowbar_custom_hover_color_enabled()) {
+        COLORREF hc = get_nowbar_hover_color();
+        bgColor = Gdiplus::Color(255, GetRValue(hc), GetGValue(hc), GetBValue(hc));
+      } else {
+        bgColor = Gdiplus::Color(255, GetRValue(m_theme_selection), GetGValue(m_theme_selection), GetBValue(m_theme_selection));
+      }
+    } else if (inverted) {
+      // Inverted: use secondary icon color for a visible dark circle
+      bgColor = icon_secondary_color;
+    } else {
+      bgColor = Gdiplus::Color(255, GetRValue(play_accent), GetGValue(play_accent), GetBValue(play_accent));
+    }
     Gdiplus::SolidBrush bgBrush(bgColor);
     g.FillEllipse(&bgBrush, playRect.left, playRect.top, play_rect_w, play_rect_h);
 
-    // Draw play or pause icon
-    Gdiplus::Color playIconColor(255, 0, 0, 0);
+    // Icon color: inverted swaps black/white
+    Gdiplus::Color playIconColor = inverted
+        ? Gdiplus::Color(255, 255, 255, 255)
+        : Gdiplus::Color(255, 0, 0, 0);
     if (m_state.is_playing && !m_state.is_paused) {
       draw_pause_icon(g, playRect, playIconColor, false);
     } else {
@@ -2418,8 +2454,30 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
   int radius = track_h / 2;                     // For rounded ends
   bool is_pill = (get_nowbar_bar_style() == 0); // 0=Pill-shaped, 1=Rectangular
 
-  // Background track - dark gray
-  Gdiplus::SolidBrush trackBrush(Gdiplus::Color(255, 60, 60, 60));
+  // Background track - theme-aware color
+  Gdiplus::Color trackColor;
+  int bg_style = get_nowbar_background_style();
+  bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
+
+  if (get_nowbar_custom_progress_track_enabled()) {
+    // Custom color overrides everything
+    COLORREF tc = get_nowbar_progress_track_color();
+    trackColor = Gdiplus::Color(255, GetRValue(tc), GetGValue(tc), GetBValue(tc));
+  } else if (has_artwork_bg) {
+    // Artwork backgrounds: derived from artwork colors for visual harmony
+    int r = m_artwork_color_secondary.GetR();
+    int g = m_artwork_color_secondary.GetG();
+    int b = m_artwork_color_secondary.GetB();
+    r = (r * 60 / 100 + 30) / 2;
+    g = (g * 60 / 100 + 30) / 2;
+    b = (b * 60 / 100 + 30) / 2;
+    trackColor = Gdiplus::Color(255, r, g, b);
+  } else {
+    // Solid background: default to DUI Text / CUI text color
+    trackColor = Gdiplus::Color(255, GetRValue(m_theme_text),
+        GetGValue(m_theme_text), GetBValue(m_theme_text));
+  }
+  Gdiplus::SolidBrush trackBrush(trackColor);
   if (is_pill) {
     Gdiplus::GraphicsPath trackPath;
     int r = std::min(radius, w / 2);
@@ -2477,12 +2535,15 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
   // Seekbar never drives the animation loop (no interpolation = no need for continuous frames)
   m_seekbar_animating = false;
 
-  // Seek handle (only on hover)
+  // Seek handle (only on hover) - uses highlight color
   if (m_hover_region == HitRegion::SeekBar || m_seeking) {
     int handle_size = track_h * 2;
     int handle_x = m_rect_seekbar.left + progress_w - handle_size / 2;
     int handle_y = m_rect_seekbar.top + (h - handle_size) / 2;
-    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255, 255, 255, 255));
+    COLORREF handle_accent = get_nowbar_custom_progress_accent_enabled()
+        ? get_nowbar_progress_accent_color() : m_theme_highlight;
+    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255,
+        GetRValue(handle_accent), GetGValue(handle_accent), GetBValue(handle_accent)));
     g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
   }
   
@@ -2818,8 +2879,31 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
   int h = active ? base_h * 2 : base_h;
   int top = m_rect_thin_progress.top;
 
-  // Background: semi-transparent dark gray
-  Gdiplus::SolidBrush bgBrush(active ? Gdiplus::Color(160, 60, 60, 60) : Gdiplus::Color(100, 60, 60, 60));
+  // Background: semi-transparent, theme-aware (including artwork colors)
+  Gdiplus::Color bgColor;
+  int bg_style = get_nowbar_background_style();
+  bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
+  BYTE alpha = active ? 200 : 140;
+
+  if (get_nowbar_custom_progress_track_enabled()) {
+    // Custom color overrides everything
+    COLORREF tc = get_nowbar_progress_track_color();
+    bgColor = Gdiplus::Color(alpha, GetRValue(tc), GetGValue(tc), GetBValue(tc));
+  } else if (has_artwork_bg) {
+    // Derive from artwork secondary color for visual harmony
+    int r = m_artwork_color_secondary.GetR();
+    int g = m_artwork_color_secondary.GetG();
+    int b = m_artwork_color_secondary.GetB();
+    r = (r * 60 / 100 + 30) / 2;
+    g = (g * 60 / 100 + 30) / 2;
+    b = (b * 60 / 100 + 30) / 2;
+    bgColor = Gdiplus::Color(alpha, r, g, b);
+  } else {
+    // Solid background: default to DUI Text / CUI text color
+    bgColor = Gdiplus::Color(alpha, GetRValue(m_theme_text),
+        GetGValue(m_theme_text), GetBValue(m_theme_text));
+  }
+  Gdiplus::SolidBrush bgBrush(bgColor);
   g.FillRectangle(&bgBrush, m_rect_thin_progress.left, top, w, h);
 
   // Progress fill
@@ -2842,11 +2926,14 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
     g.FillRectangle(&progressBrush, m_rect_thin_progress.left, top, progress_w, h);
   }
 
-  // Seek handle (solid block at progress position on hover/seeking)
+  // Seek handle (solid block at progress position on hover/seeking) - uses highlight color
   if (active && m_state.track_length > 0) {
     int handle_w = static_cast<int>(8 * m_dpi_scale);
     int handle_x = m_rect_thin_progress.left + progress_w - handle_w / 2;
-    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255, 255, 255, 255));
+    COLORREF handle_accent = get_nowbar_custom_progress_accent_enabled()
+        ? get_nowbar_progress_accent_color() : m_theme_highlight;
+    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255,
+        GetRValue(handle_accent), GetGValue(handle_accent), GetBValue(handle_accent)));
     g.FillRectangle(&handleBrush, handle_x, top, handle_w, h);
   }
 
@@ -3437,9 +3524,29 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
   int radius = bar_h / 2;
   bool is_pill = (get_nowbar_bar_style() == 0); // 0=Pill-shaped, 1=Rectangular
 
-  // Background
-  Gdiplus::SolidBrush trackBrush(
-      Gdiplus::Color(255, 60, 60, 60)); // Same as seekbar track
+  // Background - theme-aware track color
+  Gdiplus::Color trackColor;
+  bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
+
+  if (get_nowbar_custom_volume_track_enabled()) {
+    // Custom color overrides everything
+    COLORREF tc = get_nowbar_volume_track_color();
+    trackColor = Gdiplus::Color(255, GetRValue(tc), GetGValue(tc), GetBValue(tc));
+  } else if (has_artwork_bg) {
+    // Artwork backgrounds: derived from artwork colors for visual harmony
+    int r = m_artwork_color_secondary.GetR();
+    int g = m_artwork_color_secondary.GetG();
+    int b = m_artwork_color_secondary.GetB();
+    r = (r * 60 / 100 + 30) / 2;
+    g = (g * 60 / 100 + 30) / 2;
+    b = (b * 60 / 100 + 30) / 2;
+    trackColor = Gdiplus::Color(255, r, g, b);
+  } else {
+    // Solid background: default to DUI Text / CUI text color
+    trackColor = Gdiplus::Color(255, GetRValue(m_theme_text),
+        GetGValue(m_theme_text), GetBValue(m_theme_text));
+  }
+  Gdiplus::SolidBrush trackBrush(trackColor);
   if (is_pill) {
     Gdiplus::GraphicsPath trackPath;
     int r = std::min(radius, bar_w / 2);
@@ -3476,12 +3583,15 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     }
   }
 
-  // Volume handle dot (only on hover or drag)
+  // Volume handle dot (only on hover or drag) - uses highlight color
   if (m_hover_region == HitRegion::VolumeSlider || m_volume_dragging) {
     int handle_size = bar_h * 2;
     int handle_x = bar_x + level_w - handle_size / 2;
     int handle_y = m_rect_volume.top + (h - handle_size) / 2;
-    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255, 255, 255, 255));
+    COLORREF vol_handle_accent = get_nowbar_custom_volume_accent_enabled()
+        ? get_nowbar_volume_accent_color() : m_theme_highlight;
+    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255,
+        GetRValue(vol_handle_accent), GetGValue(vol_handle_accent), GetBValue(vol_handle_accent)));
     g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
   }
 
@@ -4099,20 +4209,16 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
 }
 
 void ControlPanelCore::on_mouse_wheel(int delta) {
-  // Adjust volume with mouse wheel
+  // Adjust volume with mouse wheel using position-based stepping
+  // to match foobar2000's default volume control (scroll_step = 20/1000).
   m_volume_wheel_active = true;
   auto pc = playback_control::get();
-  // delta is typically 120 per notch, positive = scroll up = volume up
-  float volume_step = 2.5f; // dB per scroll notch
-  float volume_change = (delta > 0) ? volume_step : -volume_step;
-  // When muted, scroll up should go to -50 dB (lowest non-mute value)
-  float base = (m_state.volume_db <= -100.0f && delta > 0) ? -50.0f : m_state.volume_db;
-  float new_volume = base + volume_change;
-  // Clamp to -50 dB minimum; below -50 snaps to mute (-100 dB)
-  if (new_volume < -50.0f)
-    new_volume = -100.0f;
-  else if (new_volume > 0.0f)
-    new_volume = 0.0f;
+  // Step in slider position space (0.0 to 1.0), matching SDK's 20/1000
+  constexpr float position_step = 20.0f / 1000.0f;
+  float current_pos = db_to_slider(m_state.volume_db);
+  float new_pos = current_pos + ((delta > 0) ? position_step : -position_step);
+  new_pos = std::max(0.0f, std::min(1.0f, new_pos));
+  float new_volume = slider_to_db(new_pos);
   pc->set_volume(new_volume);
   // Update local state for immediate visual feedback (same as drag handler)
   m_state.volume_db = new_volume;
@@ -4839,10 +4945,12 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
         extract_artwork_colors();
         
         // Trigger background transition BEFORE invalidating cache
-        // (crossfade needs valid cached background to blend from)
+        // Only requires m_prev_background to exist (it contains the rendered old state)
+        // m_bg_cache_valid check removed: it just indicates cache freshness, but
+        // m_prev_background already has the old background baked in from prior paints
         int bg_style = get_nowbar_background_style();
         if ((bg_style == 1 || bg_style == 2) && get_nowbar_smooth_animations_enabled()) {
-          if (m_prev_background && m_bg_cache_valid) {
+          if (m_prev_background) {
             m_bg_transition_active = true;
             m_bg_transition_start_time = std::chrono::steady_clock::now();
           }
@@ -4876,9 +4984,10 @@ void ControlPanelCore::set_artwork_from_hbitmap(HBITMAP bitmap) {
     extract_artwork_colors();
 
     // Trigger background transition BEFORE invalidating cache
+    // Only requires m_prev_background to exist (it contains the rendered old state)
     int bg_style = get_nowbar_background_style();
     if ((bg_style == 1 || bg_style == 2) && get_nowbar_smooth_animations_enabled()) {
-      if (m_prev_background && m_bg_cache_valid) {
+      if (m_prev_background) {
         m_bg_transition_active = true;
         m_bg_transition_start_time = std::chrono::steady_clock::now();
       }
