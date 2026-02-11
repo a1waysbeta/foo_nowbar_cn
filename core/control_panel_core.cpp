@@ -296,6 +296,9 @@ void ControlPanelCore::set_dark_mode(bool dark) {
   // m_theme_text must match the panel's own text color, not the DUI text color,
   // because Dark/Light mode uses hardcoded colors that may differ from the system theme.
   m_theme_text = RGB(m_text_color.GetR(), m_text_color.GetG(), m_text_color.GetB());
+  // Track (unfilled bar) color: matches the artwork placeholder color
+  // so the bar track blends with the empty artwork area
+  m_track_color = dark ? RGB(60, 60, 60) : RGB(200, 200, 200);
 
   // Invalidate caches but preserve m_prev_background for transitions
   // The cached background may have different overlay colors, but transitions
@@ -554,6 +557,11 @@ void ControlPanelCore::apply_custom_colors() {
     m_theme_highlight = highlight;
     m_theme_selection = selection;
     m_theme_text = text;
+    // Track color: 20% blend from background toward text for subtle visibility
+    m_track_color = RGB(
+        br + (r - br) * 20 / 100,
+        bg_ + (g - bg_) * 20 / 100,
+        bb + (b - bb) * 20 / 100);
 
     // Hover color - semi-transparent version of text color
     m_button_hover_color = Gdiplus::Color(40, GetRValue(text), GetGValue(text), GetBValue(text));
@@ -1351,46 +1359,7 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   }
   draw_volume(g);
 
-  // MiniPlayer button (only if visible)
-  if (get_nowbar_miniplayer_icon_visible()) {
-    bool mp_hovered = (m_hover_region == HitRegion::MiniPlayerButton);
-    int mp_w = m_rect_miniplayer.right - m_rect_miniplayer.left;
-    int mp_h = m_rect_miniplayer.bottom - m_rect_miniplayer.top;
-    
-    // Determine if we're using artwork-based background that needs light icons
-    int bg_style = get_nowbar_background_style();
-    bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) || 
-                                (bg_style == 2 && m_blurred_artwork);
-    Gdiplus::Color mp_hover_color;
-    if (use_light_foreground) {
-        mp_hover_color = Gdiplus::Color(40, 255, 255, 255);
-    } else if (get_nowbar_custom_hover_color_enabled()) {
-        COLORREF hc = get_nowbar_hover_color();
-        mp_hover_color = Gdiplus::Color(40, GetRValue(hc), GetGValue(hc), GetBValue(hc));
-    } else {
-        mp_hover_color = Gdiplus::Color(40, GetRValue(m_theme_selection), GetGValue(m_theme_selection), GetBValue(m_theme_selection));
-    }
-    Gdiplus::Color mp_secondary_color = use_light_foreground 
-        ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-    COLORREF mp_btn_accent = get_nowbar_custom_button_accent_enabled()
-        ? get_nowbar_button_accent_color() : m_theme_highlight;
-    Gdiplus::Color mp_accent_override(255, GetRValue(mp_btn_accent), GetGValue(mp_btn_accent), GetBValue(mp_btn_accent));
-    
-    if (mp_hovered && get_nowbar_hover_circles_enabled()) {
-      Gdiplus::SolidBrush hoverBrush(mp_hover_color);
-      g.FillEllipse(&hoverBrush, m_rect_miniplayer.left, m_rect_miniplayer.top,
-                    mp_w, mp_h);
-    }
-    Gdiplus::Color mpColor =
-        m_miniplayer_active ? mp_accent_override : mp_secondary_color;
-    // Enlarge icon when hovered
-    float mp_scale = mp_hovered ? HOVER_SCALE_FACTOR : 1.0f;
-    int mp_inset = static_cast<int>(mp_w * (1.0f - 0.70f * mp_scale) / 2.0f);
-    RECT miniplayerIconRect = {
-        m_rect_miniplayer.left + mp_inset, m_rect_miniplayer.top + mp_inset,
-        m_rect_miniplayer.right - mp_inset, m_rect_miniplayer.bottom - mp_inset};
-    draw_miniplayer_icon(g, miniplayerIconRect, mpColor);
-  }
+  draw_miniplayer_button(g);
 
   // Draw tooltips last so they render on top of all other elements
   draw_seekbar_tooltip(g);
@@ -1522,6 +1491,11 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   draw_thin_progress_bar(g2);
   draw_time_display_top_right(g2);
 
+  // Redraw miniplayer button — the time display rect (top-right) overlaps
+  // the miniplayer area vertically, and the background restoration above
+  // erases it. Must draw after time display to maintain correct z-order.
+  draw_miniplayer_button(g2);
+
   // Draw tooltips last so they render on top of all other elements
   // (matches full paint path — without this, the background BitBlt above
   // erases any tooltip drawn by a previous full paint, causing flicker)
@@ -1591,8 +1565,9 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
                        (m_prev_background_size.cx != width || m_prev_background_size.cy != height));
   
   // Start transition if style changed and we have a cached previous background
-  // Only start if smooth animations are enabled
-  if (style_changed && m_prev_background && !size_changed && get_nowbar_smooth_animations_enabled()) {
+  // Only start if smooth animations are enabled and no transition is already running
+  if (style_changed && m_prev_background && !size_changed &&
+      get_nowbar_smooth_animations_enabled() && !m_bg_transition_active) {
     m_bg_transition_active = true;
     m_bg_transition_start_time = std::chrono::steady_clock::now();
   } else if (style_changed && !get_nowbar_smooth_animations_enabled()) {
@@ -2066,25 +2041,20 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     }
   } else {
     // Default icons: background circle + icon
-    // Normal (style 0): light circle, dark icon
-    // Inverted (style 1): dark circle, light icon
+    // Normal (style 0): accent circle, dark icon
+    // Inverted (style 1): accent circle, white icon
     bool inverted = (get_nowbar_play_icon_style() == 1);
     COLORREF play_accent = get_nowbar_custom_play_accent_enabled()
         ? get_nowbar_play_accent_color() : m_theme_highlight;
     Gdiplus::Color bgColor;
     if (play_hovered && show_hover) {
       // Use hover color settings (same as other buttons but fully opaque)
-      if (use_light_foreground) {
-        bgColor = Gdiplus::Color(255, 255, 255, 255);
-      } else if (get_nowbar_custom_hover_color_enabled()) {
+      if (get_nowbar_custom_hover_color_enabled()) {
         COLORREF hc = get_nowbar_hover_color();
         bgColor = Gdiplus::Color(255, GetRValue(hc), GetGValue(hc), GetBValue(hc));
       } else {
         bgColor = Gdiplus::Color(255, GetRValue(m_theme_selection), GetGValue(m_theme_selection), GetBValue(m_theme_selection));
       }
-    } else if (inverted) {
-      // Inverted: use secondary icon color for a visible dark circle
-      bgColor = icon_secondary_color;
     } else {
       bgColor = Gdiplus::Color(255, GetRValue(play_accent), GetGValue(play_accent), GetBValue(play_accent));
     }
@@ -2464,18 +2434,21 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
     COLORREF tc = get_nowbar_progress_track_color();
     trackColor = Gdiplus::Color(255, GetRValue(tc), GetGValue(tc), GetBValue(tc));
   } else if (has_artwork_bg) {
-    // Artwork backgrounds: derived from artwork colors for visual harmony
-    int r = m_artwork_color_secondary.GetR();
-    int g = m_artwork_color_secondary.GetG();
-    int b = m_artwork_color_secondary.GetB();
-    r = (r * 60 / 100 + 30) / 2;
-    g = (g * 60 / 100 + 30) / 2;
-    b = (b * 60 / 100 + 30) / 2;
-    trackColor = Gdiplus::Color(255, r, g, b);
+    // Artwork backgrounds: approximate the rendered background color
+    // by applying the same black overlay darkening used in draw_background()
+    int r = m_artwork_color_primary.GetR();
+    int g = m_artwork_color_primary.GetG();
+    int b = m_artwork_color_primary.GetB();
+    BYTE ov = (bg_style == 1) ? (m_dark_mode ? 120 : 80)
+                               : (m_dark_mode ? 140 : 180);
+    r = r * (255 - ov) / 255 + 15;
+    g = g * (255 - ov) / 255 + 15;
+    b = b * (255 - ov) / 255 + 15;
+    trackColor = Gdiplus::Color(255, min(r, 255), min(g, 255), min(b, 255));
   } else {
-    // Solid background: default to DUI Text / CUI text color
-    trackColor = Gdiplus::Color(255, GetRValue(m_theme_text),
-        GetGValue(m_theme_text), GetBValue(m_theme_text));
+    // Solid background: use theme-appropriate track color
+    trackColor = Gdiplus::Color(255, GetRValue(m_track_color),
+        GetGValue(m_track_color), GetBValue(m_track_color));
   }
   Gdiplus::SolidBrush trackBrush(trackColor);
   if (is_pill) {
@@ -2547,6 +2520,49 @@ void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
     g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
   }
   
+}
+
+void ControlPanelCore::draw_miniplayer_button(Gdiplus::Graphics &g) {
+  if (!get_nowbar_miniplayer_icon_visible()) return;
+
+  bool mp_hovered = (m_hover_region == HitRegion::MiniPlayerButton);
+  int mp_w = m_rect_miniplayer.right - m_rect_miniplayer.left;
+  int mp_h = m_rect_miniplayer.bottom - m_rect_miniplayer.top;
+  if (mp_w <= 0 || mp_h <= 0) return;
+
+  int bg_style = get_nowbar_background_style();
+  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
+                              (bg_style == 2 && m_blurred_artwork);
+  Gdiplus::Color mp_hover_color;
+  if (use_light_foreground) {
+    mp_hover_color = Gdiplus::Color(40, 255, 255, 255);
+  } else if (get_nowbar_custom_hover_color_enabled()) {
+    COLORREF hc = get_nowbar_hover_color();
+    mp_hover_color = Gdiplus::Color(40, GetRValue(hc), GetGValue(hc), GetBValue(hc));
+  } else {
+    mp_hover_color = Gdiplus::Color(40, GetRValue(m_theme_selection),
+        GetGValue(m_theme_selection), GetBValue(m_theme_selection));
+  }
+  Gdiplus::Color mp_secondary_color = use_light_foreground
+      ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+  COLORREF mp_btn_accent = get_nowbar_custom_button_accent_enabled()
+      ? get_nowbar_button_accent_color() : m_theme_highlight;
+  Gdiplus::Color mp_accent_override(255, GetRValue(mp_btn_accent),
+      GetGValue(mp_btn_accent), GetBValue(mp_btn_accent));
+
+  if (mp_hovered && get_nowbar_hover_circles_enabled()) {
+    Gdiplus::SolidBrush hoverBrush(mp_hover_color);
+    g.FillEllipse(&hoverBrush, m_rect_miniplayer.left, m_rect_miniplayer.top,
+                  mp_w, mp_h);
+  }
+  Gdiplus::Color mpColor =
+      m_miniplayer_active ? mp_accent_override : mp_secondary_color;
+  float mp_scale = mp_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+  int mp_inset = static_cast<int>(mp_w * (1.0f - 0.70f * mp_scale) / 2.0f);
+  RECT miniplayerIconRect = {
+      m_rect_miniplayer.left + mp_inset, m_rect_miniplayer.top + mp_inset,
+      m_rect_miniplayer.right - mp_inset, m_rect_miniplayer.bottom - mp_inset};
+  draw_miniplayer_icon(g, miniplayerIconRect, mpColor);
 }
 
 void ControlPanelCore::draw_seekbar_tooltip(Gdiplus::Graphics &g) {
@@ -2890,18 +2906,20 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
     COLORREF tc = get_nowbar_progress_track_color();
     bgColor = Gdiplus::Color(alpha, GetRValue(tc), GetGValue(tc), GetBValue(tc));
   } else if (has_artwork_bg) {
-    // Derive from artwork secondary color for visual harmony
-    int r = m_artwork_color_secondary.GetR();
-    int g = m_artwork_color_secondary.GetG();
-    int b = m_artwork_color_secondary.GetB();
-    r = (r * 60 / 100 + 30) / 2;
-    g = (g * 60 / 100 + 30) / 2;
-    b = (b * 60 / 100 + 30) / 2;
-    bgColor = Gdiplus::Color(alpha, r, g, b);
+    // Artwork backgrounds: approximate the rendered background color
+    int r = m_artwork_color_primary.GetR();
+    int g = m_artwork_color_primary.GetG();
+    int b = m_artwork_color_primary.GetB();
+    BYTE ov = (bg_style == 1) ? (m_dark_mode ? 120 : 80)
+                               : (m_dark_mode ? 140 : 180);
+    r = r * (255 - ov) / 255 + 15;
+    g = g * (255 - ov) / 255 + 15;
+    b = b * (255 - ov) / 255 + 15;
+    bgColor = Gdiplus::Color(alpha, min(r, 255), min(g, 255), min(b, 255));
   } else {
-    // Solid background: default to DUI Text / CUI text color
-    bgColor = Gdiplus::Color(alpha, GetRValue(m_theme_text),
-        GetGValue(m_theme_text), GetBValue(m_theme_text));
+    // Solid background: use theme-appropriate track color
+    bgColor = Gdiplus::Color(alpha, GetRValue(m_track_color),
+        GetGValue(m_track_color), GetBValue(m_track_color));
   }
   Gdiplus::SolidBrush bgBrush(bgColor);
   g.FillRectangle(&bgBrush, m_rect_thin_progress.left, top, w, h);
@@ -2956,7 +2974,7 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
     int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
     int cursor_x = m_seeking ? (m_rect_thin_progress.left + progress_w) : m_seekbar_hover_x;
     int tooltip_x = cursor_x - tooltip_w / 2;
-    int tooltip_y = top + h + static_cast<int>(4 * m_dpi_scale);
+    int tooltip_y = top + h + static_cast<int>(20 * m_dpi_scale);
     tooltip_x = std::max((int)m_rect_thin_progress.left, std::min(tooltip_x, (int)m_rect_thin_progress.right - tooltip_w));
     Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
     Gdiplus::SolidBrush tooltipBgBrush(bgColor);
@@ -3247,7 +3265,7 @@ void ControlPanelCore::update_waveform_brushes() {
     COLORREF wave_color = get_nowbar_custom_waveform_color_enabled()
         ? get_nowbar_waveform_color() : m_theme_highlight;
     COLORREF unplayed_color = get_nowbar_custom_waveform_unplayed_enabled()
-        ? get_nowbar_waveform_unplayed_color() : m_theme_text;
+        ? get_nowbar_waveform_unplayed_color() : m_track_color;
     m_waveform_brush_accent = std::make_unique<Gdiplus::SolidBrush>(
         Gdiplus::Color(255, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color)));
     m_waveform_brush_dim = std::make_unique<Gdiplus::SolidBrush>(
@@ -3430,7 +3448,11 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
     // Re-render time text into a small cached bitmap
     m_time_display_cache = std::make_unique<Gdiplus::Bitmap>(time_w, time_h, PixelFormat32bppPARGB);
     Gdiplus::Graphics tg(m_time_display_cache.get());
-    tg.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    // Use grayscale antialiasing instead of ClearType — ClearType sub-pixel
+    // rendering assumes an opaque background, but this bitmap is transparent.
+    // On light backgrounds the dark ClearType fringing becomes visible as
+    // jagged edges.
+    tg.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
 
     int bg_style = get_nowbar_background_style();
     bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
@@ -3533,18 +3555,20 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     COLORREF tc = get_nowbar_volume_track_color();
     trackColor = Gdiplus::Color(255, GetRValue(tc), GetGValue(tc), GetBValue(tc));
   } else if (has_artwork_bg) {
-    // Artwork backgrounds: derived from artwork colors for visual harmony
-    int r = m_artwork_color_secondary.GetR();
-    int g = m_artwork_color_secondary.GetG();
-    int b = m_artwork_color_secondary.GetB();
-    r = (r * 60 / 100 + 30) / 2;
-    g = (g * 60 / 100 + 30) / 2;
-    b = (b * 60 / 100 + 30) / 2;
-    trackColor = Gdiplus::Color(255, r, g, b);
+    // Artwork backgrounds: approximate the rendered background color
+    int r = m_artwork_color_primary.GetR();
+    int g = m_artwork_color_primary.GetG();
+    int b = m_artwork_color_primary.GetB();
+    BYTE ov = (bg_style == 1) ? (m_dark_mode ? 120 : 80)
+                               : (m_dark_mode ? 140 : 180);
+    r = r * (255 - ov) / 255 + 15;
+    g = g * (255 - ov) / 255 + 15;
+    b = b * (255 - ov) / 255 + 15;
+    trackColor = Gdiplus::Color(255, min(r, 255), min(g, 255), min(b, 255));
   } else {
-    // Solid background: default to DUI Text / CUI text color
-    trackColor = Gdiplus::Color(255, GetRValue(m_theme_text),
-        GetGValue(m_theme_text), GetBValue(m_theme_text));
+    // Solid background: use theme-appropriate track color
+    trackColor = Gdiplus::Color(255, GetRValue(m_track_color),
+        GetGValue(m_track_color), GetBValue(m_track_color));
   }
   Gdiplus::SolidBrush trackBrush(trackColor);
   if (is_pill) {
