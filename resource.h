@@ -210,6 +210,10 @@
 #define IDC_PLAY_ICON_STYLE_LABEL        1517
 #define IDC_PLAY_ICON_STYLE_COMBO        1518
 
+// Rating Stars controls (Icons tab)
+#define IDC_RATING_STARS_LABEL           1519
+#define IDC_RATING_STARS_COMBO           1520
+
 // Profile configuration controls (Custom Button tab)
 #define IDC_PROFILE_NAME_LABEL     1370
 #define IDC_PROFILE_COMBO          1371
