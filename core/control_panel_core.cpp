@@ -2812,6 +2812,8 @@ void ControlPanelCore::create_vis_stream() {
 void ControlPanelCore::release_vis_stream() {
   m_vis_stream.release();
   std::fill(m_spectrum_bars.begin(), m_spectrum_bars.end(), 0.0f);
+  std::fill(m_spectrum_peaks.begin(), m_spectrum_peaks.end(), 0.0f);
+  std::fill(m_spectrum_peak_velocity.begin(), m_spectrum_peak_velocity.end(), 0.0f);
 }
 
 int ControlPanelCore::compute_spectrum_bar_count(int area_w) const {
@@ -2845,6 +2847,8 @@ void ControlPanelCore::update_spectrum_data() {
   if (new_count != m_spectrum_bar_count) {
     m_spectrum_bar_count = new_count;
     m_spectrum_bars.resize(new_count, 0.0f);
+    m_spectrum_peaks.resize(new_count, 0.0f);
+    m_spectrum_peak_velocity.resize(new_count, 0.0f);
   }
   if (m_spectrum_bar_count <= 0) return;
 
@@ -2888,11 +2892,38 @@ void ControlPanelCore::update_spectrum_data() {
     float target = (normalized < 0.02f) ? effective_floor : std::max(normalized, effective_floor);
     float current = m_spectrum_bars[i];
     if (target > current) {
-      m_spectrum_bars[i] = current + (target - current) * 0.7f;
+      m_spectrum_bars[i] = current + (target - current) * 0.85f;
     } else {
       m_spectrum_bars[i] = current + (target - current) * 0.15f;
     }
   }
+
+  // Peak tracking with gravity
+  for (int i = 0; i < m_spectrum_bar_count; i++) {
+    float bar_val = m_spectrum_bars[i];
+    if (bar_val >= m_spectrum_peaks[i]) {
+      m_spectrum_peaks[i] = bar_val;
+      m_spectrum_peak_velocity[i] = 0.0f;
+    } else {
+      m_spectrum_peak_velocity[i] += 0.002f;
+      m_spectrum_peaks[i] -= m_spectrum_peak_velocity[i];
+      if (m_spectrum_peaks[i] < 0.0f) m_spectrum_peaks[i] = 0.0f;
+    }
+  }
+}
+
+static COLORREF hsl_to_rgb(float h, float s, float l) {
+    float c = (1.0f - fabsf(2.0f * l - 1.0f)) * s;
+    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+    float m = l - c / 2.0f;
+    float r1, g1, b1;
+    if (h < 60)       { r1=c; g1=x; b1=0; }
+    else if (h < 120) { r1=x; g1=c; b1=0; }
+    else if (h < 180) { r1=0; g1=c; b1=x; }
+    else if (h < 240) { r1=0; g1=x; b1=c; }
+    else if (h < 300) { r1=x; g1=0; b1=c; }
+    else               { r1=c; g1=0; b1=x; }
+    return RGB((BYTE)((r1+m)*255), (BYTE)((g1+m)*255), (BYTE)((b1+m)*255));
 }
 
 void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
@@ -2984,7 +3015,28 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
     float x = (float)(m_rect_spectrum.left + margin_left + i * unit_w);
     float y = bottom_f - height;
 
-    if (gradient_mode == 1) {
+    if (gradient_mode == 2) {
+      // Frequency color mode
+      float hue = (bar_count > 1) ? (float)i / (float)(bar_count - 1) * 270.0f : 0.0f;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
+
+      if (spec_shape == 0) {
+        path.Reset();
+        if (height > radius * 2.0f) {
+          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
+          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
+          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
+          path.AddLine(x, bottom_f, x, y + radius);
+        } else {
+          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        }
+        path.CloseFigure();
+        g.FillPath(&barBrush, &path);
+      } else {
+        g.FillRectangle(&barBrush, x, y, bar_w, height);
+      }
+    } else if (gradient_mode == 1) {
       Gdiplus::LinearGradientBrush barBrush(
           Gdiplus::PointF(x, y), Gdiplus::PointF(x, bottom_f),
           Gdiplus::Color(alpha, r1, g1, b1),
@@ -3023,6 +3075,21 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
       } else {
         g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
+    }
+
+    // Peak indicator
+    if (i < (int)m_spectrum_peaks.size() && m_spectrum_peaks[i] > m_spectrum_bars[i]) {
+      float peak_y = bottom_f - m_spectrum_peaks[i] * (float)area_h;
+      BYTE pr, pg, pb;
+      if (gradient_mode == 2) {
+        float hue = (bar_count > 1) ? (float)i / (float)(bar_count - 1) * 270.0f : 0.0f;
+        COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+        pr = GetRValue(freq_color); pg = GetGValue(freq_color); pb = GetBValue(freq_color);
+      } else {
+        pr = r1; pg = g1; pb = b1;
+      }
+      Gdiplus::SolidBrush peakBrush(Gdiplus::Color(alpha, pr, pg, pb));
+      g.FillRectangle(&peakBrush, x, peak_y, bar_w, 2.0f);
     }
   }
 
@@ -3237,6 +3304,14 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
     int radius = (spec_shape == 0) ? bw / 2 : 0;
     float radius_f = (float)radius;
 
+    // Frequency color: compute once per bar
+    int freq_r = r1, freq_g = g1, freq_b = b1;
+    if (gradient_mode == 2) {
+      float hue = (bar_count > 1) ? (float)i / (float)(bar_count - 1) * 270.0f : 0.0f;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      freq_r = GetRValue(freq_color); freq_g = GetGValue(freq_color); freq_b = GetBValue(freq_color);
+    }
+
     for (int row = by; row < area_h; row++) {
       if (row < 0 || row >= area_h) continue;
       int left = bx;
@@ -3258,7 +3333,9 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
       // Compute row color
       int row_r, row_g, row_b;
-      if (gradient_mode == 1 && bar_h > 1) {
+      if (gradient_mode == 2) {
+        row_r = freq_r; row_g = freq_g; row_b = freq_b;
+      } else if (gradient_mode == 1 && bar_h > 1) {
         float t = (float)(row - by) / (float)(bar_h - 1);
         row_r = (int)((float)r1 + ((float)r2 - (float)r1) * t);
         row_g = (int)((float)g1 + ((float)g2 - (float)g1) * t);
@@ -3279,6 +3356,25 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
       uint32_t* pixel = m_spectrum_overlay_bits + row * stride + left;
       for (int col = left; col < right; col++) {
         *pixel++ = row_pixel;
+      }
+    }
+
+    // Peak indicator (2px line above bar)
+    if (i < (int)m_spectrum_peaks.size() && m_spectrum_peaks[i] > m_spectrum_bars[i]) {
+      int peak_y = area_h - (int)(m_spectrum_peaks[i] * area_h);
+      int peak_r = (gradient_mode == 2) ? freq_r : r1;
+      int peak_g = (gradient_mode == 2) ? freq_g : g1;
+      int peak_b = (gradient_mode == 2) ? freq_b : b1;
+      uint32_t peak_pixel = ((uint32_t)alpha << 24) |
+          ((uint32_t)((peak_r * alpha) / 255) << 16) |
+          ((uint32_t)((peak_g * alpha) / 255) << 8) |
+          ((uint32_t)((peak_b * alpha) / 255));
+      for (int py = peak_y; py < peak_y + 2 && py < area_h; py++) {
+        if (py < 0) continue;
+        uint32_t* pixel = m_spectrum_overlay_bits + py * stride + bx;
+        for (int col = 0; col < bw; col++) {
+          *pixel++ = peak_pixel;
+        }
       }
     }
   }
@@ -3375,7 +3471,28 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
     float x = (float)(m_rect_spectrum_full.left + margin_left + i * unit_w);
     float y = bottom_f - height;
 
-    if (gradient_mode == 1) {
+    if (gradient_mode == 2) {
+      // Frequency color mode
+      float hue = (bar_count > 1) ? (float)i / (float)(bar_count - 1) * 270.0f : 0.0f;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
+
+      if (spec_shape == 0) {
+        path.Reset();
+        if (height > radius * 2.0f) {
+          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
+          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
+          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
+          path.AddLine(x, bottom_f, x, y + radius);
+        } else {
+          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        }
+        path.CloseFigure();
+        g.FillPath(&barBrush, &path);
+      } else {
+        g.FillRectangle(&barBrush, x, y, bar_w, height);
+      }
+    } else if (gradient_mode == 1) {
       // Gradient: top color -> bottom color
       Gdiplus::LinearGradientBrush barBrush(
           Gdiplus::PointF(x, y),
@@ -3417,6 +3534,21 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
       } else {
         g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
+    }
+
+    // Peak indicator
+    if (i < (int)m_spectrum_peaks.size() && m_spectrum_peaks[i] > m_spectrum_bars[i]) {
+      float peak_y = bottom_f - m_spectrum_peaks[i] * (float)area_h;
+      BYTE pr, pg, pb;
+      if (gradient_mode == 2) {
+        float hue = (bar_count > 1) ? (float)i / (float)(bar_count - 1) * 270.0f : 0.0f;
+        COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+        pr = GetRValue(freq_color); pg = GetGValue(freq_color); pb = GetBValue(freq_color);
+      } else {
+        pr = r1; pg = g1; pb = b1;
+      }
+      Gdiplus::SolidBrush peakBrush(Gdiplus::Color(alpha, pr, pg, pb));
+      g.FillRectangle(&peakBrush, x, peak_y, bar_w, 2.0f);
     }
   }
 
