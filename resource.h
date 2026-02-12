@@ -220,6 +220,7 @@
 #define IDC_SPECTRUM_OPACITY_VALUE         1523
 #define IDC_SPECTRUM_GRADIENT_CHECK        1524
 #define IDC_SPECTRUM_COLOR2_BTN            1525
+#define IDC_SPECTRUM_COLOR_MODE_COMBO      1526
 
 // Profile configuration controls (Custom Button tab)
 #define IDC_PROFILE_NAME_LABEL     1370
