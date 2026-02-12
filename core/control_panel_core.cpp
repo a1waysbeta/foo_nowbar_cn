@@ -2811,7 +2811,18 @@ void ControlPanelCore::create_vis_stream() {
 
 void ControlPanelCore::release_vis_stream() {
   m_vis_stream.release();
-  memset(m_spectrum_bars, 0, sizeof(m_spectrum_bars));
+  std::fill(m_spectrum_bars.begin(), m_spectrum_bars.end(), 0.0f);
+}
+
+int ControlPanelCore::compute_spectrum_bar_count(int area_w) const {
+  int spec_width = get_nowbar_spectrum_width();
+  int bar_w, gap;
+  if (spec_width == 0) { bar_w = 2; gap = 1; }       // Thin
+  else if (spec_width == 2) { bar_w = 8; gap = 3; }   // Wide
+  else { bar_w = 4; gap = 2; }                          // Normal
+  int unit = bar_w + gap;
+  if (unit < 1) unit = 1;
+  return std::max(1, area_w / unit);
 }
 
 void ControlPanelCore::update_spectrum_data() {
@@ -2827,25 +2838,28 @@ void ControlPanelCore::update_spectrum_data() {
   t_size sample_count = chunk.get_sample_count();
   if (!data || sample_count == 0) return;
 
-  // Logarithmic frequency mapping: 20 bars from ~60Hz to ~16kHz
-  // FFT bin frequency = bin_index * sample_rate / fft_size
-  // We use normalized bin indices (0 to sample_count-1)
+  // Resize bars array if panel width changed
+  int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
+  if (area_w <= 0) area_w = m_rect_spectrum.right - m_rect_spectrum.left;
+  int new_count = compute_spectrum_bar_count(area_w);
+  if (new_count != m_spectrum_bar_count) {
+    m_spectrum_bar_count = new_count;
+    m_spectrum_bars.resize(new_count, 0.0f);
+  }
+  if (m_spectrum_bar_count <= 0) return;
+
   float freq_min = 60.0f;
   float freq_max = 16000.0f;
   float log_min = std::log10(freq_min);
   float log_max = std::log10(freq_max);
-
-  // Assume 44100 Hz sample rate for bin mapping
   float bin_freq_step = 44100.0f / (float)SPECTRUM_FFT_SIZE;
 
-  // First pass: calculate overall energy for soft floor scaling
   float total_energy = 0.0f;
-  float normalized_values[SPECTRUM_BAR_COUNT];
+  std::vector<float> normalized_values(m_spectrum_bar_count);
 
-  for (int i = 0; i < SPECTRUM_BAR_COUNT; i++) {
-    // Calculate frequency range for this bar
-    float f_lo = std::pow(10.0f, log_min + (log_max - log_min) * i / SPECTRUM_BAR_COUNT);
-    float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / SPECTRUM_BAR_COUNT);
+  for (int i = 0; i < m_spectrum_bar_count; i++) {
+    float f_lo = std::pow(10.0f, log_min + (log_max - log_min) * i / m_spectrum_bar_count);
+    float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / m_spectrum_bar_count);
 
     int bin_lo = (int)(f_lo / bin_freq_step);
     int bin_hi = (int)(f_hi / bin_freq_step);
@@ -2853,41 +2867,30 @@ void ControlPanelCore::update_spectrum_data() {
     if (bin_hi >= (int)sample_count) bin_hi = (int)sample_count - 1;
     if (bin_lo > bin_hi) bin_lo = bin_hi;
 
-    // Use peak (max) across bins so bars react to any energy in their band
     float magnitude = 0.0f;
     for (int b = bin_lo; b <= bin_hi; b++) {
       if (data[b] > magnitude) magnitude = data[b];
     }
 
-    // KStreamFlagNewFFT normalizes output to 0..1 range
-    // Apply power curve for perceptual scaling
     float normalized = std::pow(magnitude, 0.75f);
     if (normalized > 1.0f) normalized = 1.0f;
     normalized_values[i] = normalized;
     total_energy += normalized;
   }
 
-  // Calculate energy factor for soft floor (0 during silence, 1 during music)
-  float avg_energy = total_energy / SPECTRUM_BAR_COUNT;
-  float energy_factor = std::min(1.0f, avg_energy * 4.0f);  // Ramps up quickly with any audio
-
-  // Soft floor: bars settle toward this level instead of zero during music
+  float avg_energy = total_energy / m_spectrum_bar_count;
+  float energy_factor = std::min(1.0f, avg_energy * 4.0f);
   const float SPECTRUM_FLOOR = 0.25f;
   float effective_floor = SPECTRUM_FLOOR * energy_factor;
 
-  // Second pass: apply smoothing with soft floor
-  for (int i = 0; i < SPECTRUM_BAR_COUNT; i++) {
+  for (int i = 0; i < m_spectrum_bar_count; i++) {
     float normalized = normalized_values[i];
-
-    // Noise gate: values below threshold use the floor instead
     float target = (normalized < 0.02f) ? effective_floor : std::max(normalized, effective_floor);
-
-    // Asymmetric smoothing: snappy attack, slow decay for stable base with jumpy peaks
     float current = m_spectrum_bars[i];
     if (target > current) {
-      m_spectrum_bars[i] = current + (target - current) * 0.7f;   // Snappy attack
+      m_spectrum_bars[i] = current + (target - current) * 0.7f;
     } else {
-      m_spectrum_bars[i] = current + (target - current) * 0.15f;  // Slow decay toward floor
+      m_spectrum_bars[i] = current + (target - current) * 0.15f;
     }
   }
 }
@@ -2930,52 +2933,96 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
 
   int area_w = m_rect_spectrum.right - m_rect_spectrum.left;
   int area_h = m_rect_spectrum.bottom - m_rect_spectrum.top;
-  float bar_total_w = (float)area_w / SPECTRUM_BAR_COUNT;
-  float gap = std::max(1.0f, bar_total_w * 0.2f);
-  float bar_w = bar_total_w - gap;
-  if (bar_w < 1.0f) bar_w = 1.0f;
+
+  // Fixed-pixel bar sizing
+  int spec_width = get_nowbar_spectrum_width();
+  int bar_w_i, gap_w_i;
+  if (spec_width == 0) { bar_w_i = 2; gap_w_i = 1; }
+  else if (spec_width == 2) { bar_w_i = 8; gap_w_i = 3; }
+  else { bar_w_i = 4; gap_w_i = 2; }
+
+  int unit_w = bar_w_i + gap_w_i;
+  int bar_count = m_spectrum_bar_count;
+  if (bar_count <= 0) return;
+  int total_used = bar_count * unit_w - gap_w_i;
+  int margin_left = (area_w - total_used) / 2;
+  if (margin_left < 0) margin_left = 0;
+
+  float bar_w = (float)bar_w_i;
   float radius = bar_w * 0.5f;
 
-  // Determine colors - always use user's spectrum color setting
+  // Colors from preferences
   COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
       ? get_nowbar_spectrum_color() : m_theme_highlight;
-  Gdiplus::Color accent(255, GetRValue(spec_color), GetGValue(spec_color), GetBValue(spec_color));
-  int alpha = (int)(192 * m_spectrum_opacity);  // 75% of 255 ~ 192
+  int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
+  int alpha = (int)(user_alpha * m_spectrum_opacity);
+  if (alpha > 255) alpha = 255;
+  if (alpha < 0) alpha = 0;
+  BYTE r1 = GetRValue(spec_color), g1 = GetGValue(spec_color), b1 = GetBValue(spec_color);
 
-  Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, accent.GetR(), accent.GetG(), accent.GetB()));
+  int gradient_mode = get_nowbar_spectrum_gradient_mode();
+  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  BYTE r2 = GetRValue(spec_color2), g2 = GetGValue(spec_color2), b2 = GetBValue(spec_color2);
 
-  // Get shape setting (0=Pill, 1=Rectangle)
   int spec_shape = get_nowbar_spectrum_shape();
 
-  // Disable anti-aliasing so bar edges don't bleed into the 1px gaps
+  // Disable anti-aliasing so bar edges don't bleed into the gaps
   Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
   Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
   g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
   g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
 
-  for (int i = 0; i < SPECTRUM_BAR_COUNT; i++) {
-    float height = m_spectrum_bars[i] * (float)area_h;
-    if (height < 1.0f) continue;  // Skip bars with no visible energy
+  Gdiplus::GraphicsPath path;
+  float bottom_f = (float)m_rect_spectrum.bottom;
 
-    float x = m_rect_spectrum.left + i * bar_total_w + gap * 0.5f;
-    float y = m_rect_spectrum.bottom - height;
+  for (int i = 0; i < bar_count; i++) {
+    if (i >= (int)m_spectrum_bars.size()) break;
+    float value = m_spectrum_bars[i];
+    float height = value * (float)area_h;
+    if (height < 1.0f) continue;
 
-    if (spec_shape == 0) {
-      // Pill-shaped bar (rounded top, flat bottom)
-      Gdiplus::GraphicsPath path;
-      if (height > radius * 2.0f) {
-        path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-        path.AddLine(x + bar_w, y + radius, x + bar_w, (float)m_rect_spectrum.bottom);
-        path.AddLine(x + bar_w, (float)m_rect_spectrum.bottom, x, (float)m_rect_spectrum.bottom);
-        path.AddLine(x, (float)m_rect_spectrum.bottom, x, y + radius);
+    float x = (float)(m_rect_spectrum.left + margin_left + i * unit_w);
+    float y = bottom_f - height;
+
+    if (gradient_mode == 1) {
+      Gdiplus::LinearGradientBrush barBrush(
+          Gdiplus::PointF(x, y), Gdiplus::PointF(x, bottom_f),
+          Gdiplus::Color(alpha, r1, g1, b1),
+          Gdiplus::Color(alpha, r2, g2, b2));
+
+      if (spec_shape == 0) {
+        path.Reset();
+        if (height > radius * 2.0f) {
+          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
+          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
+          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
+          path.AddLine(x, bottom_f, x, y + radius);
+        } else {
+          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        }
+        path.CloseFigure();
+        g.FillPath(&barBrush, &path);
       } else {
-        path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
-      path.CloseFigure();
-      g.FillPath(&barBrush, &path);
     } else {
-      // Rectangle bar
-      g.FillRectangle(&barBrush, x, y, bar_w, height);
+      Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, r1, g1, b1));
+
+      if (spec_shape == 0) {
+        path.Reset();
+        if (height > radius * 2.0f) {
+          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
+          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
+          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
+          path.AddLine(x, bottom_f, x, y + radius);
+        } else {
+          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        }
+        path.CloseFigure();
+        g.FillPath(&barBrush, &path);
+      } else {
+        g.FillRectangle(&barBrush, x, y, bar_w, height);
+      }
     }
   }
 
@@ -3140,62 +3187,63 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   // Clear overlay to fully transparent
   memset(m_spectrum_overlay_bits, 0, area_w * area_h * 4);
 
+  // Fixed-pixel bar sizing
   int spec_width = get_nowbar_spectrum_width();
-  int bar_count = (spec_width == 0) ? 60 : (spec_width == 2) ? 25 : 40;
-  float bar_total_w = (float)area_w / bar_count;
-  float gap_f = std::max(1.0f, bar_total_w * 0.2f);
-  float bar_w_f = bar_total_w - gap_f;
-  if (bar_w_f < 1.0f) bar_w_f = 1.0f;
-  float radius_f = bar_w_f * 0.5f;
+  int bar_w, gap_w;
+  if (spec_width == 0) { bar_w = 2; gap_w = 1; }       // Thin
+  else if (spec_width == 2) { bar_w = 8; gap_w = 3; }   // Wide
+  else { bar_w = 4; gap_w = 2; }                          // Normal
 
+  int unit_w = bar_w + gap_w;
+  int bar_count = m_spectrum_bar_count;
+  if (bar_count <= 0) return;
+  int total_used = bar_count * unit_w - gap_w;
+  int margin_left = (area_w - total_used) / 2;
+  if (margin_left < 0) margin_left = 0;
+
+  // Colors from preferences
   COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
       ? get_nowbar_spectrum_color() : m_theme_highlight;
-  int alpha = (int)(192 * m_spectrum_opacity * m_spectrum_hover_opacity);
+  int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
+  int alpha = (int)(user_alpha * m_spectrum_opacity * m_spectrum_hover_opacity);
   if (alpha > 255) alpha = 255;
-  BYTE ar = GetRValue(spec_color);
-  BYTE ag = GetGValue(spec_color);
-  BYTE ab = GetBValue(spec_color);
-  BYTE wr = 255 - ar;
-  BYTE wg = 255 - ag;
-  BYTE wb = 255 - ab;
+  if (alpha < 0) alpha = 0;
 
-  int alpha_top = alpha / 3;
+  BYTE r1 = GetRValue(spec_color);
+  BYTE g1 = GetGValue(spec_color);
+  BYTE b1 = GetBValue(spec_color);
+
+  int gradient_mode = get_nowbar_spectrum_gradient_mode();
+  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  BYTE r2 = GetRValue(spec_color2);
+  BYTE g2 = GetGValue(spec_color2);
+  BYTE b2 = GetBValue(spec_color2);
+
   int spec_shape = get_nowbar_spectrum_shape();
   int stride = area_w;  // pixels per row (DIBSECTION is tightly packed)
 
   for (int i = 0; i < bar_count; i++) {
-    float src_idx = (float)i / bar_count * SPECTRUM_BAR_COUNT;
-    int lo = (int)src_idx;
-    int hi = lo + 1;
-    if (lo >= SPECTRUM_BAR_COUNT) lo = SPECTRUM_BAR_COUNT - 1;
-    if (hi >= SPECTRUM_BAR_COUNT) hi = SPECTRUM_BAR_COUNT - 1;
-    float frac = src_idx - lo;
-    float value = m_spectrum_bars[lo] * (1.0f - frac) + m_spectrum_bars[hi] * frac;
-
+    if (i >= (int)m_spectrum_bars.size()) break;
+    float value = m_spectrum_bars[i];
     int bar_h = (int)(value * area_h);
     if (bar_h < 1) continue;
 
-    int bx = (int)(i * bar_total_w + gap_f * 0.5f);
-    int bw = (int)bar_w_f;
+    int bx = margin_left + i * unit_w;
+    int bw = bar_w;
     if (bx + bw > area_w) bw = area_w - bx;
-    if (bw < 1) continue;
+    if (bw < 1 || bx < 0) continue;
     int by = area_h - bar_h;
 
-    // Water portion height
-    float water_frac = value * 0.5f;
-    if (water_frac > 0.5f) water_frac = 0.5f;
-    int accent_h = bar_h - (int)(bar_h * water_frac);
-    int radius = (int)radius_f;
-    float water_level = (bar_h > 1) ? (float)accent_h / bar_h : 1.0f;
+    int radius = (spec_shape == 0) ? bw / 2 : 0;
+    float radius_f = (float)radius;
 
-    // Single pass: per-row gradient from faded accent (top) -> accent (middle) -> water (bottom)
     for (int row = by; row < area_h; row++) {
       if (row < 0 || row >= area_h) continue;
       int left = bx;
       int right = bx + bw;
 
-      // Pill shape: narrow the top rows to form a rounded cap
-      if (spec_shape == 0 && radius > 0 && row < by + radius) {
+      // Pill shape: narrow top rows for rounded cap
+      if (radius > 0 && row < by + radius) {
         float dy = (float)(by + radius) - (float)row - 0.5f;
         if (dy > radius_f) continue;
         float dx = sqrtf(radius_f * radius_f - dy * dy);
@@ -3208,32 +3256,25 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
         right = pr;
       }
 
-      // Compute per-row gradient color
-      float t = (bar_h > 1) ? (float)(row - by) / (float)(bar_h - 1) : 0.0f;
-      int row_a, row_r, row_g, row_b;
-      if (t <= water_level) {
-        // Accent section: alpha fades from alpha_top to full, color stays accent
-        float s = (water_level > 0.0f) ? t / water_level : 0.0f;
-        row_a = alpha_top + (int)((alpha - alpha_top) * s);
-        row_r = ar; row_g = ag; row_b = ab;
+      // Compute row color
+      int row_r, row_g, row_b;
+      if (gradient_mode == 1 && bar_h > 1) {
+        float t = (float)(row - by) / (float)(bar_h - 1);
+        row_r = (int)((float)r1 + ((float)r2 - (float)r1) * t);
+        row_g = (int)((float)g1 + ((float)g2 - (float)g1) * t);
+        row_b = (int)((float)b1 + ((float)b2 - (float)b1) * t);
       } else {
-        // Water section: color transitions from accent to water at full alpha
-        float s = (water_level < 1.0f) ? (t - water_level) / (1.0f - water_level) : 1.0f;
-        row_a = alpha;
-        row_r = (int)ar + (int)(((int)wr - (int)ar) * s);
-        row_g = (int)ag + (int)(((int)wg - (int)ag) * s);
-        row_b = (int)ab + (int)(((int)wb - (int)ab) * s);
+        row_r = r1; row_g = g1; row_b = b1;
       }
-      row_a = std::max(0, std::min(255, row_a));
       row_r = std::max(0, std::min(255, row_r));
       row_g = std::max(0, std::min(255, row_g));
       row_b = std::max(0, std::min(255, row_b));
 
       // Pre-multiply alpha for DIBSECTION (BGRA, premultiplied)
-      uint32_t row_pixel = ((uint32_t)row_a << 24) |
-          ((uint32_t)((row_r * row_a) / 255) << 16) |
-          ((uint32_t)((row_g * row_a) / 255) << 8) |
-          ((uint32_t)((row_b * row_a) / 255));
+      uint32_t row_pixel = ((uint32_t)alpha << 24) |
+          ((uint32_t)((row_r * alpha) / 255) << 16) |
+          ((uint32_t)((row_g * alpha) / 255) << 8) |
+          ((uint32_t)((row_b * alpha) / 255));
 
       uint32_t* pixel = m_spectrum_overlay_bits + row * stride + left;
       for (int col = left; col < right; col++) {
@@ -3284,19 +3325,37 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
 
   int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
   int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
+
+  // Fixed-pixel bar sizing
   int spec_width = get_nowbar_spectrum_width();
-  int bar_count = (spec_width == 0) ? 60 : (spec_width == 2) ? 25 : 40;
-  float bar_total_w = (float)area_w / bar_count;
-  float gap = std::max(1.0f, bar_total_w * 0.2f);
-  float bar_w = bar_total_w - gap;
-  if (bar_w < 1.0f) bar_w = 1.0f;
+  int bar_w_i, gap_w_i;
+  if (spec_width == 0) { bar_w_i = 2; gap_w_i = 1; }
+  else if (spec_width == 2) { bar_w_i = 8; gap_w_i = 3; }
+  else { bar_w_i = 4; gap_w_i = 2; }
+
+  int unit_w = bar_w_i + gap_w_i;
+  int bar_count = m_spectrum_bar_count;
+  if (bar_count <= 0) return;
+  int total_used = bar_count * unit_w - gap_w_i;
+  int margin_left = (area_w - total_used) / 2;
+  if (margin_left < 0) margin_left = 0;
+
+  float bar_w = (float)bar_w_i;
   float radius = bar_w * 0.5f;
 
+  // Colors from preferences
   COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
       ? get_nowbar_spectrum_color() : m_theme_highlight;
-  int alpha = (int)(192 * m_spectrum_opacity * m_spectrum_hover_opacity);
-  BYTE accent_r = GetRValue(spec_color), accent_g = GetGValue(spec_color), accent_b = GetBValue(spec_color);
-  BYTE water_r = 255 - accent_r, water_g = 255 - accent_g, water_b = 255 - accent_b;
+  int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
+  int alpha = (int)(user_alpha * m_spectrum_opacity * m_spectrum_hover_opacity);
+  if (alpha > 255) alpha = 255;
+  if (alpha < 0) alpha = 0;
+  BYTE r1 = GetRValue(spec_color), g1 = GetGValue(spec_color), b1 = GetBValue(spec_color);
+
+  int gradient_mode = get_nowbar_spectrum_gradient_mode();
+  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  BYTE r2 = GetRValue(spec_color2), g2 = GetGValue(spec_color2), b2 = GetBValue(spec_color2);
+
   int spec_shape = get_nowbar_spectrum_shape();
 
   Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
@@ -3304,56 +3363,60 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
   g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
 
-  int alpha_top = alpha / 3;
   Gdiplus::GraphicsPath path;
   float bottom_f = (float)m_rect_spectrum_full.bottom;
 
   for (int i = 0; i < bar_count; i++) {
-    float src_idx = (float)i / bar_count * SPECTRUM_BAR_COUNT;
-    int lo = (int)src_idx;
-    int hi = lo + 1;
-    if (lo >= SPECTRUM_BAR_COUNT) lo = SPECTRUM_BAR_COUNT - 1;
-    if (hi >= SPECTRUM_BAR_COUNT) hi = SPECTRUM_BAR_COUNT - 1;
-    float frac = src_idx - lo;
-    float value = m_spectrum_bars[lo] * (1.0f - frac) + m_spectrum_bars[hi] * frac;
-
+    if (i >= (int)m_spectrum_bars.size()) break;
+    float value = m_spectrum_bars[i];
     float height = value * (float)area_h;
     if (height < 1.0f) continue;
 
-    float x = m_rect_spectrum_full.left + i * bar_total_w + gap * 0.5f;
+    float x = (float)(m_rect_spectrum_full.left + margin_left + i * unit_w);
     float y = bottom_f - height;
-    float water_frac = value * 0.5f;
-    if (water_frac > 0.5f) water_frac = 0.5f;
-    float water_level = 1.0f - water_frac;
 
-    // Per-bar gradient: faded accent (top) -> accent (middle) -> water (bottom)
-    Gdiplus::LinearGradientBrush barBrush(
-        Gdiplus::PointF(x, y),
-        Gdiplus::PointF(x, bottom_f),
-        Gdiplus::Color(alpha_top, accent_r, accent_g, accent_b),
-        Gdiplus::Color(alpha, water_r, water_g, water_b));
-    Gdiplus::Color blendColors[3] = {
-        Gdiplus::Color(alpha_top, accent_r, accent_g, accent_b),
-        Gdiplus::Color(alpha, accent_r, accent_g, accent_b),
-        Gdiplus::Color(alpha, water_r, water_g, water_b)
-    };
-    float blendPositions[3] = { 0.0f, water_level, 1.0f };
-    barBrush.SetInterpolationColors(blendColors, blendPositions, 3);
+    if (gradient_mode == 1) {
+      // Gradient: top color -> bottom color
+      Gdiplus::LinearGradientBrush barBrush(
+          Gdiplus::PointF(x, y),
+          Gdiplus::PointF(x, bottom_f),
+          Gdiplus::Color(alpha, r1, g1, b1),
+          Gdiplus::Color(alpha, r2, g2, b2));
 
-    if (spec_shape == 0) {
-      path.Reset();
-      if (height > radius * 2.0f) {
-        path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-        path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-        path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-        path.AddLine(x, bottom_f, x, y + radius);
+      if (spec_shape == 0) {
+        path.Reset();
+        if (height > radius * 2.0f) {
+          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
+          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
+          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
+          path.AddLine(x, bottom_f, x, y + radius);
+        } else {
+          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        }
+        path.CloseFigure();
+        g.FillPath(&barBrush, &path);
       } else {
-        path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
-      path.CloseFigure();
-      g.FillPath(&barBrush, &path);
     } else {
-      g.FillRectangle(&barBrush, x, y, bar_w, height);
+      // Solid color
+      Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, r1, g1, b1));
+
+      if (spec_shape == 0) {
+        path.Reset();
+        if (height > radius * 2.0f) {
+          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
+          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
+          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
+          path.AddLine(x, bottom_f, x, y + radius);
+        } else {
+          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
+        }
+        path.CloseFigure();
+        g.FillPath(&barBrush, &path);
+      } else {
+        g.FillRectangle(&barBrush, x, y, bar_w, height);
+      }
     }
   }
 
