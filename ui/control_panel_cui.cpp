@@ -208,14 +208,12 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
         
     case WM_ERASEBKGND: {
-        // Paint background based on current theme setting to prevent flash
-        HDC hdc = (HDC)wp;
-        RECT rc;
-        GetClientRect(wnd, &rc);
-        COLORREF bg_color = get_nowbar_initial_bg_color();
-        HBRUSH brush = CreateSolidBrush(bg_color);
-        FillRect(hdc, &rc, brush);
-        DeleteObject(brush);
+        // All painting is double-buffered (offscreen cache + BitBlt), so erasing
+        // the screen DC here is unnecessary.  During resize the system can set the
+        // erase flag between spectrum animation frames; if we fill the screen DC
+        // and the next WM_PAINT only BitBlts the spectrum area (partial update
+        // region), the non-spectrum areas keep the erase fill, producing a visible
+        // black box.  Returning 1 without painting avoids this.
         return 1;
     }
         
