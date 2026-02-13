@@ -531,13 +531,6 @@ private:
     // Theme management
     void apply_theme();  // Apply theme based on theme mode, background style, and playback state
 
-    // Custom button icons (PNG/ICO custom icons)
-    std::unique_ptr<Gdiplus::Bitmap> m_cbutton_icons[6];  // Cached custom icons
-    pfc::string8 m_cbutton_icon_paths[6];  // Cached paths to detect changes
-    
-    // Methods for custom icon loading
-    void load_custom_icon(int button_index);
-    void reload_all_custom_icons();
 };
 
 } // namespace nowbar
