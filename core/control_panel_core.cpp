@@ -485,9 +485,6 @@ void ControlPanelCore::on_settings_changed() {
   // Update and recompile title format strings
   update_title_formats();
   
-  // Reload custom button icons
-  reload_all_custom_icons();
-  
   // Update glass effect state from preferences
   m_glass_effect_enabled = get_nowbar_glass_effect_enabled();
 
@@ -2397,52 +2394,93 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     int inset = static_cast<int>(cw * (1.0f - 0.70f * cbutton_scale) / 2.0f);
     RECT iconRect = {rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset};
     
-    // Check if custom icon is available for this button
-    if (m_cbutton_icons[index] && m_cbutton_icons[index]->GetLastStatus() == Gdiplus::Ok) {
-      // Draw custom icon with opacity and state-based tinting
-      int icon_w = iconRect.right - iconRect.left;
-      int icon_h = iconRect.bottom - iconRect.top;
-      
-      // For fb2k actions with checked state, apply a color tint to the icon
-      // We'll use a color matrix to tint the image towards the accent color
-      float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
-      float iconAlpha = m_cbutton_opacity;
-      
-      if (is_fb2k_action) {
-        const auto& state = m_cbutton_states[index];
-        if (state.disabled) {
-          // Reduce brightness for disabled state
-          tintR = tintG = tintB = 0.4f;
-          iconAlpha *= 0.5f;
-        } else if (state.checked) {
-          // Tint towards accent color for checked state
-          tintR = icon_accent_color.GetR() / 255.0f;
-          tintG = icon_accent_color.GetG() / 255.0f;
-          tintB = icon_accent_color.GetB() / 255.0f;
+    // Check if a glyph character is set for this button
+    pfc::string8 glyph_utf8 = get_nowbar_cbutton_icon_path(index);
+    if (!glyph_utf8.is_empty()) {
+      // Render glyph via GDI DrawTextW for font linking (emoji/symbol fallback),
+      // then composite onto GDI+ Graphics with alpha support.
+
+      // Determine glyph color from command state
+      Gdiplus::Color glyphColor;
+      if (is_fb2k_action && m_cbutton_states[index].disabled) {
+        glyphColor = Gdiplus::Color(static_cast<BYTE>(alpha * 0.5f),
+            icon_secondary_color.GetR() * 40 / 100,
+            icon_secondary_color.GetG() * 40 / 100,
+            icon_secondary_color.GetB() * 40 / 100);
+      } else if (is_fb2k_action && m_cbutton_states[index].checked) {
+        glyphColor = Gdiplus::Color(alpha,
+            icon_accent_color.GetR(), icon_accent_color.GetG(), icon_accent_color.GetB());
+      } else {
+        glyphColor = Gdiplus::Color(alpha,
+            icon_secondary_color.GetR(), icon_secondary_color.GetG(), icon_secondary_color.GetB());
+      }
+
+      // Convert glyph to wide string
+      pfc::stringcvt::string_wide_from_utf8 wide_glyph(glyph_utf8);
+
+      // Calculate font size from glyph_size percentage
+      int glyph_size_pct = get_nowbar_cbutton_glyph_size(index);
+      int icon_size = std::min(iconRect.right - iconRect.left, iconRect.bottom - iconRect.top);
+      int font_height = (int)(icon_size * glyph_size_pct / 100.0f);
+
+      int gw = iconRect.right - iconRect.left;
+      int gh = iconRect.bottom - iconRect.top;
+
+      // Create a 32bpp DIB for GDI text rendering
+      BITMAPINFO bmi = {};
+      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      bmi.bmiHeader.biWidth = gw;
+      bmi.bmiHeader.biHeight = -gh;  // top-down
+      bmi.bmiHeader.biPlanes = 1;
+      bmi.bmiHeader.biBitCount = 32;
+      bmi.bmiHeader.biCompression = BI_RGB;
+
+      BYTE* pBits = nullptr;
+      HDC memDC = CreateCompatibleDC(NULL);
+      HBITMAP hBmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, (void**)&pBits, NULL, 0);
+      HBITMAP hOldBmp = (HBITMAP)SelectObject(memDC, hBmp);
+
+      // GDI font with DEFAULT_CHARSET triggers Windows font linking
+      HFONT hFont = CreateFontW(-font_height, 0, 0, 0, FW_NORMAL,
+          FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+          CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+          DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+      HFONT hOldFont = (HFONT)SelectObject(memDC, hFont);
+
+      SetBkMode(memDC, TRANSPARENT);
+      SetTextColor(memDC, RGB(255, 255, 255));
+
+      RECT textRect = {0, 0, gw, gh};
+      DrawTextW(memDC, wide_glyph, -1, &textRect,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+      SelectObject(memDC, hOldFont);
+      DeleteObject(hFont);
+
+      // Colorize: white text intensity becomes alpha mask for desired color
+      BYTE cr = glyphColor.GetR(), cg = glyphColor.GetG(), cb = glyphColor.GetB();
+      BYTE ca = glyphColor.GetA();
+      for (int py = 0; py < gh; py++) {
+        BYTE* row = pBits + py * gw * 4;
+        for (int px = 0; px < gw; px++) {
+          BYTE* p = row + px * 4;
+          BYTE intensity = p[1];  // Green channel (uniform with ANTIALIASED_QUALITY)
+          if (intensity > 0) {
+            p[0] = cb;
+            p[1] = cg;
+            p[2] = cr;
+            p[3] = (BYTE)((intensity * ca) / 255);
+          }
         }
       }
-      
-      // Create color matrix for alpha blending and optional tinting
-      Gdiplus::ColorMatrix cm = {
-        tintR, 0.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, tintG, 0.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, tintB, 0.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, iconAlpha, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 1.0f
-      };
-      Gdiplus::ImageAttributes ia;
-      ia.SetColorMatrix(&cm);
-      
-      // Use high-quality interpolation for sharp icon scaling (especially for ICO files)
-      Gdiplus::InterpolationMode oldMode = g.GetInterpolationMode();
-      g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-      
-      Gdiplus::Rect destRect(iconRect.left, iconRect.top, icon_w, icon_h);
-      g.DrawImage(m_cbutton_icons[index].get(), destRect,
-                  0, 0, m_cbutton_icons[index]->GetWidth(), m_cbutton_icons[index]->GetHeight(),
-                  Gdiplus::UnitPixel, &ia);
-      
-      g.SetInterpolationMode(oldMode);  // Restore original mode
+
+      // Composite onto main graphics
+      Gdiplus::Bitmap glyphBmp(gw, gh, gw * 4, PixelFormat32bppARGB, pBits);
+      g.DrawImage(&glyphBmp, (INT)iconRect.left, (INT)iconRect.top);
+
+      SelectObject(memDC, hOldBmp);
+      DeleteObject(hBmp);
+      DeleteDC(memDC);
     } else {
       // Fallback to default numbered square icon with state-based color
       Gdiplus::Color iconColor(alpha, baseIconColor.GetR(), baseIconColor.GetG(), baseIconColor.GetB());
@@ -6775,181 +6813,6 @@ void ControlPanelCore::draw_radio_icon(Gdiplus::Graphics &g, const RECT &rect,
   g.SetTransform(&oldMatrix);
 }
 
-// Load a custom icon for a specific button index
-void ControlPanelCore::load_custom_icon(int button_index) {
-  if (button_index < 0 || button_index >= 6) return;
-  
-  pfc::string8 path = get_nowbar_cbutton_icon_path(button_index);
-  
-  // Check if path changed
-  if (path == m_cbutton_icon_paths[button_index]) {
-    return;  // No change, keep existing icon
-  }
-  
-  // Update cached path
-  m_cbutton_icon_paths[button_index] = path;
-  
-  // Clear existing icon
-  m_cbutton_icons[button_index].reset();
-  
-  // If empty path, use default icon (null bitmap)
-  if (path.is_empty()) {
-    return;
-  }
-  
-  // Check if the file is an SVG (case-insensitive)
-  pfc::string8 path_lower = path;
-  path_lower.toLower();
-  bool is_svg = path_lower.endsWith(".svg");
-  
-  if (is_svg) {
-    // Handle SVG files using foo_svg_services
-    try {
-      // Check if SVG services are available
-      svg_services::svg_services::ptr svg_api;
-      if (!fb2k::std_api_try_get(svg_api)) {
-        // SVG services not installed - fall back to default icon
-        return;
-      }
-      
-      // Read the SVG file contents
-      abort_callback_dummy aborter;
-      std::vector<uint8_t> svg_data;
-      try {
-        file::ptr file_ptr;
-        filesystem::g_open_read(file_ptr, path.c_str(), aborter);
-        
-        // Read file size
-        t_filesize file_size = file_ptr->get_size(aborter);
-        if (file_size == filesize_invalid || file_size > 52000000) {
-          // File too large or size unknown
-          return;
-        }
-        
-        svg_data.resize(static_cast<size_t>(file_size));
-        file_ptr->read(svg_data.data(), svg_data.size(), aborter);
-      } catch (...) {
-        // File read failed
-        return;
-      }
-      
-      // Get target icon size (use a reasonable size for high quality)
-      // The button size is typically around 38 pixels, but we render at a higher
-      // resolution for quality scaling. Using 128x128 provides good quality.
-      const int render_size = 128;
-      
-      // Allocate buffer for rendered bitmap (BGRA format, 4 bytes per pixel)
-      std::vector<uint8_t> bitmap_data(static_cast<size_t>(render_size) * static_cast<size_t>(render_size) * 4);
-      
-      // Parse and render the SVG
-      auto svg_document = svg_api->open(svg_data.data(), svg_data.size());
-      svg_document->render(
-        render_size, render_size,
-        svg_services::Position::Centred,
-        svg_services::ScalingMode::Fit,
-        svg_services::PixelFormat::BGRA,
-        bitmap_data.data(),
-        bitmap_data.size()
-      );
-      
-      // Create a GDI+ bitmap from the rendered data
-      Gdiplus::Bitmap* bitmap = new Gdiplus::Bitmap(
-        render_size, render_size, render_size * 4,
-        PixelFormat32bppARGB, bitmap_data.data()
-      );
-      
-      if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-        // GDI+ Bitmap from memory doesn't own the data, so we need to create a copy
-        Gdiplus::Bitmap* copy = new Gdiplus::Bitmap(render_size, render_size, PixelFormat32bppARGB);
-        if (copy && copy->GetLastStatus() == Gdiplus::Ok) {
-          Gdiplus::Graphics gfx(copy);
-          gfx.DrawImage(bitmap, 0, 0, render_size, render_size);
-          delete bitmap;
-          m_cbutton_icons[button_index].reset(copy);
-        } else {
-          delete copy;
-          delete bitmap;
-        }
-      } else {
-        delete bitmap;
-      }
-    } catch (const std::exception&) {
-      // SVG rendering failed - use default icon
-      m_cbutton_icons[button_index].reset();
-    } catch (...) {
-      // Unknown error - use default icon
-      m_cbutton_icons[button_index].reset();
-    }
-    return;
-  }
-  
-  // Handle PNG/ICO files using GDI+
-  // Convert UTF-8 path to wide string for GDI+
-  int wide_len = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
-  if (wide_len <= 0) return;
-  
-  std::vector<wchar_t> wide_path(wide_len);
-  MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wide_path.data(), wide_len);
-  
-  // Load bitmap from file
-  Gdiplus::Bitmap* bitmap = Gdiplus::Bitmap::FromFile(wide_path.data());
-  if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-    // For ICO files, select the largest available frame for best quality
-    // ICO files contain multiple resolutions; we want the biggest one
-    UINT frameCount = bitmap->GetFrameCount(&Gdiplus::FrameDimensionResolution);
-    if (frameCount > 1) {
-      // Find the frame with the largest dimensions
-      UINT bestFrame = 0;
-      UINT bestSize = 0;
-      
-      for (UINT i = 0; i < frameCount; i++) {
-        bitmap->SelectActiveFrame(&Gdiplus::FrameDimensionResolution, i);
-        UINT size = bitmap->GetWidth() * bitmap->GetHeight();
-        if (size > bestSize) {
-          bestSize = size;
-          bestFrame = i;
-        }
-      }
-      
-      // Select the best frame
-      bitmap->SelectActiveFrame(&Gdiplus::FrameDimensionResolution, bestFrame);
-      m_cbutton_icons[button_index].reset(bitmap);
-    } else {
-      // For PNG and other single-frame formats, FromFile() may leave the bitmap 
-      // in a lazy-loaded state. Force full loading by creating a copy.
-      // This ensures the bitmap is fully materialized and displays immediately.
-      UINT w = bitmap->GetWidth();
-      UINT h = bitmap->GetHeight();
-      
-      Gdiplus::Bitmap* copy = new Gdiplus::Bitmap(w, h, PixelFormat32bppARGB);
-      if (copy && copy->GetLastStatus() == Gdiplus::Ok) {
-        Gdiplus::Graphics gfx(copy);
-        gfx.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        gfx.DrawImage(bitmap, 0, 0, w, h);
-        delete bitmap;
-        m_cbutton_icons[button_index].reset(copy);
-      } else {
-        delete copy;
-        m_cbutton_icons[button_index].reset(bitmap);
-      }
-    }
-  } else {
-    // Load failed, cleanup and use default
-    delete bitmap;
-    m_cbutton_icons[button_index].reset();
-  }
-}
-
-// Reload all custom icons (called on settings change)
-void ControlPanelCore::reload_all_custom_icons() {
-  for (int i = 0; i < 6; i++) {
-    // Force reload by clearing both cached path AND the icon itself
-    m_cbutton_icon_paths[i].reset();
-    m_cbutton_icons[i].reset();  // Also clear the cached icon
-    load_custom_icon(i);
-  }
-  invalidate();
-}
 
 void ControlPanelCore::start_waveform_computation() {
   cancel_waveform_computation();
@@ -7081,12 +6944,13 @@ void ControlPanelCore::start_waveform_computation() {
         }
       }
 
-      // Save to disk cache before moving peaks
+      // Persist to disk cache (file I/O only, no shared state)
       save_waveform_entry(path.c_str(), peaks);
 
-      // Store result
+      // Store result and update in-memory cache under the same lock
       {
         std::lock_guard<std::mutex> lock(m_waveform_mutex);
+        m_waveform_cache[std::string(path.c_str())] = peaks;
         m_waveform_peaks = std::move(peaks);
         m_waveform_valid = true;
         m_waveform_is_stream = false;
@@ -7094,8 +6958,9 @@ void ControlPanelCore::start_waveform_computation() {
       }
       m_waveform_computing = false;
 
-      // Trigger full repaint on main thread (layout changes with waveform data)
-      m_needs_full_repaint = true;
+      // Trigger full repaint on main thread via InvalidateRect (the correct
+      // cross-thread repaint mechanism on Windows). The main thread's WM_PAINT
+      // handler sets m_needs_full_repaint itself — do not write it from here.
       if (hwnd && ::IsWindow(hwnd)) {
         ::InvalidateRect(hwnd, nullptr, FALSE);
       }
@@ -7223,14 +7088,12 @@ void ControlPanelCore::save_waveform_entry(const char* path, const std::vector<f
   uint32_t peak_count = static_cast<uint32_t>(peaks.size());
   file.write(reinterpret_cast<const char*>(&peak_count), 4);
   file.write(reinterpret_cast<const char*>(peaks.data()), peak_count * sizeof(float));
-
-  // Insert into in-memory map
-  m_waveform_cache[std::string(path)] = peaks;
 }
 
 bool ControlPanelCore::lookup_waveform_cache(const char* path, std::vector<float>& out_peaks) {
   load_waveform_cache();
 
+  std::lock_guard<std::mutex> lock(m_waveform_mutex);
   auto it = m_waveform_cache.find(std::string(path));
   if (it != m_waveform_cache.end()) {
     out_peaks = it->second;
