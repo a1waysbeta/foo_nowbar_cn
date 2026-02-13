@@ -209,6 +209,13 @@ static cfg_int cfg_nowbar_visualization_mode(
     0  // Default: Disabled (0=Disabled, 1=Spectrum, 2=Waveform)
 );
 
+// Remembers spectrum vs waveform selection independently of the enable checkbox,
+// so the user's choice persists even when visualization is disabled.
+static cfg_int cfg_nowbar_vis_type(
+    GUID{0xABCDEF5E, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xEE}},
+    1  // Default: Spectrum (1=Spectrum, 2=Waveform)
+);
+
 static cfg_int cfg_nowbar_spectrum_color(
     GUID{0xABCDEF81, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x81}},
     RGB(100, 180, 255)  // Default: light blue
@@ -457,6 +464,32 @@ static cfg_string cfg_cbutton6_icon(
     ""  // Default: empty
 );
 
+// Custom Button Glyph sizes (percentage of icon area, default 80%)
+static cfg_int cfg_cbutton1_glyph_size(
+    GUID{0xABCDEF56, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE6}},
+    80
+);
+static cfg_int cfg_cbutton2_glyph_size(
+    GUID{0xABCDEF57, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE7}},
+    80
+);
+static cfg_int cfg_cbutton3_glyph_size(
+    GUID{0xABCDEF58, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE8}},
+    80
+);
+static cfg_int cfg_cbutton4_glyph_size(
+    GUID{0xABCDEF59, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE9}},
+    80
+);
+static cfg_int cfg_cbutton5_glyph_size(
+    GUID{0xABCDEF5A, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xEA}},
+    80
+);
+static cfg_int cfg_cbutton6_glyph_size(
+    GUID{0xABCDEF5B, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xEB}},
+    80
+);
+
 // Custom Button Tooltip labels (user-friendly names for tooltips)
 static cfg_string cfg_cbutton1_label(
     GUID{0xABCDEF60, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF0}},
@@ -504,7 +537,8 @@ struct ConfigFileButtonConfig {
     bool enabled = false;      // Only used for buttons 1-6
     int action = 0;            // 0=none, 1=url, 2=executable, 3=foobar2k
     pfc::string8 path;         // URL, exe path, or fb2k command
-    pfc::string8 icon;         // Only used for buttons 1-6
+    pfc::string8 icon;         // Glyph character (only used for buttons 1-6)
+    int glyph_size = 80;       // Glyph size percentage (default 80%)
     pfc::string8 label;        // Tooltip/description
 };
 
@@ -608,10 +642,11 @@ static void create_default_config_file() {
         file << "action = " << action_to_string(get_nowbar_cbutton_action(i-1)) << "\n";
         file << "path = " << get_nowbar_cbutton_path(i-1).c_str() << "\n";
         file << "icon = " << get_nowbar_cbutton_icon_path(i-1).c_str() << "\n";
+        file << "glyph_size = " << get_nowbar_cbutton_glyph_size(i-1) << "\n";
         file << "label = " << get_nowbar_cbutton_label(i-1).c_str() << "\n";
         file << "\n";
     }
-    
+
     // Buttons 7-12 (hidden)
     for (int i = 7; i <= 12; i++) {
         file << "[button:" << i << "]\n";
@@ -699,6 +734,8 @@ static void load_config_file() {
             g_config_buttons[current_button].path = value.c_str();
         } else if (key == "icon") {
             g_config_buttons[current_button].icon = value.c_str();
+        } else if (key == "glyph_size") {
+            g_config_buttons[current_button].glyph_size = atoi(std::string(value).c_str());
         } else if (key == "label") {
             g_config_buttons[current_button].label = value.c_str();
         }
@@ -749,10 +786,11 @@ static void save_config_file() {
         file << "action = " << action_to_string(get_nowbar_cbutton_action(i-1)) << "\n";
         file << "path = " << get_nowbar_cbutton_path(i-1).c_str() << "\n";
         file << "icon = " << get_nowbar_cbutton_icon_path(i-1).c_str() << "\n";
+        file << "glyph_size = " << get_nowbar_cbutton_glyph_size(i-1) << "\n";
         file << "label = " << get_nowbar_cbutton_label(i-1).c_str() << "\n";
         file << "\n";
     }
-    
+
     // Buttons 7-12 (hidden) - read from cached config
     for (int i = 7; i <= 12; i++) {
         file << "[button:" << i << "]\n";
@@ -770,6 +808,7 @@ static void save_config_file() {
         g_config_buttons[i].action = get_nowbar_cbutton_action(i);
         g_config_buttons[i].path = get_nowbar_cbutton_path(i);
         g_config_buttons[i].icon = get_nowbar_cbutton_icon_path(i);
+        g_config_buttons[i].glyph_size = get_nowbar_cbutton_glyph_size(i);
         g_config_buttons[i].label = get_nowbar_cbutton_label(i);
     }
 }
@@ -828,7 +867,8 @@ struct ButtonConfig {
     bool enabled = false;
     int action = 0;
     pfc::string8 path;
-    pfc::string8 icon;
+    pfc::string8 icon;   // Glyph character
+    int glyph_size = 80;  // Glyph size percentage
     pfc::string8 label;
 };
 
@@ -848,6 +888,7 @@ static pfc::string8 serialize_profile(const CButtonProfile& profile) {
         json << ",\"action\":" << profile.buttons[i].action;
         json << ",\"path\":\"" << escape_json_string(profile.buttons[i].path.c_str()) << "\"";
         json << ",\"icon\":\"" << escape_json_string(profile.buttons[i].icon.c_str()) << "\"";
+        json << ",\"glyph_size\":" << profile.buttons[i].glyph_size;
         json << ",\"label\":\"" << escape_json_string(profile.buttons[i].label.c_str()) << "\"}";
     }
     json << "]}";
@@ -986,6 +1027,9 @@ static const char* parse_profile(const char* p, CButtonProfile& profile) {
                                         p = parse_json_string(p, profile.buttons[btn_idx].path);
                                     } else if (btn_key == "icon") {
                                         p = parse_json_string(p, profile.buttons[btn_idx].icon);
+                                    } else if (btn_key == "glyph_size") {
+                                        profile.buttons[btn_idx].glyph_size = atoi(p);
+                                        while (*p && ((*p >= '0' && *p <= '9') || *p == '-')) p++;
                                     } else if (btn_key == "label") {
                                         p = parse_json_string(p, profile.buttons[btn_idx].label);
                                     } else {
@@ -1053,6 +1097,7 @@ static std::vector<CButtonProfile> get_all_profiles() {
             def.buttons[i].action = get_nowbar_cbutton_action(i);
             def.buttons[i].path = get_nowbar_cbutton_path(i);
             def.buttons[i].icon = get_nowbar_cbutton_icon_path(i);
+            def.buttons[i].glyph_size = get_nowbar_cbutton_glyph_size(i);
             def.buttons[i].label = cfg_cbutton1_label.get();  // Will fix below
         }
         // Fix labels
@@ -1306,7 +1351,14 @@ static void load_profile_to_config(const CButtonProfile& profile) {
     cfg_cbutton4_icon = profile.buttons[3].icon;
     cfg_cbutton5_icon = profile.buttons[4].icon;
     cfg_cbutton6_icon = profile.buttons[5].icon;
-    
+
+    cfg_cbutton1_glyph_size = profile.buttons[0].glyph_size > 0 ? profile.buttons[0].glyph_size : 80;
+    cfg_cbutton2_glyph_size = profile.buttons[1].glyph_size > 0 ? profile.buttons[1].glyph_size : 80;
+    cfg_cbutton3_glyph_size = profile.buttons[2].glyph_size > 0 ? profile.buttons[2].glyph_size : 80;
+    cfg_cbutton4_glyph_size = profile.buttons[3].glyph_size > 0 ? profile.buttons[3].glyph_size : 80;
+    cfg_cbutton5_glyph_size = profile.buttons[4].glyph_size > 0 ? profile.buttons[4].glyph_size : 80;
+    cfg_cbutton6_glyph_size = profile.buttons[5].glyph_size > 0 ? profile.buttons[5].glyph_size : 80;
+
     cfg_cbutton1_label = profile.buttons[0].label;
     cfg_cbutton2_label = profile.buttons[1].label;
     cfg_cbutton3_label = profile.buttons[2].label;
@@ -1344,7 +1396,14 @@ static void save_config_to_profile(CButtonProfile& profile) {
     profile.buttons[3].icon = cfg_cbutton4_icon.get();
     profile.buttons[4].icon = cfg_cbutton5_icon.get();
     profile.buttons[5].icon = cfg_cbutton6_icon.get();
-    
+
+    profile.buttons[0].glyph_size = cfg_cbutton1_glyph_size;
+    profile.buttons[1].glyph_size = cfg_cbutton2_glyph_size;
+    profile.buttons[2].glyph_size = cfg_cbutton3_glyph_size;
+    profile.buttons[3].glyph_size = cfg_cbutton4_glyph_size;
+    profile.buttons[4].glyph_size = cfg_cbutton5_glyph_size;
+    profile.buttons[5].glyph_size = cfg_cbutton6_glyph_size;
+
     profile.buttons[0].label = cfg_cbutton1_label.get();
     profile.buttons[1].label = cfg_cbutton2_label.get();
     profile.buttons[2].label = cfg_cbutton3_label.get();
@@ -1368,6 +1427,7 @@ static bool export_profile_to_file(const CButtonProfile& profile, const wchar_t*
         json << "      \"action\": " << profile.buttons[i].action << ",\n";
         json << "      \"path\": \"" << escape_json_string(profile.buttons[i].path.c_str()) << "\",\n";
         json << "      \"icon\": \"" << escape_json_string(profile.buttons[i].icon.c_str()) << "\",\n";
+        json << "      \"glyph_size\": " << profile.buttons[i].glyph_size << ",\n";
         json << "      \"label\": \"" << escape_json_string(profile.buttons[i].label.c_str()) << "\"\n";
         json << "    }" << (i < 5 ? "," : "") << "\n";
     }
@@ -1709,6 +1769,18 @@ pfc::string8 get_nowbar_cbutton_icon_path(int button_index) {
         case 4: return cfg_cbutton5_icon.get();
         case 5: return cfg_cbutton6_icon.get();
         default: return pfc::string8();
+    }
+}
+
+int get_nowbar_cbutton_glyph_size(int button_index) {
+    switch (button_index) {
+        case 0: return cfg_cbutton1_glyph_size;
+        case 1: return cfg_cbutton2_glyph_size;
+        case 2: return cfg_cbutton3_glyph_size;
+        case 3: return cfg_cbutton4_glyph_size;
+        case 4: return cfg_cbutton5_glyph_size;
+        case 5: return cfg_cbutton6_glyph_size;
+        default: return 80;
     }
 }
 
@@ -2499,27 +2571,21 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_PATH), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_BROWSE), show_cbutton);
     
-    // Custom Button icon controls
+    // Custom Button font + glyph controls
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_FOO_SVG_SERVICES_LINK), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_GLYPH_LABEL), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON_CLEAR), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON_CLEAR), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ICON_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ICON_CLEAR), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ICON_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ICON_CLEAR), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ICON_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ICON_CLEAR), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ICON_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ICON_CLEAR), show_cbutton);
     // Icon row number labels
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON_LABEL), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON_LABEL), show_cbutton);
@@ -2862,9 +2928,11 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             int vis_mode = get_nowbar_visualization_mode();
             CheckDlgButton(hwnd, IDC_VIS_ENABLE_CHECK, (vis_mode != 0) ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_VIS_60FPS_CHECK, cfg_nowbar_vis_60fps ? BST_CHECKED : BST_UNCHECKED);
-            // Default to Spectrum radio when disabled
+            // Restore spectrum/waveform selection from the independent sub-mode setting
+            // so the user's choice is remembered even when visualization is disabled.
+            int vis_type = (vis_mode != 0) ? vis_mode : (int)cfg_nowbar_vis_type;
             CheckRadioButton(hwnd, IDC_VIS_SPECTRUM_RADIO, IDC_VIS_WAVEFORM_RADIO,
-                (vis_mode == 2) ? IDC_VIS_WAVEFORM_RADIO : IDC_VIS_SPECTRUM_RADIO);
+                (vis_type == 2) ? IDC_VIS_WAVEFORM_RADIO : IDC_VIS_SPECTRUM_RADIO);
 
             // Populate spectrum width combo (Thin/Normal/Wide)
             HWND hSpecWidth = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO);
@@ -2981,13 +3049,39 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         uSetDlgItemText(hwnd, IDC_CBUTTON5_PATH, cfg_cbutton5_path);
         uSetDlgItemText(hwnd, IDC_CBUTTON6_PATH, cfg_cbutton6_path);
         
-        // Initialize icon path edit boxes
-        uSetDlgItemText(hwnd, IDC_CBUTTON1_ICON, cfg_cbutton1_icon);
-        uSetDlgItemText(hwnd, IDC_CBUTTON2_ICON, cfg_cbutton2_icon);
-        uSetDlgItemText(hwnd, IDC_CBUTTON3_ICON, cfg_cbutton3_icon);
-        uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
-        uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
-        uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+        // Initialize glyph comboboxes and size comboboxes
+        {
+            const wchar_t* glyph_presets[] = {
+                L"\u2605",  // ★ Star
+                L"\u2665",  // ♥ Heart
+                L"\u25B6",  // ▶ Play
+                L"\u25A0",  // ■ Stop
+                L"\u25CF",  // ● Circle
+                L"\u266B",  // ♫ Music
+                L"\u2699",  // ⚙ Gear
+                L"\u2197",  // ↗ Arrow
+                L"\u270E",  // ✎ Pencil
+                L"\u2302",  // ⌂ Home
+            };
+            const wchar_t* size_presets[] = {
+                L"50", L"60", L"70", L"80", L"90", L"100", L"120"
+            };
+            for (int btn = 0; btn < 6; btn++) {
+                // Populate glyph combobox with presets and set current value
+                HWND hGlyph = GetDlgItem(hwnd, IDC_CBUTTON1_ICON + btn * 3);
+                for (auto* g : glyph_presets)
+                    SendMessageW(hGlyph, CB_ADDSTRING, 0, (LPARAM)g);
+                pfc::string8 cur_glyph = get_nowbar_cbutton_icon_path(btn);
+                pfc::stringcvt::string_wide_from_utf8 wide_glyph(cur_glyph);
+                SetWindowTextW(hGlyph, wide_glyph);
+
+                // Populate size combobox with presets and set current value
+                HWND hSize = GetDlgItem(hwnd, IDC_CBUTTON1_GLYPH_SIZE + btn * 3);
+                for (auto* s : size_presets)
+                    SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)s);
+                SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE + btn * 3, get_nowbar_cbutton_glyph_size(btn), FALSE);
+            }
+        }
         
         // Initialize tooltip label edit boxes
         uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
@@ -3189,6 +3283,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
                     uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
                     uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
                     uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
@@ -3373,6 +3473,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
+                    SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
                     uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
                     uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
                     uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
@@ -3486,6 +3592,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                             uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
                             uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
                             uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+                            SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
+                            SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
+                            SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
+                            SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
+                            SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
+                            SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
                             uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
                             uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
                             uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
@@ -3494,7 +3606,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                             uSetDlgItemText(hwnd, IDC_CBUTTON6_LABEL, cfg_cbutton6_label);
                             update_all_cbutton_path_states(hwnd);
                             p_this->on_changed();
-                            
+
                             MessageBoxW(hwnd, L"Profile imported successfully.", L"Import", MB_OK | MB_ICONINFORMATION);
                         } else {
                             MessageBoxW(hwnd, L"Failed to import profile. Invalid file format.", L"Error", MB_OK | MB_ICONERROR);
@@ -3572,14 +3684,14 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             }
             break;
 
-        // Icon path edit changes
+        // Glyph combobox changes
         case IDC_CBUTTON1_ICON:
         case IDC_CBUTTON2_ICON:
         case IDC_CBUTTON3_ICON:
         case IDC_CBUTTON4_ICON:
         case IDC_CBUTTON5_ICON:
         case IDC_CBUTTON6_ICON:
-            if (HIWORD(wp) == EN_CHANGE) {
+            if (HIWORD(wp) == CBN_EDITCHANGE || HIWORD(wp) == CBN_SELCHANGE) {
                 p_this->on_changed();
             }
             break;
@@ -3596,56 +3708,14 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             }
             break;
 
-        // Icon browse buttons
-        case IDC_CBUTTON1_ICON_BROWSE:
-        case IDC_CBUTTON2_ICON_BROWSE:
-        case IDC_CBUTTON3_ICON_BROWSE:
-        case IDC_CBUTTON4_ICON_BROWSE:
-        case IDC_CBUTTON5_ICON_BROWSE:
-        case IDC_CBUTTON6_ICON_BROWSE:
-            if (HIWORD(wp) == BN_CLICKED) {
-                int icon_id = 0;
-                switch (LOWORD(wp)) {
-                    case IDC_CBUTTON1_ICON_BROWSE: icon_id = IDC_CBUTTON1_ICON; break;
-                    case IDC_CBUTTON2_ICON_BROWSE: icon_id = IDC_CBUTTON2_ICON; break;
-                    case IDC_CBUTTON3_ICON_BROWSE: icon_id = IDC_CBUTTON3_ICON; break;
-                    case IDC_CBUTTON4_ICON_BROWSE: icon_id = IDC_CBUTTON4_ICON; break;
-                    case IDC_CBUTTON5_ICON_BROWSE: icon_id = IDC_CBUTTON5_ICON; break;
-                    case IDC_CBUTTON6_ICON_BROWSE: icon_id = IDC_CBUTTON6_ICON; break;
-                }
-                wchar_t filename[MAX_PATH] = L"";
-                OPENFILENAMEW ofn = {};
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = hwnd;
-                ofn.lpstrFilter = L"Image Files (*.png;*.ico;*.svg)\0*.png;*.ico;*.svg\0PNG Files (*.png)\0*.png\0ICO Files (*.ico)\0*.ico\0SVG Files (*.svg)\0*.svg\0All Files (*.*)\0*.*\0";
-                ofn.lpstrFile = filename;
-                ofn.nMaxFile = MAX_PATH;
-                ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-                if (GetOpenFileNameW(&ofn)) {
-                    SetDlgItemTextW(hwnd, icon_id, filename);
-                    p_this->on_changed();
-                }
-            }
-            break;
-
-        // Icon clear buttons
-        case IDC_CBUTTON1_ICON_CLEAR:
-        case IDC_CBUTTON2_ICON_CLEAR:
-        case IDC_CBUTTON3_ICON_CLEAR:
-        case IDC_CBUTTON4_ICON_CLEAR:
-        case IDC_CBUTTON5_ICON_CLEAR:
-        case IDC_CBUTTON6_ICON_CLEAR:
-            if (HIWORD(wp) == BN_CLICKED) {
-                int icon_id = 0;
-                switch (LOWORD(wp)) {
-                    case IDC_CBUTTON1_ICON_CLEAR: icon_id = IDC_CBUTTON1_ICON; break;
-                    case IDC_CBUTTON2_ICON_CLEAR: icon_id = IDC_CBUTTON2_ICON; break;
-                    case IDC_CBUTTON3_ICON_CLEAR: icon_id = IDC_CBUTTON3_ICON; break;
-                    case IDC_CBUTTON4_ICON_CLEAR: icon_id = IDC_CBUTTON4_ICON; break;
-                    case IDC_CBUTTON5_ICON_CLEAR: icon_id = IDC_CBUTTON5_ICON; break;
-                    case IDC_CBUTTON6_ICON_CLEAR: icon_id = IDC_CBUTTON6_ICON; break;
-                }
-                SetDlgItemTextW(hwnd, icon_id, L"");
+        // Size combobox changes
+        case IDC_CBUTTON1_GLYPH_SIZE:
+        case IDC_CBUTTON2_GLYPH_SIZE:
+        case IDC_CBUTTON3_GLYPH_SIZE:
+        case IDC_CBUTTON4_GLYPH_SIZE:
+        case IDC_CBUTTON5_GLYPH_SIZE:
+        case IDC_CBUTTON6_GLYPH_SIZE:
+            if (HIWORD(wp) == CBN_EDITCHANGE || HIWORD(wp) == CBN_SELCHANGE) {
                 p_this->on_changed();
             }
             break;
@@ -3809,7 +3879,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 int sel = TabCtrl_GetCurSel(pnmhdr->hwndFrom);
                 p_this->switch_tab(sel);
             }
-            else if ((pnmhdr->idFrom == IDC_FOO_ARTWORK_LINK || pnmhdr->idFrom == IDC_FOO_TRAYCONTROLS_LINK || pnmhdr->idFrom == IDC_FOO_SVG_SERVICES_LINK) && (pnmhdr->code == NM_CLICK || pnmhdr->code == NM_RETURN)) {
+            else if ((pnmhdr->idFrom == IDC_FOO_ARTWORK_LINK || pnmhdr->idFrom == IDC_FOO_TRAYCONTROLS_LINK) && (pnmhdr->code == NM_CLICK || pnmhdr->code == NM_RETURN)) {
                 NMLINK* pnmlink = reinterpret_cast<NMLINK*>(lp);
                 ShellExecuteW(nullptr, L"open", pnmlink->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
             }
@@ -3911,12 +3981,12 @@ void nowbar_preferences::apply_settings() {
         {
             bool vis_enabled = (IsDlgButtonChecked(m_hwnd, IDC_VIS_ENABLE_CHECK) == BST_CHECKED);
             bool waveform_sel = (IsDlgButtonChecked(m_hwnd, IDC_VIS_WAVEFORM_RADIO) == BST_CHECKED);
+            int sub_mode = waveform_sel ? 2 : 1;
+            cfg_nowbar_vis_type = sub_mode;  // Always remember spectrum/waveform selection
             if (!vis_enabled) {
                 cfg_nowbar_visualization_mode = 0;  // Disabled
-            } else if (waveform_sel) {
-                cfg_nowbar_visualization_mode = 2;  // Waveform
             } else {
-                cfg_nowbar_visualization_mode = 1;  // Spectrum
+                cfg_nowbar_visualization_mode = sub_mode;
             }
 
             // Save per-visualization settings
@@ -3978,20 +4048,28 @@ void nowbar_preferences::apply_settings() {
         uGetDlgItemText(m_hwnd, IDC_CBUTTON6_PATH, path);
         cfg_cbutton6_path = path;
         
-        // Save Custom Button icon paths
-        pfc::string8 icon_path;
-        uGetDlgItemText(m_hwnd, IDC_CBUTTON1_ICON, icon_path);
-        cfg_cbutton1_icon = icon_path;
-        uGetDlgItemText(m_hwnd, IDC_CBUTTON2_ICON, icon_path);
-        cfg_cbutton2_icon = icon_path;
-        uGetDlgItemText(m_hwnd, IDC_CBUTTON3_ICON, icon_path);
-        cfg_cbutton3_icon = icon_path;
-        uGetDlgItemText(m_hwnd, IDC_CBUTTON4_ICON, icon_path);
-        cfg_cbutton4_icon = icon_path;
-        uGetDlgItemText(m_hwnd, IDC_CBUTTON5_ICON, icon_path);
-        cfg_cbutton5_icon = icon_path;
-        uGetDlgItemText(m_hwnd, IDC_CBUTTON6_ICON, icon_path);
-        cfg_cbutton6_icon = icon_path;
+        // Save Custom Button glyph characters
+        pfc::string8 glyph;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON1_ICON, glyph);
+        cfg_cbutton1_icon = glyph;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON2_ICON, glyph);
+        cfg_cbutton2_icon = glyph;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON3_ICON, glyph);
+        cfg_cbutton3_icon = glyph;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON4_ICON, glyph);
+        cfg_cbutton4_icon = glyph;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON5_ICON, glyph);
+        cfg_cbutton5_icon = glyph;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON6_ICON, glyph);
+        cfg_cbutton6_icon = glyph;
+
+        // Save Custom Button glyph sizes
+        cfg_cbutton1_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON1_GLYPH_SIZE, NULL, FALSE);
+        cfg_cbutton2_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON2_GLYPH_SIZE, NULL, FALSE);
+        cfg_cbutton3_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON3_GLYPH_SIZE, NULL, FALSE);
+        cfg_cbutton4_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON4_GLYPH_SIZE, NULL, FALSE);
+        cfg_cbutton5_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON5_GLYPH_SIZE, NULL, FALSE);
+        cfg_cbutton6_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON6_GLYPH_SIZE, NULL, FALSE);
         
         // Save Custom Button tooltip labels
         pfc::string8 label;
@@ -4036,6 +4114,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_skip_low_rating_enabled = 0;  // Disabled (default)
             cfg_nowbar_skip_low_rating_threshold = 1;  // 1 (default)
             cfg_nowbar_visualization_mode = 0;  // Disabled (default)
+            cfg_nowbar_vis_type = 1;  // Default: Spectrum
             cfg_nowbar_spectrum_width = 1;  // Default: Normal
             cfg_nowbar_spectrum_shape = 0;  // Default: Pill
             cfg_nowbar_waveform_width = 1;  // Default: Normal
@@ -4121,7 +4200,25 @@ void nowbar_preferences::reset_settings() {
             cfg_cbutton4_path = "";
             cfg_cbutton5_path = "";
             cfg_cbutton6_path = "";
-            
+            cfg_cbutton1_icon = "";
+            cfg_cbutton2_icon = "";
+            cfg_cbutton3_icon = "";
+            cfg_cbutton4_icon = "";
+            cfg_cbutton5_icon = "";
+            cfg_cbutton6_icon = "";
+            cfg_cbutton1_glyph_size = 80;
+            cfg_cbutton2_glyph_size = 80;
+            cfg_cbutton3_glyph_size = 80;
+            cfg_cbutton4_glyph_size = 80;
+            cfg_cbutton5_glyph_size = 80;
+            cfg_cbutton6_glyph_size = 80;
+            cfg_cbutton1_label = "";
+            cfg_cbutton2_label = "";
+            cfg_cbutton3_label = "";
+            cfg_cbutton4_label = "";
+            cfg_cbutton5_label = "";
+            cfg_cbutton6_label = "";
+
             // Update UI
             CheckDlgButton(m_hwnd, IDC_CBUTTON1_ENABLE, BST_UNCHECKED);
             CheckDlgButton(m_hwnd, IDC_CBUTTON2_ENABLE, BST_UNCHECKED);
@@ -4141,6 +4238,12 @@ void nowbar_preferences::reset_settings() {
             SetDlgItemTextW(m_hwnd, IDC_CBUTTON4_PATH, L"");
             SetDlgItemTextW(m_hwnd, IDC_CBUTTON5_PATH, L"");
             SetDlgItemTextW(m_hwnd, IDC_CBUTTON6_PATH, L"");
+            // Reset glyph and font comboboxes, and label fields
+            for (int i = 0; i < 6; i++) {
+                SetWindowTextW(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON + i * 3), L"");
+                SetDlgItemInt(m_hwnd, IDC_CBUTTON1_GLYPH_SIZE + i * 3, 80, FALSE);
+                SetWindowTextW(GetDlgItem(m_hwnd, IDC_CBUTTON1_LABEL + i), L"");
+            }
             update_all_cbutton_path_states(m_hwnd);
         } else if (m_current_tab == 4) {
             // Reset Fonts & Colors tab settings
