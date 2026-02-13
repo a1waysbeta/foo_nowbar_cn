@@ -102,6 +102,14 @@ void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
 }
 
 void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) {
+    // When starting another track (manual next/prev), don't notify UI of "stopped" state
+    // The on_playback_new_track() callback will fire immediately after with correct state.
+    // Notifying "stopped" here would cause the UI to clear artwork/caches unnecessarily,
+    // causing a visual flash during track transitions.
+    if (p_reason == play_control::stop_reason_starting_another) {
+        return;
+    }
+
     // Handle infinite playback before clearing state
     if (p_reason == play_control::stop_reason_eof && get_nowbar_infinite_playback_enabled()) {
         handle_infinite_playback();
@@ -214,29 +222,47 @@ void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
 }
 
 void PlaybackStateManager::notify_state_changed() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto* cb : m_callbacks) {
-        cb->on_playback_state_changed(m_state);
+    std::vector<IPlaybackStateCallback*> callbacks;
+    PlaybackState state_snapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        callbacks = m_callbacks;
+        state_snapshot = m_state;
+    }
+    for (auto* cb : callbacks) {
+        cb->on_playback_state_changed(state_snapshot);
     }
 }
 
 void PlaybackStateManager::notify_time_changed(double time) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto* cb : m_callbacks) {
+    std::vector<IPlaybackStateCallback*> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        callbacks = m_callbacks;
+    }
+    for (auto* cb : callbacks) {
         cb->on_playback_time_changed(time);
     }
 }
 
 void PlaybackStateManager::notify_volume_changed(float volume) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto* cb : m_callbacks) {
+    std::vector<IPlaybackStateCallback*> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        callbacks = m_callbacks;
+    }
+    for (auto* cb : callbacks) {
         cb->on_volume_changed(volume);
     }
 }
 
 void PlaybackStateManager::notify_track_changed() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto* cb : m_callbacks) {
+    std::vector<IPlaybackStateCallback*> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        callbacks = m_callbacks;
+    }
+    for (auto* cb : callbacks) {
         cb->on_track_changed();
     }
 }
