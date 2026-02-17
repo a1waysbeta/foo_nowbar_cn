@@ -379,12 +379,6 @@ private:
     void destroy_spectrum_overlay();
     void ensure_spectrum_overlay(HDC ref_dc, int w, int h);
 
-    // Cached time display bitmap (avoids ClearType DrawString every frame)
-    std::unique_ptr<Gdiplus::Bitmap> m_time_display_cache;
-    std::wstring m_time_display_cache_str;
-    int m_time_display_cache_w = 0;
-    int m_time_display_cache_h = 0;
-
     // Spectrum hover fade for mode 1
     float m_spectrum_hover_opacity = 1.0f;  // Dims when hovering buttons in mode 1
 
