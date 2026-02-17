@@ -297,6 +297,7 @@ void ControlPanelCore::initialize(HWND hwnd) {
 }
 
 void ControlPanelCore::set_dark_mode(bool dark) {
+  bool mode_changed = (m_dark_mode != dark);
   m_dark_mode = dark;
   if (dark) {
     m_bg_color = Gdiplus::Color(255, 24, 24, 24);
@@ -329,13 +330,20 @@ void ControlPanelCore::set_dark_mode(bool dark) {
   // so the bar track blends with the empty artwork area
   m_track_color = dark ? RGB(60, 60, 60) : RGB(200, 200, 200);
 
-  // Invalidate caches but preserve m_prev_background for transitions
-  // The cached background may have different overlay colors, but transitions
-  // need it to crossfade smoothly. The draw code will regenerate a correct
-  // target background from the new theme colors.
+  // Invalidate caches
   m_bg_cache_valid = false;
   m_target_background.reset();
-  
+
+  // When dark/light mode changes, discard the cached background so that
+  // draw_background() does an instant switch instead of a crossfade.
+  // A crossfade across dark↔light boundaries looks wrong because foreground
+  // elements (text, icons) switch instantly while the background transitions
+  // gradually — resulting in dark text on a still-dark background (or vice versa).
+  if (mode_changed) {
+    m_prev_background.reset();
+    m_bg_transition_active = false;
+  }
+
   invalidate();
 }
 
@@ -472,7 +480,6 @@ void ControlPanelCore::apply_theme() {
 void ControlPanelCore::on_settings_changed() {
   m_needs_full_repaint = true;
   m_spectrum_bg_cache_valid = false;
-  m_time_display_cache.reset();
 
   // Apply theme based on current settings and playback state
   apply_theme();
@@ -1751,17 +1758,6 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
     // Track whether background animation is still in progress
     // The centralized animation loop in paint() will request the next frame
     m_bg_animating = m_bg_transition_active;
-    
-    // End of transition handling
-    if (transition_alpha >= 1.0f) {
-        // Transition complete - promote target to be the new "previous" cache
-        m_bg_transition_active = false;
-        m_prev_background = std::move(m_target_background);
-        m_prev_background_size = m_target_background_size;
-        m_bg_cache_valid = true;
-        m_prev_bg_style = bg_style;
-        // target is now empty (moved from), which is fine
-    }
   } else {
     // No transition - use cached background if available for performance
     m_bg_animating = false;  // No transition in progress
@@ -2441,21 +2437,89 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       HBITMAP hOldBmp = (HBITMAP)SelectObject(memDC, hBmp);
 
       // GDI font with DEFAULT_CHARSET triggers Windows font linking
+      pfc::string8 font_name = get_nowbar_cbutton_font(index);
+      pfc::stringcvt::string_wide_from_utf8 wide_font(font_name);
       HFONT hFont = CreateFontW(-font_height, 0, 0, 0, FW_NORMAL,
           FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
           CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-          DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+          DEFAULT_PITCH | FF_DONTCARE, wide_font.get_ptr());
       HFONT hOldFont = (HFONT)SelectObject(memDC, hFont);
 
       SetBkMode(memDC, TRANSPARENT);
       SetTextColor(memDC, RGB(255, 255, 255));
 
-      RECT textRect = {0, 0, gw, gh};
-      DrawTextW(memDC, wide_glyph, -1, &textRect,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+      const wchar_t* glyph_str = wide_glyph.get_ptr();
+      int charCount = (int)wcslen(glyph_str);
+
+      // Check if the string contains surrogate pairs (codepoints above U+FFFF).
+      // GetGlyphIndicesW doesn't handle surrogates, so skip it in that case.
+      bool has_surrogates = false;
+      for (int i = 0; i < charCount; i++) {
+        if (IS_HIGH_SURROGATE(glyph_str[i]) || IS_LOW_SURROGATE(glyph_str[i])) { has_surrogates = true; break; }
+      }
+
+      // Try to render using glyph indices to bypass font linking.
+      // DrawTextW uses Uniscribe which applies font linking — even when the user
+      // explicitly selects an icon font (e.g. Material Icons), Windows may substitute
+      // a different font for PUA codepoints, causing wrong/missing characters.
+      // ExtTextOutW with ETO_GLYPH_INDEX renders the exact glyph from the selected font.
+      bool use_glyph_index = false;
+      WORD glyphIndices[8] = {};
+      if (!has_surrogates && charCount > 0 && charCount <= 8) {
+        DWORD res = GetGlyphIndicesW(memDC, glyph_str, charCount,
+                                      glyphIndices, GGI_MARK_NONEXISTING_GLYPHS);
+        if (res != GDI_ERROR) {
+          use_glyph_index = true;
+          for (int i = 0; i < charCount; i++) {
+            if (glyphIndices[i] == 0xFFFF) { use_glyph_index = false; break; }
+          }
+        }
+      }
+
+      if (use_glyph_index) {
+        // Glyph found in font — render via glyph index (no font linking)
+        SIZE textSize;
+        GetTextExtentPointI(memDC, glyphIndices, charCount, &textSize);
+        int x = (gw - textSize.cx) / 2;
+        int y = (gh - textSize.cy) / 2;
+        ExtTextOutW(memDC, x, y, ETO_GLYPH_INDEX, NULL,
+                    (LPCWSTR)glyphIndices, charCount, NULL);
+      } else {
+        // Fallback: DrawTextW with font linking for characters not in the selected font
+        RECT textRect = {0, 0, gw, gh};
+        DrawTextW(memDC, glyph_str, -1, &textRect,
+                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+      }
 
       SelectObject(memDC, hOldFont);
       DeleteObject(hFont);
+
+      // Find the actual pixel bounding box of the rendered glyph.
+      // Icon fonts often have unusual ascent/descent metrics that cause DT_VCENTER
+      // (and GetTextExtentPoint-based centering) to place glyphs off-center.
+      // Scanning for the true visual bounds lets us correct the offset.
+      int actual_top = gh, actual_bottom = -1;
+      int actual_left = gw, actual_right = -1;
+      for (int py = 0; py < gh; py++) {
+        BYTE* row = pBits + py * gw * 4;
+        for (int px = 0; px < gw; px++) {
+          if (row[px * 4 + 1] > 0) {  // green channel intensity
+            if (py < actual_top) actual_top = py;
+            if (py > actual_bottom) actual_bottom = py;
+            if (px < actual_left) actual_left = px;
+            if (px > actual_right) actual_right = px;
+          }
+        }
+      }
+
+      // Calculate offset to visually center the glyph's actual bounding box
+      int center_offset_x = 0, center_offset_y = 0;
+      if (actual_top <= actual_bottom) {
+        int rendered_cx = (actual_left + actual_right + 1) / 2;
+        int rendered_cy = (actual_top + actual_bottom + 1) / 2;
+        center_offset_x = gw / 2 - rendered_cx;
+        center_offset_y = gh / 2 - rendered_cy;
+      }
 
       // Colorize: white text intensity becomes alpha mask for desired color
       BYTE cr = glyphColor.GetR(), cg = glyphColor.GetG(), cb = glyphColor.GetB();
@@ -2474,9 +2538,11 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
         }
       }
 
-      // Composite onto main graphics
+      // Composite onto main graphics with visual centering offset
       Gdiplus::Bitmap glyphBmp(gw, gh, gw * 4, PixelFormat32bppARGB, pBits);
-      g.DrawImage(&glyphBmp, (INT)iconRect.left, (INT)iconRect.top);
+      g.DrawImage(&glyphBmp,
+                  (INT)iconRect.left + center_offset_x,
+                  (INT)iconRect.top + center_offset_y);
 
       SelectObject(memDC, hOldBmp);
       DeleteObject(hBmp);
@@ -3768,7 +3834,6 @@ void ControlPanelCore::draw_waveform_tooltip(Gdiplus::Graphics& g) {
 void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
   if (m_rect_time.right <= m_rect_time.left) return;
 
-  // Format: "0:00 / 0:00" — only re-render when the display string changes
   std::wstring elapsed = format_time(m_state.playback_time);
   std::wstring total = format_time(m_state.track_length);
   std::wstring display = elapsed + L" / " + total;
@@ -3776,40 +3841,25 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
   int time_w = m_rect_time.right - m_rect_time.left;
   int time_h = m_rect_time.bottom - m_rect_time.top;
 
-  if (display != m_time_display_cache_str || !m_time_display_cache ||
-      m_time_display_cache_w != time_w || m_time_display_cache_h != time_h) {
-    // Re-render time text into a small cached bitmap
-    m_time_display_cache = std::make_unique<Gdiplus::Bitmap>(time_w, time_h, PixelFormat32bppPARGB);
-    Gdiplus::Graphics tg(m_time_display_cache.get());
-    // Use grayscale antialiasing instead of ClearType — ClearType sub-pixel
-    // rendering assumes an opaque background, but this bitmap is transparent.
-    // On light backgrounds the dark ClearType fringing becomes visible as
-    // jagged edges.
-    tg.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+  int bg_style = get_nowbar_background_style();
+  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
+                              (bg_style == 2 && m_blurred_artwork);
+  Gdiplus::Color time_color = use_light_foreground
+      ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+  Gdiplus::SolidBrush timeBrush(time_color);
 
-    int bg_style = get_nowbar_background_style();
-    bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
-                                (bg_style == 2 && m_blurred_artwork);
-    Gdiplus::Color time_color = use_light_foreground
-        ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-    Gdiplus::SolidBrush timeBrush(time_color);
+  Gdiplus::StringFormat sf;
+  sf.SetAlignment(Gdiplus::StringAlignmentFar);
+  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
-    Gdiplus::StringFormat sf;
-    sf.SetAlignment(Gdiplus::StringAlignmentFar);
-    sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-
-    Gdiplus::RectF timeRect(0.0f, 0.0f, (float)time_w, (float)time_h);
-    tg.DrawString(display.c_str(), -1, m_font_time.get(), timeRect, &sf, &timeBrush);
-
-    m_time_display_cache_str = display;
-    m_time_display_cache_w = time_w;
-    m_time_display_cache_h = time_h;
-  }
-
-  // Blit cached time text
-  g.DrawImage(m_time_display_cache.get(),
-              Gdiplus::Rect(m_rect_time.left, m_rect_time.top, time_w, time_h),
-              0, 0, time_w, time_h, Gdiplus::UnitPixel);
+  // Draw directly to the caller's Graphics — the DC already has an opaque
+  // background (from draw_background or the spectrum bg cache restoration),
+  // so ClearType sub-pixel rendering works correctly without fringing.
+  // Previous versions cached to a transparent bitmap with grayscale AA,
+  // which avoided ClearType fringing but produced noticeably fuzzier text.
+  Gdiplus::RectF timeRect((float)m_rect_time.left, (float)m_rect_time.top,
+                           (float)time_w, (float)time_h);
+  g.DrawString(display.c_str(), -1, m_font_time.get(), timeRect, &sf, &timeBrush);
 }
 
 void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
