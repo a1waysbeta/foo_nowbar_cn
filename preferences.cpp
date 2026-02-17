@@ -516,6 +516,38 @@ static cfg_string cfg_cbutton6_label(
     ""  // Default: empty (will show "Button #6")
 );
 
+// Custom Button Font names (per-button font for glyph rendering)
+static cfg_string cfg_cbutton1_font(
+    GUID{0xABCDEF80, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x01}},
+    "Segoe UI"
+);
+static cfg_string cfg_cbutton2_font(
+    GUID{0xABCDEF81, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x02}},
+    "Segoe UI"
+);
+static cfg_string cfg_cbutton3_font(
+    GUID{0xABCDEF82, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x03}},
+    "Segoe UI"
+);
+static cfg_string cfg_cbutton4_font(
+    GUID{0xABCDEF83, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x04}},
+    "Segoe UI"
+);
+static cfg_string cfg_cbutton5_font(
+    GUID{0xABCDEF84, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x05}},
+    "Segoe UI"
+);
+static cfg_string cfg_cbutton6_font(
+    GUID{0xABCDEF85, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x06}},
+    "Segoe UI"
+);
+
+// Color picker custom colors (16 user-defined slots in ChooseColor dialog)
+static cfg_string cfg_color_picker_custom(
+    GUID{0xABCDEF90, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x90}},
+    ""
+);
+
 // Profile configuration storage
 static cfg_string cfg_cbutton_profiles(
     GUID{0xABCDEF70, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF6}},
@@ -538,6 +570,7 @@ struct ConfigFileButtonConfig {
     int action = 0;            // 0=none, 1=url, 2=executable, 3=foobar2k
     pfc::string8 path;         // URL, exe path, or fb2k command
     pfc::string8 icon;         // Glyph character (only used for buttons 1-6)
+    pfc::string8 font;         // Font name (default "Segoe UI")
     int glyph_size = 80;       // Glyph size percentage (default 80%)
     pfc::string8 label;        // Tooltip/description
 };
@@ -642,6 +675,7 @@ static void create_default_config_file() {
         file << "action = " << action_to_string(get_nowbar_cbutton_action(i-1)) << "\n";
         file << "path = " << get_nowbar_cbutton_path(i-1).c_str() << "\n";
         file << "icon = " << get_nowbar_cbutton_icon_path(i-1).c_str() << "\n";
+        file << "font = " << get_nowbar_cbutton_font(i-1).c_str() << "\n";
         file << "glyph_size = " << get_nowbar_cbutton_glyph_size(i-1) << "\n";
         file << "label = " << get_nowbar_cbutton_label(i-1).c_str() << "\n";
         file << "\n";
@@ -655,7 +689,7 @@ static void create_default_config_file() {
         file << "label = Custom Button " << i << "\n";
         file << "\n";
     }
-    
+
     file.close();
 }
 
@@ -734,6 +768,8 @@ static void load_config_file() {
             g_config_buttons[current_button].path = value.c_str();
         } else if (key == "icon") {
             g_config_buttons[current_button].icon = value.c_str();
+        } else if (key == "font") {
+            g_config_buttons[current_button].font = value.c_str();
         } else if (key == "glyph_size") {
             g_config_buttons[current_button].glyph_size = atoi(std::string(value).c_str());
         } else if (key == "label") {
@@ -786,6 +822,7 @@ static void save_config_file() {
         file << "action = " << action_to_string(get_nowbar_cbutton_action(i-1)) << "\n";
         file << "path = " << get_nowbar_cbutton_path(i-1).c_str() << "\n";
         file << "icon = " << get_nowbar_cbutton_icon_path(i-1).c_str() << "\n";
+        file << "font = " << get_nowbar_cbutton_font(i-1).c_str() << "\n";
         file << "glyph_size = " << get_nowbar_cbutton_glyph_size(i-1) << "\n";
         file << "label = " << get_nowbar_cbutton_label(i-1).c_str() << "\n";
         file << "\n";
@@ -808,6 +845,7 @@ static void save_config_file() {
         g_config_buttons[i].action = get_nowbar_cbutton_action(i);
         g_config_buttons[i].path = get_nowbar_cbutton_path(i);
         g_config_buttons[i].icon = get_nowbar_cbutton_icon_path(i);
+        g_config_buttons[i].font = get_nowbar_cbutton_font(i);
         g_config_buttons[i].glyph_size = get_nowbar_cbutton_glyph_size(i);
         g_config_buttons[i].label = get_nowbar_cbutton_label(i);
     }
@@ -868,6 +906,7 @@ struct ButtonConfig {
     int action = 0;
     pfc::string8 path;
     pfc::string8 icon;   // Glyph character
+    pfc::string8 font;   // Font name (default "Segoe UI")
     int glyph_size = 80;  // Glyph size percentage
     pfc::string8 label;
 };
@@ -888,6 +927,7 @@ static pfc::string8 serialize_profile(const CButtonProfile& profile) {
         json << ",\"action\":" << profile.buttons[i].action;
         json << ",\"path\":\"" << escape_json_string(profile.buttons[i].path.c_str()) << "\"";
         json << ",\"icon\":\"" << escape_json_string(profile.buttons[i].icon.c_str()) << "\"";
+        json << ",\"font\":\"" << escape_json_string(profile.buttons[i].font.c_str()) << "\"";
         json << ",\"glyph_size\":" << profile.buttons[i].glyph_size;
         json << ",\"label\":\"" << escape_json_string(profile.buttons[i].label.c_str()) << "\"}";
     }
@@ -1027,6 +1067,8 @@ static const char* parse_profile(const char* p, CButtonProfile& profile) {
                                         p = parse_json_string(p, profile.buttons[btn_idx].path);
                                     } else if (btn_key == "icon") {
                                         p = parse_json_string(p, profile.buttons[btn_idx].icon);
+                                    } else if (btn_key == "font") {
+                                        p = parse_json_string(p, profile.buttons[btn_idx].font);
                                     } else if (btn_key == "glyph_size") {
                                         profile.buttons[btn_idx].glyph_size = atoi(p);
                                         while (*p && ((*p >= '0' && *p <= '9') || *p == '-')) p++;
@@ -1098,6 +1140,7 @@ static std::vector<CButtonProfile> get_all_profiles() {
             def.buttons[i].path = get_nowbar_cbutton_path(i);
             def.buttons[i].icon = get_nowbar_cbutton_icon_path(i);
             def.buttons[i].glyph_size = get_nowbar_cbutton_glyph_size(i);
+            def.buttons[i].font = get_nowbar_cbutton_font(i);
             def.buttons[i].label = cfg_cbutton1_label.get();  // Will fix below
         }
         // Fix labels
@@ -1352,6 +1395,13 @@ static void load_profile_to_config(const CButtonProfile& profile) {
     cfg_cbutton5_icon = profile.buttons[4].icon;
     cfg_cbutton6_icon = profile.buttons[5].icon;
 
+    cfg_cbutton1_font = profile.buttons[0].font.is_empty() ? pfc::string8("Segoe UI") : profile.buttons[0].font;
+    cfg_cbutton2_font = profile.buttons[1].font.is_empty() ? pfc::string8("Segoe UI") : profile.buttons[1].font;
+    cfg_cbutton3_font = profile.buttons[2].font.is_empty() ? pfc::string8("Segoe UI") : profile.buttons[2].font;
+    cfg_cbutton4_font = profile.buttons[3].font.is_empty() ? pfc::string8("Segoe UI") : profile.buttons[3].font;
+    cfg_cbutton5_font = profile.buttons[4].font.is_empty() ? pfc::string8("Segoe UI") : profile.buttons[4].font;
+    cfg_cbutton6_font = profile.buttons[5].font.is_empty() ? pfc::string8("Segoe UI") : profile.buttons[5].font;
+
     cfg_cbutton1_glyph_size = profile.buttons[0].glyph_size > 0 ? profile.buttons[0].glyph_size : 80;
     cfg_cbutton2_glyph_size = profile.buttons[1].glyph_size > 0 ? profile.buttons[1].glyph_size : 80;
     cfg_cbutton3_glyph_size = profile.buttons[2].glyph_size > 0 ? profile.buttons[2].glyph_size : 80;
@@ -1397,6 +1447,13 @@ static void save_config_to_profile(CButtonProfile& profile) {
     profile.buttons[4].icon = cfg_cbutton5_icon.get();
     profile.buttons[5].icon = cfg_cbutton6_icon.get();
 
+    profile.buttons[0].font = cfg_cbutton1_font.get();
+    profile.buttons[1].font = cfg_cbutton2_font.get();
+    profile.buttons[2].font = cfg_cbutton3_font.get();
+    profile.buttons[3].font = cfg_cbutton4_font.get();
+    profile.buttons[4].font = cfg_cbutton5_font.get();
+    profile.buttons[5].font = cfg_cbutton6_font.get();
+
     profile.buttons[0].glyph_size = cfg_cbutton1_glyph_size;
     profile.buttons[1].glyph_size = cfg_cbutton2_glyph_size;
     profile.buttons[2].glyph_size = cfg_cbutton3_glyph_size;
@@ -1427,6 +1484,7 @@ static bool export_profile_to_file(const CButtonProfile& profile, const wchar_t*
         json << "      \"action\": " << profile.buttons[i].action << ",\n";
         json << "      \"path\": \"" << escape_json_string(profile.buttons[i].path.c_str()) << "\",\n";
         json << "      \"icon\": \"" << escape_json_string(profile.buttons[i].icon.c_str()) << "\",\n";
+        json << "      \"font\": \"" << escape_json_string(profile.buttons[i].font.c_str()) << "\",\n";
         json << "      \"glyph_size\": " << profile.buttons[i].glyph_size << ",\n";
         json << "      \"label\": \"" << escape_json_string(profile.buttons[i].label.c_str()) << "\"\n";
         json << "    }" << (i < 5 ? "," : "") << "\n";
@@ -1781,6 +1839,18 @@ int get_nowbar_cbutton_glyph_size(int button_index) {
         case 4: return cfg_cbutton5_glyph_size;
         case 5: return cfg_cbutton6_glyph_size;
         default: return 80;
+    }
+}
+
+pfc::string8 get_nowbar_cbutton_font(int button_index) {
+    switch (button_index) {
+        case 0: return cfg_cbutton1_font.get();
+        case 1: return cfg_cbutton2_font.get();
+        case 2: return cfg_cbutton3_font.get();
+        case 3: return cfg_cbutton4_font.get();
+        case 4: return cfg_cbutton5_font.get();
+        case 5: return cfg_cbutton6_font.get();
+        default: return "Segoe UI";
     }
 }
 
@@ -2574,18 +2644,25 @@ void nowbar_preferences::switch_tab(int tab) {
     // Custom Button font + glyph controls
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_ICON_LABEL), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_GLYPH_LABEL), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_FONT_LABEL), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_FONT), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_FONT), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ICON), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_FONT), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ICON), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_FONT), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ICON), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_FONT), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_GLYPH_SIZE), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ICON), show_cbutton);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_FONT), show_cbutton);
     // Icon row number labels
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON_LABEL), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON_LABEL), show_cbutton);
@@ -2709,9 +2786,28 @@ static UINT_PTR CALLBACK ColorPickerHookProc(HWND hdlg, UINT uiMsg, WPARAM wPara
     return 0;
 }
 
-// Helper to show the Windows color picker dialog
+// Helper to show the Windows color picker dialog.
+// The 16 custom color slots persist across sessions via cfg_color_picker_custom.
 static bool show_color_picker(HWND hwnd, COLORREF& color) {
     static COLORREF custom_colors[16] = {0};
+    static bool loaded = false;
+
+    // Load custom colors from cfg on first use
+    if (!loaded) {
+        loaded = true;
+        pfc::string8 stored = cfg_color_picker_custom.get();
+        if (!stored.is_empty()) {
+            const char* p = stored.c_str();
+            for (int i = 0; i < 16 && *p; i++) {
+                char* end;
+                unsigned long val = strtoul(p, &end, 16);
+                custom_colors[i] = (COLORREF)val;
+                p = end;
+                if (*p == ',') p++;
+            }
+        }
+    }
+
     CHOOSECOLOR cc = {};
     cc.lStructSize = sizeof(cc);
     cc.hwndOwner = hwnd;
@@ -2719,7 +2815,20 @@ static bool show_color_picker(HWND hwnd, COLORREF& color) {
     cc.lpCustColors = custom_colors;
     cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_ENABLEHOOK;
     cc.lpfnHook = ColorPickerHookProc;
-    if (ChooseColor(&cc)) {
+    bool ok = ChooseColor(&cc) != 0;
+
+    // Save custom colors back to cfg (whether OK or Cancel — user may have
+    // defined custom colors without clicking OK on the main color)
+    {
+        pfc::string8 buf;
+        for (int i = 0; i < 16; i++) {
+            if (i > 0) buf += ",";
+            buf += pfc::format_hex(custom_colors[i], 6);
+        }
+        cfg_color_picker_custom = buf;
+    }
+
+    if (ok) {
         color = cc.rgbResult;
         return true;
     }
@@ -3080,9 +3189,22 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 for (auto* s : size_presets)
                     SendMessageW(hSize, CB_ADDSTRING, 0, (LPARAM)s);
                 SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE + btn * 3, get_nowbar_cbutton_glyph_size(btn), FALSE);
+
+                // Populate font combobox with presets and set current value
+                HWND hFont = GetDlgItem(hwnd, IDC_CBUTTON1_FONT + btn);
+                const wchar_t* font_presets[] = {
+                    L"Segoe UI", L"Segoe MDL2 Assets", L"Segoe Fluent Icons",
+                    L"Segoe UI Symbol", L"Material Icons Outlined",
+                    L"Material Icons", L"Wingdings", L"Webdings"
+                };
+                for (auto* f : font_presets)
+                    SendMessageW(hFont, CB_ADDSTRING, 0, (LPARAM)f);
+                pfc::string8 cur_font = get_nowbar_cbutton_font(btn);
+                pfc::stringcvt::string_wide_from_utf8 wide_font(cur_font);
+                SetWindowTextW(hFont, wide_font);
             }
         }
-        
+
         // Initialize tooltip label edit boxes
         uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
         uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
@@ -3283,6 +3405,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
                     SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
                     SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
                     SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
@@ -3473,6 +3601,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
                     uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
+                    uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
                     SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
                     SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
                     SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
@@ -3592,6 +3726,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                             uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
                             uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
                             uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+                            uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
+                            uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
+                            uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
+                            uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
+                            uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
+                            uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
                             SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
                             SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
                             SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
@@ -3704,6 +3844,18 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_CBUTTON5_LABEL:
         case IDC_CBUTTON6_LABEL:
             if (HIWORD(wp) == EN_CHANGE) {
+                p_this->on_changed();
+            }
+            break;
+
+        // Font combobox changes
+        case IDC_CBUTTON1_FONT:
+        case IDC_CBUTTON2_FONT:
+        case IDC_CBUTTON3_FONT:
+        case IDC_CBUTTON4_FONT:
+        case IDC_CBUTTON5_FONT:
+        case IDC_CBUTTON6_FONT:
+            if (HIWORD(wp) == CBN_EDITCHANGE || HIWORD(wp) == CBN_SELCHANGE) {
                 p_this->on_changed();
             }
             break;
@@ -4070,7 +4222,22 @@ void nowbar_preferences::apply_settings() {
         cfg_cbutton4_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON4_GLYPH_SIZE, NULL, FALSE);
         cfg_cbutton5_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON5_GLYPH_SIZE, NULL, FALSE);
         cfg_cbutton6_glyph_size = GetDlgItemInt(m_hwnd, IDC_CBUTTON6_GLYPH_SIZE, NULL, FALSE);
-        
+
+        // Save Custom Button font names
+        pfc::string8 font_name;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON1_FONT, font_name);
+        cfg_cbutton1_font = font_name;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON2_FONT, font_name);
+        cfg_cbutton2_font = font_name;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON3_FONT, font_name);
+        cfg_cbutton3_font = font_name;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON4_FONT, font_name);
+        cfg_cbutton4_font = font_name;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON5_FONT, font_name);
+        cfg_cbutton5_font = font_name;
+        uGetDlgItemText(m_hwnd, IDC_CBUTTON6_FONT, font_name);
+        cfg_cbutton6_font = font_name;
+
         // Save Custom Button tooltip labels
         pfc::string8 label;
         uGetDlgItemText(m_hwnd, IDC_CBUTTON1_LABEL, label);
@@ -4212,6 +4379,12 @@ void nowbar_preferences::reset_settings() {
             cfg_cbutton4_glyph_size = 80;
             cfg_cbutton5_glyph_size = 80;
             cfg_cbutton6_glyph_size = 80;
+            cfg_cbutton1_font = "Segoe UI";
+            cfg_cbutton2_font = "Segoe UI";
+            cfg_cbutton3_font = "Segoe UI";
+            cfg_cbutton4_font = "Segoe UI";
+            cfg_cbutton5_font = "Segoe UI";
+            cfg_cbutton6_font = "Segoe UI";
             cfg_cbutton1_label = "";
             cfg_cbutton2_label = "";
             cfg_cbutton3_label = "";
@@ -4242,6 +4415,7 @@ void nowbar_preferences::reset_settings() {
             for (int i = 0; i < 6; i++) {
                 SetWindowTextW(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON + i * 3), L"");
                 SetDlgItemInt(m_hwnd, IDC_CBUTTON1_GLYPH_SIZE + i * 3, 80, FALSE);
+                SetWindowTextW(GetDlgItem(m_hwnd, IDC_CBUTTON1_FONT + i), L"Segoe UI");
                 SetWindowTextW(GetDlgItem(m_hwnd, IDC_CBUTTON1_LABEL + i), L"");
             }
             update_all_cbutton_path_states(m_hwnd);
