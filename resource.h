@@ -221,3 +221,12 @@
 #define IDC_PROFILE_NAME_LABEL     1370
 #define IDC_PROFILE_COMBO          1371
 #define IDC_PROFILE_MENU_BTN       1372
+
+// Custom Button Font comboboxes
+#define IDC_CBUTTON_FONT_LABEL     1380
+#define IDC_CBUTTON1_FONT          1381
+#define IDC_CBUTTON2_FONT          1382
+#define IDC_CBUTTON3_FONT          1383
+#define IDC_CBUTTON4_FONT          1384
+#define IDC_CBUTTON5_FONT          1385
+#define IDC_CBUTTON6_FONT          1386
