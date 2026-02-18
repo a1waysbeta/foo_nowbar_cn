@@ -217,6 +217,16 @@
 #define IDC_SPECTRUM_COLOR2_BTN            1525
 #define IDC_SPECTRUM_COLOR_MODE_COMBO      1526
 
+// About tab controls
+#define IDC_ABOUT_NAME             1600
+#define IDC_ABOUT_DESCRIPTION      1601
+#define IDC_ABOUT_REPO_LINK        1602
+#define IDC_ABOUT_DONATE_LINK      1603
+#define IDC_ABOUT_OTHER_LABEL      1604
+#define IDC_ABOUT_FOO_ARTWORK_LINK 1605
+#define IDC_ABOUT_FOO_TRAYCONTROLS_LINK 1606
+#define IDC_ABOUT_NOTE             1607
+
 // Profile configuration controls (Custom Button tab)
 #define IDC_PROFILE_NAME_LABEL     1370
 #define IDC_PROFILE_COMBO          1371
