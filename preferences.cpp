@@ -100,6 +100,16 @@ static cfg_int cfg_nowbar_cbutton_autohide(
     0  // Default: No (don't auto-hide)
 );
 
+static cfg_int cfg_nowbar_volume_icon_visible(
+    GUID{0xABCDEF69, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF9}},
+    1  // Default: Show (visible)
+);
+
+static cfg_int cfg_nowbar_volume_bar_visible(
+    GUID{0xABCDEF6A, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xFA}},
+    1  // Default: Show (visible)
+);
+
 static cfg_int cfg_nowbar_glass_effect(
     GUID{0xABCDEF1F, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xAF}},
     0  // Default: Disabled
@@ -1591,6 +1601,14 @@ bool get_nowbar_cbutton_autohide() {
     return cfg_nowbar_cbutton_autohide != 0;
 }
 
+bool get_nowbar_volume_icon_visible() {
+    return cfg_nowbar_volume_icon_visible != 0;
+}
+
+bool get_nowbar_volume_bar_visible() {
+    return cfg_nowbar_volume_bar_visible != 0;
+}
+
 bool get_nowbar_glass_effect_enabled() {
     return cfg_nowbar_glass_effect != 0;
 }
@@ -2621,6 +2639,10 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_RATING_STARS_COMBO), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_LABEL), show_icons);
     ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ICON_LABEL), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ICON_COMBO), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_BAR_LABEL), show_icons);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_BAR_COMBO), show_icons);
 
     // Custom Button tab controls (Tab 3)
     BOOL show_cbutton = (tab == 3) ? SW_SHOW : SW_HIDE;
@@ -3038,6 +3060,18 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hAutohideCbuttonsCombo, CB_ADDSTRING, 0, (LPARAM)L"No");
         SendMessage(hAutohideCbuttonsCombo, CB_SETCURSEL, cfg_nowbar_cbutton_autohide ? 0 : 1, 0);
 
+        // Initialize volume icon visibility combobox
+        HWND hVolumeIconCombo = GetDlgItem(hwnd, IDC_VOLUME_ICON_COMBO);
+        SendMessage(hVolumeIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
+        SendMessage(hVolumeIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hVolumeIconCombo, CB_SETCURSEL, cfg_nowbar_volume_icon_visible ? 0 : 1, 0);
+
+        // Initialize volume bar visibility combobox
+        HWND hVolumeBarCombo = GetDlgItem(hwnd, IDC_VOLUME_BAR_COMBO);
+        SendMessage(hVolumeBarCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
+        SendMessage(hVolumeBarCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hVolumeBarCombo, CB_SETCURSEL, cfg_nowbar_volume_bar_visible ? 0 : 1, 0);
+
         // Initialize mood tag combobox
         HWND hMoodTagCombo = GetDlgItem(hwnd, IDC_MOOD_TAG_COMBO);
         SendMessage(hMoodTagCombo, CB_ADDSTRING, 0, (LPARAM)L"%FEEDBACK%");
@@ -3276,6 +3310,8 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_PLAY_ICON_STYLE_COMBO:
         case IDC_RATING_STARS_COMBO:
         case IDC_AUTOHIDE_CBUTTONS_COMBO:
+        case IDC_VOLUME_ICON_COMBO:
+        case IDC_VOLUME_BAR_COMBO:
         case IDC_GLASS_EFFECT_COMBO:
         case IDC_MOOD_TAG_COMBO:
         case IDC_SKIP_RATING_THRESHOLD_COMBO:
@@ -4156,6 +4192,14 @@ void nowbar_preferences::apply_settings() {
         int autohideCbuttonsSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_cbutton_autohide = (autohideCbuttonsSel == 0) ? 1 : 0;
 
+        // Save volume icon visibility (0=Show, 1=Hidden in combobox -> config 1=Show, 0=Hidden)
+        int volumeIconSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_ICON_COMBO), CB_GETCURSEL, 0, 0);
+        cfg_nowbar_volume_icon_visible = (volumeIconSel == 0) ? 1 : 0;
+
+        // Save volume bar visibility (0=Show, 1=Hidden in combobox -> config 1=Show, 0=Hidden)
+        int volumeBarSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_BAR_COMBO), CB_GETCURSEL, 0, 0);
+        cfg_nowbar_volume_bar_visible = (volumeBarSel == 0) ? 1 : 0;
+
         // Save mood tag mode (0=FEEDBACK, 1=2003_LOVED, 2=LFM_LOVED, 3=SMP_LOVED, 4=MOOD)
         cfg_nowbar_mood_tag_mode = (int)SendMessage(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), CB_GETCURSEL, 0, 0);
 
@@ -4374,6 +4418,8 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_alternate_icons = 0;  // Disabled
             cfg_nowbar_play_icon_style = 0;  // Dark (default)
             cfg_nowbar_cbutton_autohide = 0;  // No (default)
+            cfg_nowbar_volume_icon_visible = 1;  // Show (default)
+            cfg_nowbar_volume_bar_visible = 1;  // Show (default)
 
             // Update Icons tab UI
             SendMessage(GetDlgItem(m_hwnd, IDC_MOOD_ICON_COMBO), CB_SETCURSEL, 0, 0);
@@ -4386,6 +4432,8 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_ALTERNATE_ICONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: Disabled
             SendMessage(GetDlgItem(m_hwnd, IDC_PLAY_ICON_STYLE_COMBO), CB_SETCURSEL, 0, 0);  // Default: Normal
             SendMessage(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: No
+            SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_ICON_COMBO), CB_SETCURSEL, 0, 0);  // Default: Show
+            SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_BAR_COMBO), CB_SETCURSEL, 0, 0);  // Default: Show
         } else if (m_current_tab == 3) {
             // Reset Custom Button tab settings
             cfg_cbutton1_enabled = 0;
