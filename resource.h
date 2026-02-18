@@ -219,6 +219,12 @@
 #define IDC_VIS_SPECTRUM_STYLE_LABEL      1527
 #define IDC_VIS_SPECTRUM_STYLE_COMBO      1528
 
+// Volume visibility controls (Icons tab)
+#define IDC_VOLUME_ICON_LABEL            1529
+#define IDC_VOLUME_ICON_COMBO            1530
+#define IDC_VOLUME_BAR_LABEL             1531
+#define IDC_VOLUME_BAR_COMBO             1532
+
 // About tab controls
 #define IDC_ABOUT_NAME             1600
 #define IDC_ABOUT_DESCRIPTION      1601
