@@ -214,7 +214,6 @@ private:
     void draw_next_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);
     void draw_heart_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);
     void draw_star_filled_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);
-    void draw_star_outline_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);
     void draw_miniplayer_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);
     void draw_volume_icon(Gdiplus::Graphics& g, int x, int y, int size, const Gdiplus::Color& color, int level);  // level: 0=mute, 1=low, 2=full
     void draw_custom_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);  // Button #1 icon (dots grid)
