@@ -3174,26 +3174,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         
         // Initialize glyph comboboxes and size comboboxes
         {
-            const wchar_t* glyph_presets[] = {
-                L"\u2605",  // ★ Star
-                L"\u2665",  // ♥ Heart
-                L"\u25B6",  // ▶ Play
-                L"\u25A0",  // ■ Stop
-                L"\u25CF",  // ● Circle
-                L"\u266B",  // ♫ Music
-                L"\u2699",  // ⚙ Gear
-                L"\u2197",  // ↗ Arrow
-                L"\u270E",  // ✎ Pencil
-                L"\u2302",  // ⌂ Home
-            };
             const wchar_t* size_presets[] = {
                 L"50", L"60", L"70", L"80", L"90", L"100", L"120"
             };
             for (int btn = 0; btn < 6; btn++) {
-                // Populate glyph combobox with presets and set current value
+                // Set current glyph value (accepts Unicode chars or U+XXXX notation)
                 HWND hGlyph = GetDlgItem(hwnd, IDC_CBUTTON1_ICON + btn * 3);
-                for (auto* g : glyph_presets)
-                    SendMessageW(hGlyph, CB_ADDSTRING, 0, (LPARAM)g);
                 pfc::string8 cur_glyph = get_nowbar_cbutton_icon_path(btn);
                 pfc::stringcvt::string_wide_from_utf8 wide_glyph(cur_glyph);
                 SetWindowTextW(hGlyph, wide_glyph);
@@ -3848,14 +3834,14 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             }
             break;
 
-        // Glyph combobox changes
+        // Glyph edit changes
         case IDC_CBUTTON1_ICON:
         case IDC_CBUTTON2_ICON:
         case IDC_CBUTTON3_ICON:
         case IDC_CBUTTON4_ICON:
         case IDC_CBUTTON5_ICON:
         case IDC_CBUTTON6_ICON:
-            if (HIWORD(wp) == CBN_EDITCHANGE || HIWORD(wp) == CBN_SELCHANGE) {
+            if (HIWORD(wp) == EN_CHANGE) {
                 p_this->on_changed();
             }
             break;
