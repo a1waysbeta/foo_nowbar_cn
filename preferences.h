@@ -33,6 +33,7 @@ int get_nowbar_visualization_mode();  // 0=Disabled, 1=Spectrum, 2=Waveform
 COLORREF get_nowbar_spectrum_color();
 int get_nowbar_spectrum_width();     // 0=Thin, 1=Normal, 2=Wide
 int get_nowbar_spectrum_shape();     // 0=Pill, 1=Rectangle
+int get_nowbar_spectrum_style();     // 0=Mono, 1=Stereo Mirrored
 int get_nowbar_spectrum_opacity();       // 0-100
 int get_nowbar_spectrum_gradient_mode(); // 0=Solid, 1=Gradient, 2=Frequency
 COLORREF get_nowbar_spectrum_color2();   // Gradient bottom color
