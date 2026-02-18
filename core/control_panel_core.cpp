@@ -938,7 +938,10 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int play_button_size =
       static_cast<int>(m_metrics.play_button_size * m_size_scale);
   int spacing = static_cast<int>(m_metrics.spacing * m_size_scale);
-  int volume_width = static_cast<int>(m_metrics.volume_width * m_size_scale);
+  bool volume_visible = get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible();
+  int volume_width = volume_visible
+      ? static_cast<int>(m_metrics.volume_width * m_size_scale)
+      : 0;
 
   // Volume and MiniPlayer (right side)
   int right_inset =
@@ -1149,6 +1152,16 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       : m_rect_repeat.right + spacing;
   int cbutton_right_edge = vol_x - spacing;
 
+  // In spectrum mode, the time display is in the top-right corner and its
+  // cache rect is restored every frame via BitBlt — custom buttons must not
+  // extend under it or their tops get erased by the spectrum fast paint path.
+  if (get_nowbar_visualization_mode() == 1) {
+    int time_width = static_cast<int>(120 * m_dpi_scale);
+    int time_margin = static_cast<int>(8 * m_dpi_scale);
+    int time_left = rect.right - time_width - time_margin;
+    cbutton_right_edge = std::min(cbutton_right_edge, time_left - spacing);
+  }
+
   int available_width = cbutton_right_edge - min_cbutton_left;
   
   // Determine layout mode based on panel height (size scale)
@@ -1291,7 +1304,11 @@ void ControlPanelCore::update_layout(const RECT &rect) {
 
   // Set Volume bar position - vertically centered (right-side element)
   // No need to clamp based on custom buttons since they're now to the left
-  m_rect_volume = {vol_x, right_btn_y, volume_right_edge, right_btn_y + button_size};
+  if (volume_visible) {
+    m_rect_volume = {vol_x, right_btn_y, volume_right_edge, right_btn_y + button_size};
+  } else {
+    m_rect_volume = {};
+  }
 
 
   // Track info (between artwork and controls) - truly vertically centered on
@@ -4168,6 +4185,9 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
 }
 
 void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
+  if (!get_nowbar_volume_icon_visible() && !get_nowbar_volume_bar_visible())
+    return;
+
   int w = m_rect_volume.right - m_rect_volume.left;
   int h = m_rect_volume.bottom - m_rect_volume.top;
 
@@ -4196,33 +4216,38 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
   else if (level <= 0.5f)
     vol_level = 1; // low (0-50%)
 
-  // Draw custom volume icon (scaled with panel height) - always grayed
+  // Icon dimensions needed for bar offset calculation
   int icon_size =
       static_cast<int>(23 * m_dpi_scale * m_size_scale); // Volume icon (scaled)
-  int icon_y = m_rect_volume.top + (h - icon_size) / 2;
   int icon_gap = static_cast<int>(6 * m_dpi_scale *
                                   m_size_scale); // Extra gap to move icon left
 
-  // Hover circle on volume icon (same pattern as MiniPlayer button)
-  bool icon_hovered = (m_hover_region == HitRegion::VolumeIcon);
-  if (icon_hovered && get_nowbar_hover_circles_enabled()) {
-    Gdiplus::SolidBrush hoverBrush(vol_hover_color);
-    // Use full rect height for a proper circle, centered on icon
-    int circle_size = h;
-    int icon_center_x = m_rect_volume.left - icon_gap + icon_size / 2;
-    int icon_center_y = m_rect_volume.top + h / 2;
-    g.FillEllipse(&hoverBrush, icon_center_x - circle_size / 2,
-                  icon_center_y - circle_size / 2, circle_size, circle_size);
+  if (get_nowbar_volume_icon_visible()) {
+    // Draw custom volume icon (scaled with panel height) - always grayed
+    int icon_y = m_rect_volume.top + (h - icon_size) / 2;
+
+    // Hover circle on volume icon (same pattern as MiniPlayer button)
+    bool icon_hovered = (m_hover_region == HitRegion::VolumeIcon);
+    if (icon_hovered && get_nowbar_hover_circles_enabled()) {
+      Gdiplus::SolidBrush hoverBrush(vol_hover_color);
+      // Use full rect height for a proper circle, centered on icon
+      int circle_size = h;
+      int icon_center_x = m_rect_volume.left - icon_gap + icon_size / 2;
+      int icon_center_y = m_rect_volume.top + h / 2;
+      g.FillEllipse(&hoverBrush, icon_center_x - circle_size / 2,
+                    icon_center_y - circle_size / 2, circle_size, circle_size);
+    }
+
+    // Enlarge icon when hovered (same 15% pattern as other buttons)
+    float vol_icon_scale = icon_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+    int scaled_icon_size = static_cast<int>(icon_size * vol_icon_scale);
+    int icon_x = m_rect_volume.left - icon_gap + (icon_size - scaled_icon_size) / 2;
+    int scaled_icon_y = icon_y + (icon_size - scaled_icon_size) / 2;
+    draw_volume_icon(g, icon_x, scaled_icon_y, scaled_icon_size,
+                     volume_icon_color, vol_level);
   }
 
-  // Enlarge icon when hovered (same 15% pattern as other buttons)
-  float vol_icon_scale = icon_hovered ? HOVER_SCALE_FACTOR : 1.0f;
-  int scaled_icon_size = static_cast<int>(icon_size * vol_icon_scale);
-  int icon_x = m_rect_volume.left - icon_gap + (icon_size - scaled_icon_size) / 2;
-  int scaled_icon_y = icon_y + (icon_size - scaled_icon_size) / 2;
-  draw_volume_icon(g, icon_x, scaled_icon_y, scaled_icon_size,
-                   volume_icon_color, vol_level);
-
+  if (get_nowbar_volume_bar_visible()) {
   // Volume bar - use same thickness as seekbar
   int bar_offset =
       icon_size +
@@ -4306,6 +4331,7 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
         GetRValue(vol_handle_accent), GetGValue(vol_handle_accent), GetBValue(vol_handle_accent)));
     g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
   }
+  } // volume bar visible
 
 }
 
@@ -4436,17 +4462,21 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
       return HitRegion::CButton6;
   }
   // Volume area - check both icon (positioned left of rect) and slider
-  int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
-  int icon_width =
-      static_cast<int>(23 * m_dpi_scale * m_size_scale); // Match volume icon
-  RECT expanded_volume = {m_rect_volume.left - icon_gap, m_rect_volume.top,
-                          m_rect_volume.right, m_rect_volume.bottom};
-  if (pt_in_rect(expanded_volume, x, y)) {
-    // Check if click is on icon area or slider bar
-    if (x < m_rect_volume.left + icon_width - icon_gap) {
-      return HitRegion::VolumeIcon;
+  if (get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible()) {
+    int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
+    int icon_width =
+        static_cast<int>(23 * m_dpi_scale * m_size_scale); // Match volume icon
+    RECT expanded_volume = {m_rect_volume.left - icon_gap, m_rect_volume.top,
+                            m_rect_volume.right, m_rect_volume.bottom};
+    if (pt_in_rect(expanded_volume, x, y)) {
+      // Check if click is on icon area or slider bar
+      if (get_nowbar_volume_icon_visible() && x < m_rect_volume.left + icon_width - icon_gap) {
+        return HitRegion::VolumeIcon;
+      }
+      if (get_nowbar_volume_bar_visible()) {
+        return HitRegion::VolumeSlider;
+      }
     }
-    return HitRegion::VolumeSlider;
   }
   if (get_nowbar_miniplayer_icon_visible() &&
       pt_in_rect(m_rect_miniplayer, x, y))
