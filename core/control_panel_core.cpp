@@ -974,11 +974,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Heart and custom buttons appear at the edges without shifting the core
   // controls
 
-  // Calculate fixed width for core controls only (shuffle, prev, play, next, [stop], [stop_after_current], repeat)
-  // Stop and Stop After Current buttons are optional and same size as other buttons (not Play)
+  // Calculate fixed width for core controls only ([shuffle], prev, play, next, [stop], [stop_after_current], [repeat])
+  // Optional buttons are same size as other buttons (not Play)
+  bool shuffle_visible = get_nowbar_shuffle_icon_visible();
+  bool repeat_visible = get_nowbar_repeat_icon_visible();
   bool stop_visible = get_nowbar_stop_icon_visible();
   bool stop_after_current_visible = get_nowbar_stop_after_current_icon_visible();
-  int core_buttons = 5; // shuffle, prev, play, next, repeat (base)
+  int core_buttons = 3; // prev, play, next (always visible)
+  if (shuffle_visible) core_buttons++;
+  if (repeat_visible) core_buttons++;
   if (stop_visible) core_buttons++;
   if (stop_after_current_visible) core_buttons++;
   int core_width = button_size * (core_buttons - 1) + play_button_size +
@@ -1030,9 +1034,13 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Position core controls at fixed positions
   int controls_x = core_start_x;
 
-  m_rect_shuffle = {controls_x, btn_y, controls_x + button_size,
-                    btn_y + button_size};
-  controls_x += button_size + spacing;
+  if (shuffle_visible) {
+    m_rect_shuffle = {controls_x, btn_y, controls_x + button_size,
+                      btn_y + button_size};
+    controls_x += button_size + spacing;
+  } else {
+    m_rect_shuffle = {};  // Clear when hidden
+  }
 
   m_rect_prev = {controls_x, btn_y, controls_x + button_size,
                  btn_y + button_size};
@@ -1064,9 +1072,13 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     m_rect_stop_after_current = {};  // Clear when hidden
   }
 
-  m_rect_repeat = {controls_x, btn_y, controls_x + button_size,
-                   btn_y + button_size};
-  controls_x += button_size + spacing;
+  if (repeat_visible) {
+    m_rect_repeat = {controls_x, btn_y, controls_x + button_size,
+                     btn_y + button_size};
+    controls_x += button_size + spacing;
+  } else {
+    m_rect_repeat = {};  // Clear when hidden
+  }
   
   // Super button - positioned after Repeat (cosmetic only)
   if (get_nowbar_super_icon_visible()) {
@@ -1076,9 +1088,11 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     m_rect_super = {};  // Clear rect when hidden
   }
 
-  // Heart button - positioned to the left of shuffle (if visible)
+  // Heart button - positioned to the left of the first core button (shuffle or prev)
+  // core_left_edge is the left edge of the leftmost core control button
+  int core_left_edge = shuffle_visible ? m_rect_shuffle.left : m_rect_prev.left;
   if (get_nowbar_mood_icon_visible()) {
-    int heart_x = m_rect_shuffle.left - spacing - button_size;
+    int heart_x = core_left_edge - spacing - button_size;
     // Prevent overlap with artwork - clamp left edge
     int min_heart_x = get_nowbar_cover_artwork_visible()
         ? m_rect_artwork.right + spacing
@@ -1095,12 +1109,12 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     int star_gap = static_cast<int>(2 * m_dpi_scale);
     int total_rating_width = star_size * 5 + star_gap * 4;
 
-    // Position to the left of heart icon, or shuffle if heart is hidden
+    // Position to the left of heart icon, or first core button if heart is hidden
     int rating_right;
     if (get_nowbar_mood_icon_visible() && m_rect_heart.right > m_rect_heart.left) {
       rating_right = m_rect_heart.left - spacing;
     } else {
-      rating_right = m_rect_shuffle.left - spacing;
+      rating_right = core_left_edge - spacing;
     }
     int rating_x = rating_right - total_rating_width;
 
@@ -1151,10 +1165,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       : button_size;
 
   // Calculate available space for custom buttons
-  // Use Super button right edge if visible, otherwise use Repeat button right edge
-  int min_cbutton_left = get_nowbar_super_icon_visible()
-      ? m_rect_super.right + spacing
-      : m_rect_repeat.right + spacing;
+  // Use the rightmost visible core-area button as the left boundary
+  // Priority: Super > Repeat > last positioned core button (controls_x is already past it)
+  int core_right_edge = controls_x - spacing;  // controls_x advanced past the last positioned button
+  if (get_nowbar_super_icon_visible()) {
+    core_right_edge = m_rect_super.right;
+  } else if (repeat_visible) {
+    core_right_edge = m_rect_repeat.right;
+  }
+  int min_cbutton_left = core_right_edge + spacing;
   int cbutton_right_edge = vol_x - spacing;
 
   // In spectrum mode, the time display occupies the top-right corner.
@@ -1336,16 +1355,27 @@ void ControlPanelCore::update_layout(const RECT &rect) {
 
   // Track info (between artwork and controls) - truly vertically centered on
   // panel
+  int vis_mode = get_nowbar_visualization_mode();
   int info_x = get_nowbar_cover_artwork_visible()
       ? m_rect_artwork.right + spacing
       : rect.left + spacing;
-  // Use heart button as reference if visible, otherwise shuffle button
-  // Add extra spacing to prevent text overlap with progress timer
-  int extra_spacing = spacing; // Full spacing instead of 50%
-  int reference_left = get_nowbar_mood_icon_visible() ? m_rect_heart.left : m_rect_shuffle.left;
-  // Account for timer space: timer extends to the left of seekbar (which starts at shuffle)
-  // Conservative estimate to accommodate h:mm:ss format for tracks over 59 minutes
-  int timer_space = static_cast<int>(110 * m_dpi_scale * m_size_scale); // Timer width + gap
+  // Use the leftmost left-side element (rating stars > heart > core buttons) as reference.
+  // Reserve timer_space for the elapsed time display that extends left from the seekbar
+  // in Normal/Waveform modes. In Spectrum mode, the timer is in the top-right corner.
+  int reference_left;
+  int timer_space;
+  if (get_nowbar_rating_visible() && m_rect_rating.right > m_rect_rating.left) {
+    reference_left = m_rect_rating.left;
+    // Rating stars are further left than the timer text, so only need a small gap
+    timer_space = static_cast<int>(spacing);
+  } else if (get_nowbar_mood_icon_visible()) {
+    reference_left = m_rect_heart.left;
+    // Timer extends ~62px left from seekbar (≈ heart position): text width + gap
+    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
+  } else {
+    reference_left = core_left_edge;
+    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
+  }
   int info_right = reference_left - timer_space;
   // Use actual font heights when available, fall back to metric default
   int title_h = m_title_font_height > 0
@@ -1369,24 +1399,66 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int full_core_start_x = rect.left + (w - full_core_width) / 2;
   full_core_start_x = std::max(full_core_start_x, min_controls_x);
 
-  int full_shuffle_left = full_core_start_x;
-  int full_heart_left = full_shuffle_left - full_spacing - full_button_size;
+  int full_core_left = full_core_start_x;
+  int full_heart_left = full_core_left - full_spacing - full_button_size;
 
   int full_x = full_core_start_x;
-  full_x += full_button_size + full_spacing; // past shuffle
+  if (shuffle_visible) full_x += full_button_size + full_spacing; // past shuffle
   full_x += full_button_size + full_spacing; // past prev
   full_x += full_play_size + full_spacing;   // past play
   full_x += full_button_size + full_spacing; // past next
-  if (stop_visible) {
-    full_x += full_button_size + full_spacing; // past stop
+  if (stop_visible) full_x += full_button_size + full_spacing; // past stop
+  if (stop_after_current_visible) full_x += full_button_size + full_spacing; // past stop after current
+  int full_last_core_right;
+  if (repeat_visible) {
+    full_last_core_right = full_x + full_button_size;
+    // full_x past repeat for super calculation
+    full_x += full_button_size;
+  } else {
+    full_last_core_right = full_x - full_spacing; // back up to previous button's right edge
   }
-  int full_repeat_right = full_x + full_button_size;
-  int full_super_right = full_repeat_right + full_spacing + full_button_size;
+  int full_super_right = full_last_core_right + full_spacing + full_button_size;
 
-  int seekbar_left = get_nowbar_mood_icon_visible() ? full_heart_left : full_shuffle_left;
-  int seekbar_right = get_nowbar_super_icon_visible() ? full_super_right : full_repeat_right;
+  int seekbar_left = get_nowbar_mood_icon_visible() ? full_heart_left : full_core_left;
+  int seekbar_right = get_nowbar_super_icon_visible() ? full_super_right : full_last_core_right;
 
-  int vis_mode = get_nowbar_visualization_mode();
+  // Find leftmost custom button edge (if any are enabled/positioned)
+  int cbuttons_left_edge = INT_MAX;
+  {
+    const RECT* cb_rects[6] = {&m_rect_cbutton1, &m_rect_cbutton2, &m_rect_cbutton3,
+                                &m_rect_cbutton4, &m_rect_cbutton5, &m_rect_cbutton6};
+    for (int i = 0; i < 6; i++) {
+      if (btn_enabled[i] && cb_rects[i]->right > cb_rects[i]->left) {
+        if (cb_rects[i]->left < cbuttons_left_edge)
+          cbuttons_left_edge = cb_rects[i]->left;
+      }
+    }
+  }
+  bool has_cbuttons = (cbuttons_left_edge != INT_MAX);
+
+  // Adjust seekbar extent based on Seekbar Length preference
+  int seekbar_length_mode = get_nowbar_seekbar_length();
+  if (seekbar_length_mode == 1) {
+    // Scaling: extend seekbar to fill available space proportionally
+    int sp = static_cast<int>(full_spacing);
+    int avail_left = get_nowbar_cover_artwork_visible() ? m_rect_artwork.right + sp : rect.left + sp;
+    // Right boundary: custom buttons > volume > panel edge
+    int avail_right = has_cbuttons ? cbuttons_left_edge - sp
+                    : volume_visible ? m_rect_volume.left - sp
+                    : rect.right - sp;
+    int left_gap = seekbar_left - avail_left;
+    int right_gap = avail_right - seekbar_right;
+    if (left_gap > 0) seekbar_left -= left_gap / 2;
+    if (right_gap > 0) seekbar_right += right_gap / 2;
+  }
+  // seekbar_length_mode == 0: Fixed (current Normal behavior, no change)
+
+  // Clamp track info right edge if Scaling pushed the seekbar/spectrum leftward
+  if (seekbar_length_mode == 1) {
+    int adjusted_info_right = seekbar_left - timer_space;
+    if (adjusted_info_right < m_rect_track_info.right)
+      m_rect_track_info.right = adjusted_info_right;
+  }
 
   // Clear new rects by default
   m_rect_thin_progress = {};
@@ -1402,10 +1474,21 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     int thin_h = static_cast<int>(3 * m_dpi_scale);
     m_rect_thin_progress = {rect.left, rect.top, rect.right, rect.top + thin_h};
 
-    // Full spectrum area: from heart/shuffle left to super/repeat right,
-    // from play button top down to panel bottom (overlaps buttons)
-    int spectrum_left = get_nowbar_mood_icon_visible() ? m_rect_heart.left : m_rect_shuffle.left;
-    int spectrum_right = get_nowbar_super_icon_visible() ? m_rect_super.right : m_rect_repeat.right;
+    // Full spectrum area: extent follows seekbar length setting
+    int spectrum_left = get_nowbar_mood_icon_visible() ? m_rect_heart.left : core_left_edge;
+    int spectrum_right = get_nowbar_super_icon_visible() ? m_rect_super.right : core_right_edge;
+    if (seekbar_length_mode == 1) {
+      // Scaling: extend spectrum to fill available space proportionally
+      int sp = static_cast<int>(full_spacing);
+      int avail_left = get_nowbar_cover_artwork_visible() ? m_rect_artwork.right + sp : rect.left + sp;
+      int avail_right = has_cbuttons ? cbuttons_left_edge - sp
+                      : volume_visible ? m_rect_volume.left - sp
+                      : rect.right - sp;
+      int left_gap = spectrum_left - avail_left;
+      int right_gap = avail_right - spectrum_right;
+      if (left_gap > 0) spectrum_left -= left_gap / 2;
+      if (right_gap > 0) spectrum_right += right_gap / 2;
+    }
     int spectrum_top = m_rect_play.top;
     m_rect_spectrum_full = {spectrum_left, spectrum_top, spectrum_right, rect.bottom};
 
@@ -2145,27 +2228,28 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   }
 
   // Shuffle button
-  bool shuffle_active = (m_state.playback_order == 4); // Shuffle tracks
-  bool shuffle_hovered = (m_hover_region == HitRegion::ShuffleButton);
-  float shuffle_opacity = get_hover_opacity(HitRegion::ShuffleButton);
+  if (get_nowbar_shuffle_icon_visible()) {
+    bool shuffle_active = (m_state.playback_order == 4); // Shuffle tracks
+    bool shuffle_hovered = (m_hover_region == HitRegion::ShuffleButton);
+    float shuffle_opacity = get_hover_opacity(HitRegion::ShuffleButton);
 
-  int sw = m_rect_shuffle.right - m_rect_shuffle.left;
-  int sh = m_rect_shuffle.bottom - m_rect_shuffle.top;
-  if (shuffle_opacity > 0.01f && show_hover) {
-    BYTE alpha = static_cast<BYTE>(shuffle_opacity * icon_hover_color.GetA());
-    Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
-    Gdiplus::SolidBrush hoverBrush(hoverColor);
-    g.FillEllipse(&hoverBrush, m_rect_shuffle.left, m_rect_shuffle.top, sw, sh);
+    int sw = m_rect_shuffle.right - m_rect_shuffle.left;
+    int sh = m_rect_shuffle.bottom - m_rect_shuffle.top;
+    if (shuffle_opacity > 0.01f && show_hover) {
+      BYTE alpha = static_cast<BYTE>(shuffle_opacity * icon_hover_color.GetA());
+      Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
+      Gdiplus::SolidBrush hoverBrush(hoverColor);
+      g.FillEllipse(&hoverBrush, m_rect_shuffle.left, m_rect_shuffle.top, sw, sh);
+    }
+    Gdiplus::Color shuffleColor =
+        shuffle_active ? icon_accent_color : icon_secondary_color;
+    float shuffle_scale = shuffle_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+    int shuffle_icon_inset = static_cast<int>(sw * (1.0f - 0.70f * shuffle_scale) / 2.0f);
+    RECT shuffleIconRect = {
+        m_rect_shuffle.left + shuffle_icon_inset, m_rect_shuffle.top + shuffle_icon_inset,
+        m_rect_shuffle.right - shuffle_icon_inset, m_rect_shuffle.bottom - shuffle_icon_inset};
+    draw_shuffle_icon(g, shuffleIconRect, shuffleColor);
   }
-  Gdiplus::Color shuffleColor =
-      shuffle_active ? icon_accent_color : icon_secondary_color;
-  // Calculate icon inset - smaller when hovered (for enlarge effect)
-  float shuffle_scale = shuffle_hovered ? HOVER_SCALE_FACTOR : 1.0f;
-  int shuffle_icon_inset = static_cast<int>(sw * (1.0f - 0.70f * shuffle_scale) / 2.0f);
-  RECT shuffleIconRect = {
-      m_rect_shuffle.left + shuffle_icon_inset, m_rect_shuffle.top + shuffle_icon_inset,
-      m_rect_shuffle.right - shuffle_icon_inset, m_rect_shuffle.bottom - shuffle_icon_inset};
-  draw_shuffle_icon(g, shuffleIconRect, shuffleColor);
 
   // Previous button
   bool prev_hovered = (m_hover_region == HitRegion::PrevButton);
@@ -2327,29 +2411,30 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   }
 
   // Repeat button
-  bool repeat_active =
-      (m_state.playback_order == 1 || m_state.playback_order == 2);
-  bool repeat_one = (m_state.playback_order == 2);
-  bool repeat_hovered = (m_hover_region == HitRegion::RepeatButton);
-  float repeat_opacity = get_hover_opacity(HitRegion::RepeatButton);
+  if (get_nowbar_repeat_icon_visible()) {
+    bool repeat_active =
+        (m_state.playback_order == 1 || m_state.playback_order == 2);
+    bool repeat_one = (m_state.playback_order == 2);
+    bool repeat_hovered = (m_hover_region == HitRegion::RepeatButton);
+    float repeat_opacity = get_hover_opacity(HitRegion::RepeatButton);
 
-  int rw = m_rect_repeat.right - m_rect_repeat.left;
-  int rh = m_rect_repeat.bottom - m_rect_repeat.top;
-  if (repeat_opacity > 0.01f && show_hover) {
-    BYTE alpha = static_cast<BYTE>(repeat_opacity * icon_hover_color.GetA());
-    Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
-    Gdiplus::SolidBrush hoverBrush(hoverColor);
-    g.FillEllipse(&hoverBrush, m_rect_repeat.left, m_rect_repeat.top, rw, rh);
+    int rw = m_rect_repeat.right - m_rect_repeat.left;
+    int rh = m_rect_repeat.bottom - m_rect_repeat.top;
+    if (repeat_opacity > 0.01f && show_hover) {
+      BYTE alpha = static_cast<BYTE>(repeat_opacity * icon_hover_color.GetA());
+      Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
+      Gdiplus::SolidBrush hoverBrush(hoverColor);
+      g.FillEllipse(&hoverBrush, m_rect_repeat.left, m_rect_repeat.top, rw, rh);
+    }
+    Gdiplus::Color repeatColor =
+        repeat_active ? icon_accent_color : icon_secondary_color;
+    float repeat_scale = repeat_hovered ? HOVER_SCALE_FACTOR : 1.0f;
+    int repeat_icon_inset = static_cast<int>(rw * (1.0f - 0.70f * repeat_scale) / 2.0f);
+    RECT repeatIconRect = {
+        m_rect_repeat.left + repeat_icon_inset, m_rect_repeat.top + repeat_icon_inset,
+        m_rect_repeat.right - repeat_icon_inset, m_rect_repeat.bottom - repeat_icon_inset};
+    draw_repeat_icon(g, repeatIconRect, repeatColor, repeat_one);
   }
-  Gdiplus::Color repeatColor =
-      repeat_active ? icon_accent_color : icon_secondary_color;
-  // Enlarge icon when hovered
-  float repeat_scale = repeat_hovered ? HOVER_SCALE_FACTOR : 1.0f;
-  int repeat_icon_inset = static_cast<int>(rw * (1.0f - 0.70f * repeat_scale) / 2.0f);
-  RECT repeatIconRect = {
-      m_rect_repeat.left + repeat_icon_inset, m_rect_repeat.top + repeat_icon_inset,
-      m_rect_repeat.right - repeat_icon_inset, m_rect_repeat.bottom - repeat_icon_inset};
-  draw_repeat_icon(g, repeatIconRect, repeatColor, repeat_one);
 
   // Super button (cosmetic - no functionality)
   if (get_nowbar_super_icon_visible()) {
@@ -4458,9 +4543,9 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
     return HitRegion::RatingArea;
   if (get_nowbar_mood_icon_visible() && pt_in_rect(m_rect_heart, x, y))
     return HitRegion::HeartButton;
-  if (pt_in_rect(m_rect_shuffle, x, y))
+  if (get_nowbar_shuffle_icon_visible() && pt_in_rect(m_rect_shuffle, x, y))
     return HitRegion::ShuffleButton;
-  if (pt_in_rect(m_rect_repeat, x, y))
+  if (get_nowbar_repeat_icon_visible() && pt_in_rect(m_rect_repeat, x, y))
     return HitRegion::RepeatButton;
   if (get_nowbar_super_icon_visible() && pt_in_rect(m_rect_super, x, y))
     return HitRegion::SuperButton;
