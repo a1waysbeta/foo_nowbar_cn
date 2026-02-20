@@ -219,6 +219,16 @@
 #define IDC_VIS_SPECTRUM_STYLE_LABEL      1527
 #define IDC_VIS_SPECTRUM_STYLE_COMBO      1528
 
+// Seekbar Length controls (Appearance tab)
+#define IDC_SEEKBAR_LENGTH_LABEL         1537
+#define IDC_SEEKBAR_LENGTH_COMBO         1538
+
+// Shuffle/Repeat visibility controls (Icons tab)
+#define IDC_SHUFFLE_ICON_LABEL           1533
+#define IDC_SHUFFLE_ICON_COMBO           1534
+#define IDC_REPEAT_ICON_LABEL            1535
+#define IDC_REPEAT_ICON_COMBO            1536
+
 // Volume visibility controls (Icons tab)
 #define IDC_VOLUME_ICON_LABEL            1529
 #define IDC_VOLUME_ICON_COMBO            1530
