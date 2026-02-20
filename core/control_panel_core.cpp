@@ -668,6 +668,11 @@ void ControlPanelCore::update_fonts() {
   m_font_artist.reset(artistFont);
   m_font_time.reset(timeFont);
 
+  // Measure actual font pixel heights for layout
+  float dpi = 96.0f * m_dpi_scale;
+  m_title_font_height = static_cast<int>(m_font_title->GetHeight(dpi) + 0.99f);
+  m_artist_font_height = static_cast<int>(m_font_artist->GetHeight(dpi) + 0.99f);
+
   invalidate();
 }
 
@@ -1152,14 +1157,31 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       : m_rect_repeat.right + spacing;
   int cbutton_right_edge = vol_x - spacing;
 
-  // In spectrum mode, the time display is in the top-right corner and its
-  // cache rect is restored every frame via BitBlt — custom buttons must not
-  // extend under it or their tops get erased by the spectrum fast paint path.
+  // In spectrum mode, the time display occupies the top-right corner.
+  // Only constrain custom buttons horizontally when they would actually
+  // overlap vertically with the time display.
   if (get_nowbar_visualization_mode() == 1) {
-    int time_width = static_cast<int>(120 * m_dpi_scale);
-    int time_margin = static_cast<int>(8 * m_dpi_scale);
-    int time_left = rect.right - time_width - time_margin;
-    cbutton_right_edge = std::min(cbutton_right_edge, time_left - spacing);
+    int thin_h = static_cast<int>(3 * m_dpi_scale);
+    int time_height = static_cast<int>(m_metrics.text_height * m_size_scale);
+    int time_bottom = rect.top + thin_h + static_cast<int>(2 * m_dpi_scale) + time_height;
+
+    // Compute the top edge of the custom button block
+    int cbutton_top;
+    if (m_size_scale < 0.75f) {
+      // Single-row: centered on y_center
+      cbutton_top = y_center - cbutton_size / 2;
+    } else {
+      // 2-row worst case: both rows with 2px gap
+      int total_h = cbutton_size * 2 + 2;
+      cbutton_top = y_center - total_h / 2;
+    }
+
+    if (cbutton_top < time_bottom) {
+      int time_width = static_cast<int>(120 * m_dpi_scale);
+      int time_margin = static_cast<int>(8 * m_dpi_scale);
+      int time_left = rect.right - time_width - time_margin;
+      cbutton_right_edge = std::min(cbutton_right_edge, time_left - spacing);
+    }
   }
 
   int available_width = cbutton_right_edge - min_cbutton_left;
@@ -1196,12 +1218,13 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     int x = start_x;
     int shown = 0;
 
-    // Position buttons in order (1-6) from left to right, using right_btn_y for vertical centering
+    // Position buttons in order (1-6) from left to right, vertically centered on y_center
+    int cbutton_y = y_center - cbutton_size / 2;
     RECT* rects[6] = {&m_rect_cbutton1, &m_rect_cbutton2, &m_rect_cbutton3,
                       &m_rect_cbutton4, &m_rect_cbutton5, &m_rect_cbutton6};
     for (int i = 0; i < 6 && shown < buttons_to_show; i++) {
       if (btn_enabled[i]) {
-        *rects[i] = {x, right_btn_y, x + cbutton_size, right_btn_y + cbutton_size};
+        *rects[i] = {x, cbutton_y, x + cbutton_size, cbutton_y + cbutton_size};
         x += cbutton_size + spacing;
         shown++;
       }
@@ -1324,9 +1347,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Conservative estimate to accommodate h:mm:ss format for tracks over 59 minutes
   int timer_space = static_cast<int>(110 * m_dpi_scale * m_size_scale); // Timer width + gap
   int info_right = reference_left - timer_space;
-  int info_height =
-      static_cast<int>((m_metrics.text_height * 2 + 8) *
-                       m_size_scale); // Title + artist + gap (scaled)
+  // Use actual font heights when available, fall back to metric default
+  int title_h = m_title_font_height > 0
+      ? m_title_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int artist_h = m_artist_font_height > 0
+      ? m_artist_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int text_gap = static_cast<int>(4 * m_dpi_scale);
+  int info_height = title_h + artist_h + text_gap; // Actual font sizes + gap
   int info_y =
       y_center - info_height / 2; // Centered on panel, not offset with controls
   m_rect_track_info = {info_x, info_y, info_right, info_y + info_height};
@@ -1596,24 +1625,18 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // This is drawn BEFORE buttons so spectrum appears behind them
   draw_full_spectrum(hdc);
 
-  // Now draw buttons ON TOP of the spectrum
+  // Now draw buttons ON TOP of the spectrum.
+  // No clip region — core playback buttons overlap the spectrum area, and
+  // custom buttons may extend into the right side where the background cache
+  // restore could have overwritten them. Redrawing all buttons is lightweight.
   {
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
     g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
     g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
     g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
-    
-    // Clip to the spectrum area to only redraw buttons that overlap
-    Gdiplus::Region clip;
-    clip.MakeEmpty();
-    clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
-        m_rect_spectrum_full.right - m_rect_spectrum_full.left,
-        m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
-    g.SetClip(&clip);
-    
+
     draw_playback_buttons(g);
-    g.ResetClip();
   }
 
   // Progress bar and time display still use GDI+ (lightweight, few calls)
@@ -1997,20 +2020,25 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   Gdiplus::SolidBrush titleBrush(textColor);
   Gdiplus::SolidBrush artistBrush(textSecondary);
 
+  // Use actual font heights for text layout rects
+  int title_h = m_title_font_height > 0
+      ? m_title_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int artist_h = m_artist_font_height > 0
+      ? m_artist_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int text_gap = static_cast<int>(4 * m_dpi_scale);
+
   Gdiplus::RectF titleRect(
       (float)m_rect_track_info.left, (float)m_rect_track_info.top,
       (float)(m_rect_track_info.right - m_rect_track_info.left),
-      (float)m_metrics.text_height);
-
-  int scaled_text_height =
-      static_cast<int>(m_metrics.text_height * m_size_scale);
-  int scaled_gap = static_cast<int>(4 * m_size_scale);
+      (float)title_h);
 
   Gdiplus::RectF artistRect(
       (float)m_rect_track_info.left,
-      (float)(m_rect_track_info.top + scaled_text_height + scaled_gap),
+      (float)(m_rect_track_info.top + title_h + text_gap),
       (float)(m_rect_track_info.right - m_rect_track_info.left),
-      (float)scaled_text_height);
+      (float)artist_h);
 
   Gdiplus::StringFormat sf;
   sf.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
