@@ -11,7 +11,10 @@ int get_nowbar_theme_mode();  // 0=Auto, 1=Dark, 2=Light
 bool get_nowbar_cover_margin();  // true=Yes (margin), false=No (edge-to-edge)
 bool get_nowbar_cover_artwork_visible();  // true=Yes (show), false=No (hide)
 int get_nowbar_bar_style();  // 0=Pill-shaped, 1=Rectangular
+int get_nowbar_seekbar_length();  // 0=Fixed, 1=Scaling
 bool get_nowbar_mood_icon_visible();  // true=Show, false=Hidden
+bool get_nowbar_shuffle_icon_visible();  // true=Show, false=Hidden
+bool get_nowbar_repeat_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_rating_visible();  // true=Show, false=Hidden
 int get_nowbar_mood_tag_mode();  // 0=FEEDBACK, 1=2003_LOVED, 2=LFM_LOVED, 3=SMP_LOVED, 4=MOOD
 bool get_nowbar_stop_icon_visible();  // true=Show, false=Hidden
