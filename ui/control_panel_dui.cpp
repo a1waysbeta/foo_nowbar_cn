@@ -139,8 +139,20 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
     info.m_max_height = static_cast<t_uint32>(1.12 * dpi);
     
     // Fixed minimum width that accommodates all elements at any height
-    // Including Super button, spectrum visualizer after Repeat
-    info.m_min_width = static_cast<t_uint32>(1232.0 * dpi / 96.0);
+    // Including Super button, spectrum visualizer after Repeat.
+    // When volume, miniplayer, and all custom buttons are hidden, allow a
+    // smaller minimum width since those right-side elements are absent.
+    double base_width = 1232.0;
+    {
+      bool has_any_cbutton = false;
+      for (int i = 0; i < 6; i++) {
+        if (get_nowbar_cbutton_enabled(i)) { has_any_cbutton = true; break; }
+      }
+      bool volume_vis = get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible();
+      if (!volume_vis && !get_nowbar_miniplayer_icon_visible() && !has_any_cbutton)
+        base_width = 832.0;
+    }
+    info.m_min_width = static_cast<t_uint32>(base_width * dpi / 96.0);
     
     return info;
 }
