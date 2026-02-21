@@ -45,6 +45,11 @@ static cfg_int cfg_nowbar_seekbar_length(
     0  // Default: Fixed
 );
 
+static cfg_int cfg_nowbar_seekbar_position(
+    GUID{0xABCDEF06, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x02}},
+    0  // Default: centered (no offset)
+);
+
 static cfg_int cfg_nowbar_mood_icon_visible(
     GUID{0xABCDEF07, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8F}},
     1  // Default: Show (visible)
@@ -1576,6 +1581,13 @@ int get_nowbar_seekbar_length() {
     return len;
 }
 
+int get_nowbar_seekbar_position() {
+    int pos = cfg_nowbar_seekbar_position;
+    if (pos < -100) pos = -100;
+    if (pos > 100) pos = 100;
+    return pos;
+}
+
 bool get_nowbar_mood_icon_visible() {
     return cfg_nowbar_mood_icon_visible != 0;
 }
@@ -2641,6 +2653,9 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_LABEL), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_VALUE), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_LABEL), show_appearance);
@@ -3032,6 +3047,20 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"Fixed");
         SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"Scaling");
         SendMessage(hSeekbarLengthCombo, CB_SETCURSEL, cfg_nowbar_seekbar_length, 0);
+
+        // Initialize seekbar position slider (-100 to +100, mapped to 0-200)
+        {
+            HWND hPosSlider = GetDlgItem(hwnd, IDC_SEEKBAR_POSITION_SLIDER);
+            SendMessage(hPosSlider, TBM_SETRANGE, TRUE, MAKELPARAM(0, 200));
+            SendMessage(hPosSlider, TBM_SETPOS, TRUE, cfg_nowbar_seekbar_position + 100);
+            wchar_t buf[8];
+            int val = (int)cfg_nowbar_seekbar_position;
+            if (val > 0)
+                wsprintfW(buf, L"+%d", val);
+            else
+                wsprintfW(buf, L"%d", val);
+            SetDlgItemTextW(hwnd, IDC_SEEKBAR_POSITION_VALUE, buf);
+        }
 
         // Initialize cover margin combobox
         HWND hCoverMarginCombo = GetDlgItem(hwnd, IDC_COVER_MARGIN_COMBO);
@@ -4104,6 +4133,17 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SetDlgItemTextW(hwnd, IDC_SPECTRUM_OPACITY_VALUE, buf);
             p_this->on_changed();
         }
+        if ((HWND)lp == GetDlgItem(hwnd, IDC_SEEKBAR_POSITION_SLIDER)) {
+            int pos = (int)SendMessage(GetDlgItem(hwnd, IDC_SEEKBAR_POSITION_SLIDER), TBM_GETPOS, 0, 0);
+            int offset = pos - 100;
+            wchar_t buf[8];
+            if (offset > 0)
+                wsprintfW(buf, L"+%d", offset);
+            else
+                wsprintfW(buf, L"%d", offset);
+            SetDlgItemTextW(hwnd, IDC_SEEKBAR_POSITION_VALUE, buf);
+            p_this->on_changed();
+        }
         break;
 
     case WM_DRAWITEM:
@@ -4208,6 +4248,9 @@ void nowbar_preferences::apply_settings() {
 
         // Save seekbar length (0=Fixed, 1=Scaling)
         cfg_nowbar_seekbar_length = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), CB_GETCURSEL, 0, 0);
+
+        // Save seekbar position offset (-100 to +100)
+        cfg_nowbar_seekbar_position = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), TBM_GETPOS, 0, 0) - 100;
 
         // Save cover margin setting (0=Yes, 1=No in combobox -> config 1=Yes, 0=No)
         int coverMarginSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_COVER_MARGIN_COMBO), CB_GETCURSEL, 0, 0);
@@ -4472,6 +4515,9 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), CB_SETCURSEL, 0, 0);
             cfg_nowbar_seekbar_length = 0;  // Default: Fixed
             SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), CB_SETCURSEL, 0, 0);  // Default: Fixed
+            cfg_nowbar_seekbar_position = 0;  // Default: centered
+            SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), TBM_SETPOS, TRUE, 100);
+            SetDlgItemTextW(m_hwnd, IDC_SEEKBAR_POSITION_VALUE, L"0");
             SendMessage(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_COMBO), CB_SETCURSEL, 0, 0);  // Default: Disabled
             SendMessage(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: Disabled (index 1)
             CheckDlgButton(m_hwnd, IDC_ONLINE_ARTWORK_CHECK, BST_UNCHECKED);
