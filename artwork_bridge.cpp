@@ -8,6 +8,7 @@ pfn_foo_artwork_search g_artwork_search = nullptr;
 pfn_foo_artwork_get_bitmap g_artwork_get_bitmap = nullptr;
 pfn_foo_artwork_is_loading g_artwork_is_loading = nullptr;
 pfn_foo_artwork_set_callback g_artwork_set_callback = nullptr;
+pfn_foo_artwork_remove_callback g_artwork_remove_callback = nullptr;
 
 // Module handle for foo_artwork
 static HMODULE g_foo_artwork_module = nullptr;
@@ -49,6 +50,9 @@ bool init_artwork_bridge() {
     g_artwork_set_callback = (pfn_foo_artwork_set_callback)
         GetProcAddress(g_foo_artwork_module, "foo_artwork_set_callback");
 
+    g_artwork_remove_callback = (pfn_foo_artwork_remove_callback)
+        GetProcAddress(g_foo_artwork_module, "foo_artwork_remove_callback");
+
     // Register our callback to receive artwork results
     if (g_artwork_set_callback) {
         g_artwork_set_callback(artwork_result_callback);
@@ -59,9 +63,11 @@ bool init_artwork_bridge() {
 }
 
 void shutdown_artwork_bridge() {
-    // Unregister callback
-    if (g_artwork_set_callback) {
-        g_artwork_set_callback(nullptr);
+    // Unregister our specific callback (multi-callback safe)
+    if (g_artwork_remove_callback) {
+        g_artwork_remove_callback(artwork_result_callback);
+    } else if (g_artwork_set_callback) {
+        g_artwork_set_callback(nullptr); // Fallback for older foo_artwork
     }
     g_pending_artwork_bitmap = nullptr;
     g_has_pending_artwork = false;
