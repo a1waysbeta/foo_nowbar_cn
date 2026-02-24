@@ -12,12 +12,14 @@ typedef void (*pfn_foo_artwork_search)(const char* artist, const char* title);
 typedef HBITMAP (*pfn_foo_artwork_get_bitmap)();
 typedef bool (*pfn_foo_artwork_is_loading)();
 typedef void (*pfn_foo_artwork_set_callback)(pfn_artwork_result_callback callback);
+typedef void (*pfn_foo_artwork_remove_callback)(pfn_artwork_result_callback callback);
 
 // Global function pointers - null if foo_artwork not available
 extern pfn_foo_artwork_search g_artwork_search;
 extern pfn_foo_artwork_get_bitmap g_artwork_get_bitmap;
 extern pfn_foo_artwork_is_loading g_artwork_is_loading;
 extern pfn_foo_artwork_set_callback g_artwork_set_callback;
+extern pfn_foo_artwork_remove_callback g_artwork_remove_callback;
 
 // Initialize the bridge - call once at component startup
 // Returns true if foo_artwork was found and linked
