@@ -396,6 +396,7 @@ private:
     std::mutex m_waveform_mutex;
     std::atomic<bool> m_waveform_computing{false};
     std::atomic<bool> m_waveform_cancel{false};
+    abort_callback_impl m_waveform_abort;
     std::thread m_waveform_thread;
     pfc::string8 m_waveform_track_path;
     bool m_waveform_valid = false;
