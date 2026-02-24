@@ -7431,67 +7431,72 @@ void ControlPanelCore::start_waveform_computation() {
 
   m_waveform_thread = std::thread([this, path, hwnd, track_length, track_handle]() {
     try {
-      // Open the track for decoding using core SDK API (no helpers dependency)
-      abort_callback_impl abort_cb;
-      service_ptr_t<input_decoder> decoder;
-      input_entry::g_open_for_decoding(decoder, nullptr, path.c_str(), abort_cb);
-      decoder->initialize(0, input_flag_simpledecode, abort_cb);
-
       int num_segments = WAVEFORM_SEGMENTS;
       double segment_duration = track_length / num_segments;
       std::vector<float> peaks(num_segments, 0.0f);
       std::vector<double> rms_sums(num_segments, 0.0);
       std::vector<int> rms_counts(num_segments, 0);
 
-      audio_chunk_impl_temporary chunk;
-      int current_segment = 0;
-      double segment_start = 0.0;
+      // Decode audio in a tight scope so the file handle is released
+      // immediately after reading. This prevents blocking tag writers
+      // that need write access to the same file (e.g., CUE sheets
+      // where the underlying full-track file is both played and tagged).
+      {
+        service_ptr_t<input_decoder> decoder;
+        input_entry::g_open_for_decoding(decoder, nullptr, path.c_str(), m_waveform_abort);
+        decoder->initialize(0, input_flag_simpledecode, m_waveform_abort);
 
-      while (current_segment < num_segments) {
-        if (m_waveform_cancel.load()) return;
+        audio_chunk_impl_temporary chunk;
+        int current_segment = 0;
+        double segment_start = 0.0;
 
-        bool got_data = false;
-        try {
-          got_data = decoder->run(chunk, abort_cb);
-        } catch (...) {
-          break;
-        }
+        while (current_segment < num_segments) {
+          if (m_waveform_cancel.load()) return;
 
-        if (!got_data) break;
-
-        // Process samples in this chunk
-        const audio_sample* data = chunk.get_data();
-        t_size samples = chunk.get_sample_count();
-        int channels = chunk.get_channel_count();
-        int sample_rate = chunk.get_sample_rate();
-
-        if (!data || samples == 0 || channels == 0 || sample_rate == 0) continue;
-
-        double chunk_duration = (double)samples / sample_rate;
-        double chunk_end_time = segment_start + chunk_duration;
-
-        // Accumulate squared sample values for RMS per segment
-        for (t_size s = 0; s < samples; s++) {
-          double sample_time = segment_start + (double)s / sample_rate;
-          int seg = (int)(sample_time / segment_duration);
-          if (seg >= num_segments) seg = num_segments - 1;
-          if (seg < 0) seg = 0;
-
-          // Average across channels, then accumulate squared value
-          float sum_ch = 0.0f;
-          for (int ch = 0; ch < channels; ch++) {
-            sum_ch += std::abs(data[s * channels + ch]);
+          bool got_data = false;
+          try {
+            got_data = decoder->run(chunk, m_waveform_abort);
+          } catch (...) {
+            break;
           }
-          float val = sum_ch / channels;
-          rms_sums[seg] += (double)(val * val);
-          rms_counts[seg]++;
 
-          // Track segment progress for early exit
-          if (seg > current_segment) current_segment = seg;
+          if (!got_data) break;
+
+          // Process samples in this chunk
+          const audio_sample* data = chunk.get_data();
+          t_size samples = chunk.get_sample_count();
+          int channels = chunk.get_channel_count();
+          int sample_rate = chunk.get_sample_rate();
+
+          if (!data || samples == 0 || channels == 0 || sample_rate == 0) continue;
+
+          double chunk_duration = (double)samples / sample_rate;
+          double chunk_end_time = segment_start + chunk_duration;
+
+          // Accumulate squared sample values for RMS per segment
+          for (t_size s = 0; s < samples; s++) {
+            double sample_time = segment_start + (double)s / sample_rate;
+            int seg = (int)(sample_time / segment_duration);
+            if (seg >= num_segments) seg = num_segments - 1;
+            if (seg < 0) seg = 0;
+
+            // Average across channels, then accumulate squared value
+            float sum_ch = 0.0f;
+            for (int ch = 0; ch < channels; ch++) {
+              sum_ch += std::abs(data[s * channels + ch]);
+            }
+            float val = sum_ch / channels;
+            rms_sums[seg] += (double)(val * val);
+            rms_counts[seg]++;
+
+            // Track segment progress for early exit
+            if (seg > current_segment) current_segment = seg;
+          }
+
+          segment_start = chunk_end_time;
         }
-
-        segment_start = chunk_end_time;
       }
+      // decoder is now destroyed — file handle released
 
       // Compute RMS for each segment
       for (int i = 0; i < num_segments; i++) {
@@ -7543,11 +7548,13 @@ void ControlPanelCore::start_waveform_computation() {
 
 void ControlPanelCore::cancel_waveform_computation() {
   m_waveform_cancel = true;
+  m_waveform_abort.abort();
   if (m_waveform_thread.joinable()) {
     m_waveform_thread.join();
   }
   m_waveform_computing = false;
   m_waveform_cancel = false;
+  m_waveform_abort.reset();
 }
 
 // Waveform cache magic and version
