@@ -683,6 +683,46 @@ void ControlPanelCore::update_fonts() {
   invalidate();
 }
 
+void ControlPanelCore::create_artwork_thumbnail() {
+    m_artwork_thumbnail.reset();
+
+    if (!m_artwork_bitmap || m_artwork_bitmap->GetLastStatus() != Gdiplus::Ok) {
+        return;
+    }
+
+    int srcW = m_artwork_bitmap->GetWidth();
+    int srcH = m_artwork_bitmap->GetHeight();
+
+    const int max_dim = 512;
+
+    // Only create thumbnail if source exceeds max_dim in either dimension
+    if (srcW <= max_dim && srcH <= max_dim) {
+        // Source is small enough - just move it directly
+        m_artwork_thumbnail = std::move(m_artwork_bitmap);
+        return;
+    }
+
+    // Calculate thumbnail dimensions preserving aspect ratio
+    int thumbW, thumbH;
+    if (srcW >= srcH) {
+        thumbW = max_dim;
+        thumbH = static_cast<int>(static_cast<float>(srcH) / srcW * max_dim);
+    } else {
+        thumbH = max_dim;
+        thumbW = static_cast<int>(static_cast<float>(srcW) / srcH * max_dim);
+    }
+    if (thumbW < 1) thumbW = 1;
+    if (thumbH < 1) thumbH = 1;
+
+    m_artwork_thumbnail.reset(new Gdiplus::Bitmap(thumbW, thumbH, PixelFormat32bppARGB));
+    Gdiplus::Graphics gfx(m_artwork_thumbnail.get());
+    gfx.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    gfx.DrawImage(m_artwork_bitmap.get(), 0, 0, thumbW, thumbH);
+
+    // Release full-resolution bitmap to save memory
+    m_artwork_bitmap.reset();
+}
+
 void ControlPanelCore::extract_artwork_colors() {
   m_artwork_colors_valid = false;
   
@@ -741,8 +781,8 @@ void ControlPanelCore::extract_artwork_colors() {
 void ControlPanelCore::create_blurred_artwork(int target_width, int target_height) {
   m_blurred_artwork.reset();
   m_blurred_artwork_size = {0, 0};
-  
-  if (!m_artwork_bitmap || m_artwork_bitmap->GetLastStatus() != Gdiplus::Ok) {
+
+  if (!m_artwork_thumbnail || m_artwork_thumbnail->GetLastStatus() != Gdiplus::Ok) {
     return;
   }
   
@@ -757,7 +797,7 @@ void ControlPanelCore::create_blurred_artwork(int target_width, int target_heigh
   {
     Gdiplus::Graphics gfx(scaled.get());
     gfx.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
-    gfx.DrawImage(m_artwork_bitmap.get(), 0, 0, blur_size, blur_size);
+    gfx.DrawImage(m_artwork_thumbnail.get(), 0, 0, blur_size, blur_size);
   }
   
   // Lock the scaled bitmap for direct memory access
@@ -1918,7 +1958,7 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
       Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
       Gdiplus::SolidBrush overlayBrush(overlayColor);
       target.FillRectangle(&overlayBrush, draw_rect);
-    } else if (bg_style == 2 && m_artwork_bitmap) {
+    } else if (bg_style == 2 && m_artwork_thumbnail) {
       // Blurred Artwork mode
       if (!m_blurred_artwork || 
           m_blurred_artwork_size.cx != width || 
@@ -2043,7 +2083,7 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
           Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
           Gdiplus::SolidBrush overlayBrush(overlayColor);
           cache_g.FillRectangle(&overlayBrush, cache_r);
-        } else if (bg_style == 2 && m_artwork_bitmap) {
+        } else if (bg_style == 2 && m_artwork_thumbnail) {
           // Ensure blurred artwork is created if it doesn't exist or needs resize
           if (!m_blurred_artwork || 
               m_blurred_artwork_size.cx != width || 
@@ -2078,9 +2118,9 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
   int w = m_rect_artwork.right - m_rect_artwork.left;
   int h = m_rect_artwork.bottom - m_rect_artwork.top;
 
-  if (m_artwork_bitmap) {
-    int srcW = m_artwork_bitmap->GetWidth();
-    int srcH = m_artwork_bitmap->GetHeight();
+  if (m_artwork_thumbnail) {
+    int srcW = m_artwork_thumbnail->GetWidth();
+    int srcH = m_artwork_thumbnail->GetHeight();
     float srcAspect = (float)srcW / (float)srcH;
     float dstAspect = (float)w / (float)h;
     int cropX, cropY, cropW, cropH;
@@ -2098,7 +2138,7 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
       cropY = (srcH - cropH) / 2;
     }
     Gdiplus::Rect destRect(m_rect_artwork.left, m_rect_artwork.top, w, h);
-    g.DrawImage(m_artwork_bitmap.get(), destRect, cropX, cropY, cropW, cropH,
+    g.DrawImage(m_artwork_thumbnail.get(), destRect, cropX, cropY, cropW, cropH,
                 Gdiplus::UnitPixel);
   } else {
     // Draw placeholder - use theme-appropriate background color
@@ -6090,7 +6130,8 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
         
         // Extract colors for dynamic background
         extract_artwork_colors();
-        
+        create_artwork_thumbnail();
+
         // Trigger background transition BEFORE invalidating cache
         // Only requires m_prev_background to exist (it contains the rendered old state)
         // m_bg_cache_valid check removed: it just indicates cache freshness, but
@@ -6129,6 +6170,7 @@ void ControlPanelCore::set_artwork_from_hbitmap(HBITMAP bitmap) {
   if (m_artwork_bitmap && m_artwork_bitmap->GetLastStatus() == Gdiplus::Ok) {
     // Extract colors for dynamic background
     extract_artwork_colors();
+    create_artwork_thumbnail();
 
     // Trigger background transition BEFORE invalidating cache
     // Only requires m_prev_background to exist (it contains the rendered old state)
@@ -6147,6 +6189,7 @@ void ControlPanelCore::set_artwork_from_hbitmap(HBITMAP bitmap) {
     m_bg_cache_valid = false;
   } else {
     m_artwork_bitmap.reset();
+    m_artwork_thumbnail.reset();
   }
 
   invalidate();
@@ -6156,6 +6199,7 @@ void ControlPanelCore::clear_artwork() {
   m_needs_full_repaint = true;
   m_artwork_is_online = false;
   m_artwork_bitmap.reset();
+  m_artwork_thumbnail.reset();
   m_artwork_colors_valid = false;
   m_blurred_artwork.reset();
   m_target_background.reset();
