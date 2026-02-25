@@ -187,6 +187,7 @@ private:
     void invalidate_progress();  // Partial invalidation for progress-only updates (no full repaint)
     void update_fonts();
     void extract_artwork_colors();  // Extract dominant colors from artwork for dynamic background
+    void create_artwork_thumbnail();
     void create_blurred_artwork(int target_width, int target_height);  // Create blurred version at exact size
     
     // Drawing helpers
@@ -468,6 +469,7 @@ private:
     
     // Artwork
     std::unique_ptr<Gdiplus::Bitmap> m_artwork_bitmap;
+    std::unique_ptr<Gdiplus::Bitmap> m_artwork_thumbnail;  // Pre-scaled artwork (max 512x512) for rendering
     std::unique_ptr<Gdiplus::Bitmap> m_default_artwork;
     bool m_artwork_is_online = false;  // True if current artwork is from foo_artwork (online)
 
