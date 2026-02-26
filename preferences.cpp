@@ -130,10 +130,6 @@ static cfg_int cfg_nowbar_volume_bar_visible(
     1  // Default: Show (visible)
 );
 
-static cfg_int cfg_nowbar_glass_effect(
-    GUID{0xABCDEF1F, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xAF}},
-    0  // Default: Disabled
-);
 
 static cfg_int cfg_nowbar_background_style(
     GUID{0xABCDEF50, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE0}},
@@ -1651,9 +1647,6 @@ bool get_nowbar_volume_bar_visible() {
     return cfg_nowbar_volume_bar_visible != 0;
 }
 
-bool get_nowbar_glass_effect_enabled() {
-    return cfg_nowbar_glass_effect != 0;
-}
 
 bool get_nowbar_infinite_playback_enabled() {
     return cfg_nowbar_infinite_playback != 0;
@@ -2656,8 +2649,6 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_VALUE), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ONLINE_ARTWORK_CHECK), show_appearance);
@@ -3238,12 +3229,6 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             update_vis_section_state(hwnd);
         }
 
-        // Initialize glass effect combobox
-        HWND hGlassEffectCombo = GetDlgItem(hwnd, IDC_GLASS_EFFECT_COMBO);
-        SendMessage(hGlassEffectCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
-        SendMessage(hGlassEffectCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
-        SendMessage(hGlassEffectCombo, CB_SETCURSEL, cfg_nowbar_glass_effect ? 1 : 0, 0);
-
         // Initialize font displays
         p_this->update_font_displays();
 
@@ -3398,7 +3383,6 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_AUTOHIDE_CBUTTONS_COMBO:
         case IDC_VOLUME_ICON_COMBO:
         case IDC_VOLUME_BAR_COMBO:
-        case IDC_GLASS_EFFECT_COMBO:
         case IDC_MOOD_TAG_COMBO:
         case IDC_SKIP_RATING_THRESHOLD_COMBO:
         case IDC_VIS_SPECTRUM_WIDTH_COMBO:
@@ -4355,10 +4339,6 @@ void nowbar_preferences::apply_settings() {
         cfg_custom_progress_track_enabled = (IsDlgButtonChecked(m_hwnd, IDC_CUSTOM_PROGRESS_TRACK_CHECK) == BST_CHECKED) ? 1 : 0;
         cfg_custom_volume_track_enabled = (IsDlgButtonChecked(m_hwnd, IDC_CUSTOM_VOLUME_TRACK_CHECK) == BST_CHECKED) ? 1 : 0;
 
-        // Save glass effect setting (0=Disabled, 1=Enabled in combobox -> config 0=Disabled, 1=Enabled)
-        int glassEffectSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_COMBO), CB_GETCURSEL, 0, 0);
-        cfg_nowbar_glass_effect = (glassEffectSel == 1) ? 1 : 0;
-
         // Save background style setting
         int bgStyleSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_BACKGROUND_STYLE_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_background_style = bgStyleSel;
@@ -4503,7 +4483,6 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_cover_margin = 1;  // Yes (margin enabled)
             cfg_nowbar_background_style = 0;  // Solid
             cfg_nowbar_bar_style = 0;  // Pill-shaped
-            cfg_nowbar_glass_effect = 0;  // Disabled
             cfg_nowbar_smooth_animations = 0;  // Disabled (default for performance)
             cfg_nowbar_online_artwork = 0;  // Default: Disabled
 
@@ -4518,7 +4497,6 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_seekbar_position = 0;  // Default: centered
             SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), TBM_SETPOS, TRUE, 100);
             SetDlgItemTextW(m_hwnd, IDC_SEEKBAR_POSITION_VALUE, L"0");
-            SendMessage(GetDlgItem(m_hwnd, IDC_GLASS_EFFECT_COMBO), CB_SETCURSEL, 0, 0);  // Default: Disabled
             SendMessage(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: Disabled (index 1)
             CheckDlgButton(m_hwnd, IDC_ONLINE_ARTWORK_CHECK, BST_UNCHECKED);
             update_cover_margin_state(m_hwnd);  // Re-enable Cover Margin (Cover Artwork is Yes)
