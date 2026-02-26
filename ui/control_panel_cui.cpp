@@ -42,11 +42,6 @@ void ControlPanelCUI::initialize_core(HWND wnd) {
         // Now initialize (which calls on_settings_changed with callbacks available)
         m_core->initialize(wnd);
         
-        // Apply glass effect if enabled in preferences
-        if (get_nowbar_glass_effect_enabled()) {
-            m_glass_effect_active = enable_glass_for_child(wnd);
-        }
-        
         // Load artwork for current track
         update_artwork();
     }
@@ -124,10 +119,6 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
         
     case WM_DESTROY:
-        if (m_glass_effect_active) {
-            disable_glass_for_child(wnd);
-            m_glass_effect_active = false;
-        }
         // Unregister colour callback before destroying
         if (m_colour_manager.is_valid() && m_colour_callback) {
             m_colour_manager->deregister_common_callback(m_colour_callback.get());
@@ -149,17 +140,6 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
         
     case WM_PAINT: {
-        // Sync DWM glass state with preference (enables live toggle without restart)
-        if (m_core) {
-            bool want_glass = m_core->is_glass_effect_enabled();
-            if (want_glass && !m_glass_effect_active) {
-                m_glass_effect_active = enable_glass_for_child(wnd);
-            } else if (!want_glass && m_glass_effect_active) {
-                disable_glass_for_child(wnd);
-                m_glass_effect_active = false;
-            }
-        }
-
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(wnd, &ps);
 
@@ -171,8 +151,7 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
             if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
             m_cache_dc = CreateCompatibleDC(hdc);
-            // Use 32-bit ARGB DIB section so DWM glass can see per-pixel alpha
-            m_cache_bitmap = create_argb_dib_section(m_cache_dc, rect.right, rect.bottom);
+            m_cache_bitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
             m_cache_old_bitmap = (HBITMAP)SelectObject(m_cache_dc, m_cache_bitmap);
             m_cache_w = rect.right;
             m_cache_h = rect.bottom;
@@ -189,16 +168,10 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             // Background cache in paint_spectrum_only covers the dirty areas — no clear needed
             m_core->paint_spectrum_only(m_cache_dc, rect);
         } else if (waveform_fast) {
-            m_core->clear_waveform_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color(),
-                                                m_core->is_glass_effect_enabled());
+            m_core->clear_waveform_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color());
             m_core->paint_waveform_only(m_cache_dc, rect);
         } else {
-            // Full repaint — clear to transparent if glass, else solid fill
-            if (m_core && m_core->is_glass_effect_enabled()) {
-                Gdiplus::Graphics g(m_cache_dc);
-                g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-                g.Clear(Gdiplus::Color(0, 0, 0, 0));
-            } else {
+            {
                 HBRUSH bgBrush = CreateSolidBrush(get_nowbar_initial_bg_color());
                 FillRect(m_cache_dc, &rect, bgBrush);
                 DeleteObject(bgBrush);
