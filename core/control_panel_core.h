@@ -6,9 +6,6 @@
 
 namespace nowbar {
 
-// Shared DWM glass utilities (Windows 11)
-bool enable_glass_for_child(HWND child_hwnd);
-void disable_glass_for_child(HWND child_hwnd);
 HBITMAP create_argb_dib_section(HDC hdc, int w, int h);
 
 // Layout constants (will be scaled by DPI)
@@ -126,27 +123,12 @@ public:
     const RECT& get_spectrum_full_rect() const { return m_rect_spectrum_full; }
     // Clears only the individual rects that paint_spectrum_only will redraw,
     // preserving artwork, track info, custom buttons, and volume on the cached bitmap
-    void clear_spectrum_dirty_rects(HDC hdc, COLORREF bg, bool glass = false) const {
-        if (glass) {
-            Gdiplus::Graphics g(hdc);
-            g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-            Gdiplus::SolidBrush brush(Gdiplus::Color(0, 0, 0, 0));
-            g.FillRectangle(&brush, Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
-                m_rect_spectrum_full.right - m_rect_spectrum_full.left,
-                m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
-            g.FillRectangle(&brush, Gdiplus::Rect(m_rect_thin_progress.left, m_rect_thin_progress.top,
-                m_rect_thin_progress.right - m_rect_thin_progress.left,
-                m_rect_thin_progress.bottom - m_rect_thin_progress.top));
-            g.FillRectangle(&brush, Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
-                m_rect_time.right - m_rect_time.left,
-                m_rect_time.bottom - m_rect_time.top));
-        } else {
-            HBRUSH brush = CreateSolidBrush(bg);
-            FillRect(hdc, &m_rect_spectrum_full, brush);
-            FillRect(hdc, &m_rect_thin_progress, brush);
-            FillRect(hdc, &m_rect_time, brush);
-            DeleteObject(brush);
-        }
+    void clear_spectrum_dirty_rects(HDC hdc, COLORREF bg) const {
+        HBRUSH brush = CreateSolidBrush(bg);
+        FillRect(hdc, &m_rect_spectrum_full, brush);
+        FillRect(hdc, &m_rect_thin_progress, brush);
+        FillRect(hdc, &m_rect_time, brush);
+        DeleteObject(brush);
     }
     bool is_spectrum_animating_only() const {
         if (!m_spectrum_animating) return false;
@@ -162,23 +144,11 @@ public:
     void paint_waveform_only(HDC hdc, const RECT& panel_rect);
     const RECT& get_waveform_rect() const { return m_rect_waveform; }
     // Clears only the rects that paint_waveform_only will redraw
-    void clear_waveform_dirty_rects(HDC hdc, COLORREF bg, bool glass = false) const {
-        if (glass) {
-            Gdiplus::Graphics g(hdc);
-            g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-            Gdiplus::SolidBrush brush(Gdiplus::Color(0, 0, 0, 0));
-            g.FillRectangle(&brush, Gdiplus::Rect(m_rect_waveform.left, m_rect_waveform.top,
-                m_rect_waveform.right - m_rect_waveform.left,
-                m_rect_waveform.bottom - m_rect_waveform.top));
-            g.FillRectangle(&brush, Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
-                m_rect_time.right - m_rect_time.left,
-                m_rect_time.bottom - m_rect_time.top));
-        } else {
-            HBRUSH brush = CreateSolidBrush(bg);
-            FillRect(hdc, &m_rect_waveform, brush);
-            FillRect(hdc, &m_rect_time, brush);
-            DeleteObject(brush);
-        }
+    void clear_waveform_dirty_rects(HDC hdc, COLORREF bg) const {
+        HBRUSH brush = CreateSolidBrush(bg);
+        FillRect(hdc, &m_rect_waveform, brush);
+        FillRect(hdc, &m_rect_time, brush);
+        DeleteObject(brush);
     }
     bool is_waveform_progress_only() const {
         if (m_needs_full_repaint) return false;
@@ -194,9 +164,6 @@ public:
         return m_animation_dirty_partial ? &m_animation_dirty_rect : nullptr;
     }
     void clear_animation_dirty() { m_animation_dirty_partial = false; }
-
-    // Glass effect state
-    bool is_glass_effect_enabled() const { return m_glass_effect_enabled; }
 
     // Settings change notification
     void on_settings_changed();
@@ -292,7 +259,6 @@ private:
     HWND m_hwnd = nullptr;
     bool m_dark_mode = true;
     bool m_pending_theme_refresh = true;  // Re-check theme on first paint to fix startup timing
-    bool m_glass_effect_enabled = false;  // Windows 11 acrylic backdrop
     float m_dpi_scale = 1.0f;
     float m_size_scale = 1.0f;  // Scale factor for controls based on panel height
     LayoutMetrics m_metrics;
