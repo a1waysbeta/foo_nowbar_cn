@@ -4,93 +4,16 @@
 #include "../resource.h"
 #include <algorithm>
 #include <commdlg.h>
-#include <dwmapi.h>
 #include <memory>
 #include <mutex>
 #include <fstream>
 #include <shellapi.h>
 #include <string>
 #include <vector>
-#pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "msimg32.lib")
 
-// --- DWM Glass Effect Utilities (Windows 11) ---
-
-#ifndef DWMWA_SYSTEMBACKDROP_TYPE
-#define DWMWA_SYSTEMBACKDROP_TYPE 38
-#endif
-
-static DWORD get_windows_build_number() {
-    static DWORD cached = [] {
-        DWORD buildNumber = 0;
-        HKEY hKey;
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-                          0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            wchar_t buildStr[16] = {};
-            DWORD size = sizeof(buildStr);
-            if (RegQueryValueExW(hKey, L"CurrentBuildNumber", nullptr, nullptr,
-                                 reinterpret_cast<LPBYTE>(buildStr), &size) == ERROR_SUCCESS) {
-                buildNumber = _wtoi(buildStr);
-            }
-            RegCloseKey(hKey);
-        }
-        return buildNumber;
-    }();
-    return cached;
-}
-
-// Reference count for glass-enabled panels per top-level window.
-// Multiple nowbar panels may share the same top-level foobar2000 window;
-// DWM attributes are only removed when the last panel disables glass.
-static std::unordered_map<HWND, int> g_glass_refcount;
-
 namespace nowbar {
-
-bool enable_glass_for_child(HWND child_hwnd) {
-    if (get_windows_build_number() < 22000) return false;
-
-    HWND top = GetAncestor(child_hwnd, GA_ROOT);
-    if (!top) return false;
-
-    // If another panel already enabled glass on this window, just bump the refcount
-    if (g_glass_refcount[top]++ > 0) return true;
-
-    // Apply acrylic backdrop to the top-level window.
-    // Note: DwmExtendFrameIntoClientArea affects the entire client area, so other
-    // foobar2000 panels that paint with undefined alpha may also become transparent.
-    // In practice, GDI fills set alpha=0xFF on 32-bit surfaces so this is rarely an issue.
-    DWM_SYSTEMBACKDROP_TYPE backdropType = DWMSBT_TRANSIENTWINDOW;
-    HRESULT hr = DwmSetWindowAttribute(top, DWMWA_SYSTEMBACKDROP_TYPE,
-                                       &backdropType, sizeof(backdropType));
-    if (FAILED(hr)) { g_glass_refcount[top]--; return false; }
-
-    // Extend frame into entire client area — DWM uses per-pixel alpha
-    MARGINS margins = { -1, -1, -1, -1 };
-    hr = DwmExtendFrameIntoClientArea(top, &margins);
-    if (FAILED(hr)) { g_glass_refcount[top]--; return false; }
-
-    return true;
-}
-
-void disable_glass_for_child(HWND child_hwnd) {
-    HWND top = GetAncestor(child_hwnd, GA_ROOT);
-    if (!top) return;
-
-    auto it = g_glass_refcount.find(top);
-    if (it == g_glass_refcount.end()) return;
-
-    // Only remove DWM attributes when the last panel on this window disables glass
-    if (--it->second > 0) return;
-    g_glass_refcount.erase(it);
-
-    DWM_SYSTEMBACKDROP_TYPE backdropType = DWMSBT_NONE;
-    DwmSetWindowAttribute(top, DWMWA_SYSTEMBACKDROP_TYPE,
-                          &backdropType, sizeof(backdropType));
-
-    MARGINS margins = { 0, 0, 0, 0 };
-    DwmExtendFrameIntoClientArea(top, &margins);
-}
 
 HBITMAP create_argb_dib_section(HDC hdc, int w, int h) {
     BITMAPINFO bmi = {};
@@ -624,12 +547,6 @@ void ControlPanelCore::on_settings_changed() {
   // Update and recompile title format strings
   update_title_formats();
   
-  // Update glass effect state from preferences
-  m_glass_effect_enabled = get_nowbar_glass_effect_enabled();
-
-  // Glass state change requires spectrum cache rebuild (opaque vs ARGB bitmap)
-  destroy_spectrum_bg_cache();
-
   // Invalidate target background to prevent stale content during transition
   m_target_background.reset();
 
@@ -1601,13 +1518,14 @@ void ControlPanelCore::update_layout(const RECT &rect) {
                     : rect.right - sp;
     int left_gap = seekbar_left - avail_left;
     int right_gap = avail_right - seekbar_right;
-    // Extend each side independently by half its available gap.
-    // When buttons are centered (gaps equal), this matches symmetric
-    // extension. When buttons are pushed off-center by artwork, the
-    // side with more space extends further, shifting the seekbar toward
-    // the center of the available space.
-    if (left_gap > 0) seekbar_left -= static_cast<int>(left_gap * 0.50);
-    if (right_gap > 0) seekbar_right += static_cast<int>(right_gap * 0.50);
+    // Use the smaller gap for both sides so the seekbar extends
+    // symmetrically even when L1 != L2 (e.g. custom buttons enabled
+    // on one side).  This keeps the progress bar visually centred
+    // around the Play/Pause button by default.
+    int min_gap = (left_gap < right_gap) ? left_gap : right_gap;
+    int extend = (min_gap > 0) ? static_cast<int>(min_gap * 0.50) : 0;
+    if (left_gap > 0) seekbar_left -= extend;
+    if (right_gap > 0) seekbar_right += extend;
 
     // Shorten the scaling seekbar by 10% on each side so the elapsed/remaining
     // timer text does not overlap the progress bar at narrow panel widths.
@@ -1879,11 +1797,7 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     if (m_spectrum_bg_cache_cx != cache_w || m_spectrum_bg_cache_cy != cache_h) {
       destroy_spectrum_bg_cache();
       m_spectrum_bg_hdc = CreateCompatibleDC(hdc);
-      if (m_glass_effect_enabled) {
-          m_spectrum_bg_hbitmap = create_argb_dib_section(m_spectrum_bg_hdc, cache_w, cache_h);
-      } else {
-          m_spectrum_bg_hbitmap = CreateCompatibleBitmap(hdc, cache_w, cache_h);
-      }
+      m_spectrum_bg_hbitmap = CreateCompatibleBitmap(hdc, cache_w, cache_h);
       m_spectrum_bg_old = (HBITMAP)SelectObject(m_spectrum_bg_hdc, m_spectrum_bg_hbitmap);
       m_spectrum_bg_cache_cx = cache_w;
       m_spectrum_bg_cache_cy = cache_h;
@@ -1908,7 +1822,8 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     int spec_top = m_rect_spectrum_full.top;
     bool buttons_above_spectrum =
         (m_rect_play.right > m_rect_play.left && m_rect_play.top < spec_top) ||
-        (m_rect_miniplayer.right > m_rect_miniplayer.left && m_rect_miniplayer.top < spec_top);
+        (m_rect_miniplayer.right > m_rect_miniplayer.left && m_rect_miniplayer.top < spec_top) ||
+        (m_rect_cbutton1.right > m_rect_cbutton1.left && m_rect_cbutton1.top < spec_top);
 
     if (buttons_above_spectrum) {
       Gdiplus::Graphics g(hdc);
@@ -1947,6 +1862,12 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
       add_rect(m_rect_super);
       add_rect(m_rect_miniplayer);
       for (int i = 0; i < 5; i++) add_rect(m_rect_stars[i]);
+      add_rect(m_rect_cbutton1);
+      add_rect(m_rect_cbutton2);
+      add_rect(m_rect_cbutton3);
+      add_rect(m_rect_cbutton4);
+      add_rect(m_rect_cbutton5);
+      add_rect(m_rect_cbutton6);
 
       g.SetClip(&btn_clip);
       draw_background(g, panel_rect);
@@ -2044,11 +1965,6 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
   
   int bg_style = get_nowbar_background_style();
 
-  // Glass effect overrides all background styles — acrylic replaces artwork backgrounds
-  if (m_glass_effect_enabled) {
-    bg_style = 0;  // Force solid path, which the glass branch will intercept
-  }
-
   // Detect if background style or content has changed (needs transition)
   bool style_changed = (m_prev_bg_style != -1 && m_prev_bg_style != bg_style);
   bool size_changed = (m_prev_background && 
@@ -2126,13 +2042,6 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
       Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
       Gdiplus::SolidBrush overlayBrush(overlayColor);
       target.FillRectangle(&overlayBrush, draw_rect);
-    } else if (m_glass_effect_enabled) {
-      // Glass effect — clear to fully transparent so DWM acrylic shows through
-      auto prev_mode = target.GetCompositingMode();
-      target.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-      Gdiplus::SolidBrush brush(Gdiplus::Color(0, 0, 0, 0));
-      target.FillRectangle(&brush, draw_rect);
-      target.SetCompositingMode(prev_mode);
     } else {
       // Solid background
       Gdiplus::SolidBrush brush(m_bg_color);
@@ -2250,13 +2159,6 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
           Gdiplus::Color overlayColor(overlay_alpha, 0, 0, 0);
           Gdiplus::SolidBrush overlayBrush(overlayColor);
           cache_g.FillRectangle(&overlayBrush, cache_r);
-        } else if (m_glass_effect_enabled) {
-          // Glass effect — clear to fully transparent so DWM acrylic shows through
-          auto prev_mode = cache_g.GetCompositingMode();
-          cache_g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-          Gdiplus::SolidBrush brush(Gdiplus::Color(0, 0, 0, 0));
-          cache_g.FillRectangle(&brush, cache_r);
-          cache_g.SetCompositingMode(prev_mode);
         } else {
           Gdiplus::SolidBrush brush(m_bg_color);
           cache_g.FillRectangle(&brush, cache_r);
