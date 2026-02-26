@@ -2141,7 +2141,7 @@ bool execute_fb2k_action_by_path(const char* path) {
     // Create context menu manager and search for the command
     contextmenu_manager::ptr cm;
     contextmenu_manager::g_create(cm);
-    cm->init_context(tracks, contextmenu_manager::flag_show_shortcuts);
+    cm->init_context(tracks, 0);
     
     // Recursive function to search context menu nodes
     std::function<bool(contextmenu_node*, pfc::string8)> search_context_node;
@@ -2365,7 +2365,7 @@ CommandState get_fb2k_action_state_by_path(const char* path) {
     // Create context menu manager and search for the command
     contextmenu_manager::ptr cm;
     contextmenu_manager::g_create(cm);
-    cm->init_context(tracks, contextmenu_manager::flag_show_shortcuts);
+    cm->init_context(tracks, 0);
     
     // Recursive function to search context menu nodes
     std::function<bool(contextmenu_node*, pfc::string8)> search_context_node;
