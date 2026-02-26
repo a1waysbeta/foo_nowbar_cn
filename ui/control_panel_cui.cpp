@@ -3,35 +3,6 @@
 #include "../preferences.h"
 #include "../artwork_bridge.h"
 
-// Windows 11 Build 22000+ DWM backdrop attribute (for older SDK headers)
-#ifndef DWMWA_SYSTEMBACKDROP_TYPE
-#define DWMWA_SYSTEMBACKDROP_TYPE 38
-#endif
-// DWM_SYSTEMBACKDROP_TYPE enum values are in dwmapi.h on SDK 10.0.22000+
-
-// Try to enable Windows 11 acrylic backdrop for a window
-static bool try_enable_acrylic_backdrop_cui(HWND hwnd) {
-    DWORD buildNumber = 0;
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-                      0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        wchar_t buildStr[16] = {};
-        DWORD size = sizeof(buildStr);
-        if (RegQueryValueExW(hKey, L"CurrentBuildNumber", nullptr, nullptr,
-                             reinterpret_cast<LPBYTE>(buildStr), &size) == ERROR_SUCCESS) {
-            buildNumber = _wtoi(buildStr);
-        }
-        RegCloseKey(hKey);
-    }
-    
-    if (buildNumber < 22000) return false;
-    
-    DWM_SYSTEMBACKDROP_TYPE backdropType = DWMSBT_TRANSIENTWINDOW;
-    HRESULT hr = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
-                                       &backdropType, sizeof(backdropType));
-    return SUCCEEDED(hr);
-}
-
 namespace nowbar {
 
 // Register with Columns UI
@@ -73,7 +44,7 @@ void ControlPanelCUI::initialize_core(HWND wnd) {
         
         // Apply glass effect if enabled in preferences
         if (get_nowbar_glass_effect_enabled()) {
-            m_glass_effect_active = try_enable_acrylic_backdrop_cui(wnd);
+            m_glass_effect_active = enable_glass_for_child(wnd);
         }
         
         // Load artwork for current track
@@ -153,6 +124,10 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
         
     case WM_DESTROY:
+        if (m_glass_effect_active) {
+            disable_glass_for_child(wnd);
+            m_glass_effect_active = false;
+        }
         // Unregister colour callback before destroying
         if (m_colour_manager.is_valid() && m_colour_callback) {
             m_colour_manager->deregister_common_callback(m_colour_callback.get());
@@ -174,6 +149,17 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
         
     case WM_PAINT: {
+        // Sync DWM glass state with preference (enables live toggle without restart)
+        if (m_core) {
+            bool want_glass = m_core->is_glass_effect_enabled();
+            if (want_glass && !m_glass_effect_active) {
+                m_glass_effect_active = enable_glass_for_child(wnd);
+            } else if (!want_glass && m_glass_effect_active) {
+                disable_glass_for_child(wnd);
+                m_glass_effect_active = false;
+            }
+        }
+
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(wnd, &ps);
 
@@ -185,7 +171,8 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
             if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
             m_cache_dc = CreateCompatibleDC(hdc);
-            m_cache_bitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+            // Use 32-bit ARGB DIB section so DWM glass can see per-pixel alpha
+            m_cache_bitmap = create_argb_dib_section(m_cache_dc, rect.right, rect.bottom);
             m_cache_old_bitmap = (HBITMAP)SelectObject(m_cache_dc, m_cache_bitmap);
             m_cache_w = rect.right;
             m_cache_h = rect.bottom;
@@ -202,13 +189,20 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             // Background cache in paint_spectrum_only covers the dirty areas — no clear needed
             m_core->paint_spectrum_only(m_cache_dc, rect);
         } else if (waveform_fast) {
-            m_core->clear_waveform_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color());
+            m_core->clear_waveform_dirty_rects(m_cache_dc, get_nowbar_initial_bg_color(),
+                                                m_core->is_glass_effect_enabled());
             m_core->paint_waveform_only(m_cache_dc, rect);
         } else {
-            // Full repaint
-            HBRUSH bgBrush = CreateSolidBrush(get_nowbar_initial_bg_color());
-            FillRect(m_cache_dc, &rect, bgBrush);
-            DeleteObject(bgBrush);
+            // Full repaint — clear to transparent if glass, else solid fill
+            if (m_core && m_core->is_glass_effect_enabled()) {
+                Gdiplus::Graphics g(m_cache_dc);
+                g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+                g.Clear(Gdiplus::Color(0, 0, 0, 0));
+            } else {
+                HBRUSH bgBrush = CreateSolidBrush(get_nowbar_initial_bg_color());
+                FillRect(m_cache_dc, &rect, bgBrush);
+                DeleteObject(bgBrush);
+            }
             if (m_core) {
                 m_core->paint(m_cache_dc, rect);
             }
