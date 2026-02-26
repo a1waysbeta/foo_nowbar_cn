@@ -40,7 +40,6 @@ public:
 private:
     std::unique_ptr<ControlPanelCore> m_core;
     bool m_tracking_mouse = false;
-    bool m_glass_effect_active = false;  // Tracks if acrylic backdrop is currently applied
 
     // Cached offscreen bitmap for double buffering (avoids alloc/free per frame)
     HDC m_cache_dc = nullptr;
