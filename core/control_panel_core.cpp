@@ -1416,13 +1416,13 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     timer_space = static_cast<int>(spacing);
   } else if (get_nowbar_mood_icon_visible()) {
     reference_left = m_rect_heart.left;
-    // Small gap only — draw_time_display() has a runtime clamp that prevents
-    // the elapsed timer from overlapping the track info text, so the layout
-    // does not need to reserve the full timer width here.
-    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(spacing);
+    // Reserve the full timer width so the track info is pushed far enough left
+    // for the elapsed time display. Without this, the safety clamp below pushes
+    // the seekbar past the heart icon (the seekbar should start at heart.left).
+    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
   } else {
     reference_left = core_left_edge;
-    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(spacing);
+    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
   }
   int info_right = reference_left - timer_space;
   // Use actual font heights when available, fall back to metric default
@@ -1716,15 +1716,7 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
                                  m_spectrum_animating || m_waveform_animating;
 
     if (any_animation_active) {
-      // If only spectrum is animating, use partial invalidation for its rect
-      bool spectrum_only = m_spectrum_animating && !m_seekbar_animating &&
-                           !m_hover_animating && !m_cbutton_animating &&
-                           !m_bg_animating && !m_waveform_animating;
-      if (spectrum_only) {
-        request_animation(&m_rect_spectrum_full);
-      } else {
-        request_animation();
-      }
+      request_animation();
     } else {
       // No animations active - make sure timer is stopped to avoid wasting CPU
       if (m_animation_timer_active) {
@@ -1806,6 +1798,63 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // Spectrum bars rendered via direct pixel writes (no per-bar GDI+ calls)
   // This is drawn BEFORE buttons so spectrum appears behind them
   draw_full_spectrum(hdc);
+
+  // Restore background behind core button rects that extend above the spectrum
+  // area.  At small panel heights the track info text clamp pushes
+  // m_rect_spectrum_full.top below the button tops, so the cache_rect restore
+  // above does not cover them.  Without clearing, semi-transparent elements
+  // (hover circles at alpha 40, anti-aliased icon edges) accumulate on stale
+  // cache content each frame.  We draw background clipped to only the
+  // individual button rects to avoid overwriting artwork, track info, or volume.
+  {
+    int spec_top = m_rect_spectrum_full.top;
+    bool buttons_above_spectrum =
+        (m_rect_play.right > m_rect_play.left && m_rect_play.top < spec_top) ||
+        (m_rect_miniplayer.right > m_rect_miniplayer.left && m_rect_miniplayer.top < spec_top);
+
+    if (buttons_above_spectrum) {
+      Gdiplus::Graphics g(hdc);
+      g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+      g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+      g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+
+      // Build clip region from individual button rects that are above spectrum_top
+      Gdiplus::Region btn_clip;
+      btn_clip.MakeEmpty();
+
+      auto add_rect = [&](const RECT& r) {
+        if (r.right > r.left && r.top < spec_top) {
+          // Inflate by hover scale factor so the restored background covers
+          // the full area of hover-enlarged buttons (anti-aliased edges of
+          // scaled-up circles/icons would otherwise accumulate on stale pixels)
+          int w = r.right - r.left;
+          int h = r.bottom - r.top;
+          int pad_x = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
+          int pad_y = static_cast<int>(h * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
+          int left = r.left - pad_x;
+          int top = r.top - pad_y;
+          int right = r.right + pad_x;
+          int bottom = std::min((int)r.bottom + pad_y, spec_top);
+          btn_clip.Union(Gdiplus::Rect(left, top, right - left, bottom - top));
+        }
+      };
+      add_rect(m_rect_heart);
+      add_rect(m_rect_shuffle);
+      add_rect(m_rect_prev);
+      add_rect(m_rect_play);
+      add_rect(m_rect_next);
+      add_rect(m_rect_stop);
+      add_rect(m_rect_stop_after_current);
+      add_rect(m_rect_repeat);
+      add_rect(m_rect_super);
+      add_rect(m_rect_miniplayer);
+      for (int i = 0; i < 5; i++) add_rect(m_rect_stars[i]);
+
+      g.SetClip(&btn_clip);
+      draw_background(g, panel_rect);
+      g.ResetClip();
+    }
+  }
 
   // Now draw buttons ON TOP of the spectrum.
   // No clip region — core playback buttons overlap the spectrum area, and
@@ -3517,7 +3566,7 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   // Keep animating while spectrum is visible (need continuous redraws for FFT data)
   if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
     m_spectrum_animating = true;
-    request_animation(&m_rect_spectrum_full);
+    request_animation();
   }
 
   int area_w = m_rect_spectrum.right - m_rect_spectrum.left;
@@ -3856,16 +3905,16 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
   if (m_spectrum_opacity <= 0.001f) return;
 
+  int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
+  int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
+  if (area_w <= 0 || area_h <= 0) return;
+
   update_spectrum_data();
 
   if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
     m_spectrum_animating = true;
-    request_animation(&m_rect_spectrum_full);
+    request_animation();
   }
-
-  int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
-  int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
-  if (area_w <= 0 || area_h <= 0) return;
 
   // Ensure overlay DIBSECTION exists at the right size
   ensure_spectrum_overlay(hdc, area_w, area_h);
@@ -4071,15 +4120,17 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   }
 
   if (m_spectrum_opacity <= 0.001f) return;
+
+  int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
+  int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
+  if (area_w <= 0 || area_h <= 0) return;
+
   update_spectrum_data();
 
   if (m_spectrum_opacity > 0.0f && m_vis_stream.is_valid()) {
     m_spectrum_animating = true;
-    request_animation(&m_rect_spectrum_full);
+    request_animation();
   }
-
-  int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
-  int area_h = m_rect_spectrum_full.bottom - m_rect_spectrum_full.top;
 
   // Fixed-pixel bar sizing
   int spec_width = get_nowbar_spectrum_width();
@@ -6231,11 +6282,14 @@ void ControlPanelCore::invalidate_progress() {
     RECT dirty = {};
 
     if (vis_mode == 1) {
-        // Spectrum mode: spectrum area + thin progress bar + time display
-        UnionRect(&dirty, &m_rect_spectrum_full, &m_rect_thin_progress);
-        RECT combined;
-        UnionRect(&combined, &dirty, &m_rect_time);
-        dirty = combined;
+        // Spectrum mode: full panel invalidation because paint_spectrum_only
+        // redraws buttons, thin progress bar, time display, and miniplayer
+        // which can extend outside m_rect_spectrum_full (e.g. at minimum
+        // panel height where track info clamps the spectrum top downward).
+        // On Windows 11 DUI, BeginPaint clips BitBlt to the update region,
+        // so partial invalidation leaves stale button content on screen.
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
     } else if (vis_mode == 2) {
         // Waveform mode: waveform area + time display
         UnionRect(&dirty, &m_rect_waveform, &m_rect_time);
