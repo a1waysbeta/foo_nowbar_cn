@@ -255,6 +255,8 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (timer_id == ControlPanelCore::COMMAND_STATE_TIMER_ID) {
             // Command state polling timer - poll for fb2k action states
             if (m_core) m_core->poll_custom_button_states();
+        } else if (timer_id == ControlPanelCore::SHOW_PREFS_TIMER_ID) {
+            if (m_core) m_core->do_show_preferences();
         } else {
             // Animation timer fired - trigger a repaint to continue the animation
             const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
