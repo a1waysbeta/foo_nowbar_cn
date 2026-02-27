@@ -342,7 +342,7 @@ private:
     static constexpr float CBUTTON_FADE_DURATION_MS = 300.0f;  // Fade duration in milliseconds
     
     // Spectrum visualizer
-    static constexpr int SPECTRUM_FFT_SIZE = 512;
+    static constexpr int SPECTRUM_FFT_SIZE = 1024;
     static constexpr float SPECTRUM_FADE_DURATION_MS = 300.0f;
     service_ptr_t<visualisation_stream_v3> m_vis_stream;
     std::vector<float> m_spectrum_bars;
@@ -352,6 +352,7 @@ private:
     std::vector<float> m_spectrum_peaks_right;          // right channel peak heights
     std::vector<float> m_spectrum_peak_velocity_right;  // right channel peak gravity
     int m_spectrum_bar_count = 0;  // current bar count based on panel width
+    static constexpr int SPECTRUM_CURVE_POINTS = 50;  // control points for curve mode
     float m_spectrum_opacity = 0.0f;
     float m_spectrum_target_opacity = 0.0f;
     float m_spectrum_start_opacity = 0.0f;
@@ -363,6 +364,7 @@ private:
     int compute_spectrum_bar_count(int area_w) const;
     void create_vis_stream();
     void release_vis_stream();
+    void draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& area_rect);
 
     // Cached spectrum region background (GDI objects for fast BitBlt)
     HDC m_spectrum_bg_hdc = nullptr;
