@@ -181,6 +181,10 @@ public:
     // Command state polling for custom buttons (public for UI wrapper timer handling)
     static constexpr UINT_PTR COMMAND_STATE_TIMER_ID = 1002;
     void poll_custom_button_states();  // Query command state and invalidate if changed
+
+    // Deferred show-preferences (avoids blocking animation loop from menu handler)
+    static constexpr UINT_PTR SHOW_PREFS_TIMER_ID = 1003;
+    void do_show_preferences();
     
 private:
     void update_layout(const RECT& rect);
@@ -384,6 +388,21 @@ private:
     int m_spectrum_overlay_cy = 0;
     void destroy_spectrum_overlay();
     void ensure_spectrum_overlay(HDC ref_dc, int w, int h);
+
+    // Spectrum hotspot wandering
+    struct SpectrumHotspot {
+        float position = 0.5f;
+        float start = 0.5f;
+        float target = 0.5f;
+        float transition = 1.0f;    // 0..1 transition progress
+        float hold_remaining = 1.0f; // seconds to hold before next jump
+    };
+    static constexpr int SPECTRUM_HOTSPOT_COUNT = 3;
+    SpectrumHotspot m_spectrum_hotspots[3];
+    std::mt19937 m_spectrum_rng{42};
+    bool m_spectrum_hotspots_initialized = false;
+    std::chrono::steady_clock::time_point m_spectrum_hotspot_last_time;
+    void update_spectrum_hotspots(float dt);
 
     // Spectrum hover fade for mode 1
     float m_spectrum_hover_opacity = 1.0f;  // Dims when hovering buttons in mode 1
