@@ -1523,7 +1523,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     // on one side).  This keeps the progress bar visually centred
     // around the Play/Pause button by default.
     int min_gap = (left_gap < right_gap) ? left_gap : right_gap;
-    int extend = (min_gap > 0) ? static_cast<int>(min_gap * 0.50) : 0;
+    int extend = (min_gap > 0) ? static_cast<int>(min_gap * 0.70) : 0;
     if (left_gap > 0) seekbar_left -= extend;
     if (right_gap > 0) seekbar_right += extend;
 
@@ -1536,9 +1536,13 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   }
   // seekbar_length_mode == 0: Fixed (current Normal behavior, no change)
 
-  // Clamp track info right edge if Scaling pushed the seekbar/spectrum leftward
+  // Clamp track info right edge if Scaling pushed the seekbar/spectrum leftward.
+  // Use a fixed timer width (same as timer_reserve below) so the clamp is
+  // consistent regardless of which left-side element (rating / heart / core)
+  // set timer_space — the elapsed time display always needs ~65 DPI-scaled px.
+  int timer_reserve = static_cast<int>(65 * m_dpi_scale);
   if (seekbar_length_mode == 1) {
-    int adjusted_info_right = seekbar_left - timer_space;
+    int adjusted_info_right = seekbar_left - timer_reserve;
     if (adjusted_info_right < m_rect_track_info.right)
       m_rect_track_info.right = adjusted_info_right;
   }
@@ -1547,7 +1551,6 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // The elapsed timer draws between the track info right edge and the seekbar,
   // and the remaining timer draws between the seekbar and the panel right edge.
   if (vis_mode != 1) {
-    int timer_reserve = static_cast<int>(65 * m_dpi_scale);
     int min_seekbar_left = m_rect_track_info.right + timer_reserve;
     if (seekbar_left < min_seekbar_left)
       seekbar_left = min_seekbar_left;
@@ -2239,18 +2242,10 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
 
 void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   // Set clipping region to prevent text overflow beyond boundaries.
-  // When rating stars are hidden, widen the clip to match the extended title_w
-  // so the extra characters are actually visible.
-  int clip_w = m_rect_track_info.right - m_rect_track_info.left;
-  if (!get_nowbar_rating_visible()) {
-    Gdiplus::RectF clipCharBounds;
-    g.MeasureString(L"XXXXXXXXX", 9, m_font_title.get(), Gdiplus::PointF(0, 0), &clipCharBounds);
-    clip_w += static_cast<int>(clipCharBounds.Width);
-  }
   Gdiplus::Rect clipRect(
       m_rect_track_info.left,
       m_rect_track_info.top,
-      clip_w,
+      m_rect_track_info.right - m_rect_track_info.left,
       m_rect_track_info.bottom - m_rect_track_info.top
   );
   g.SetClip(clipRect);
@@ -2277,51 +2272,7 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   int text_gap = static_cast<int>(4 * m_dpi_scale);
 
   float text_w = (float)(m_rect_track_info.right - m_rect_track_info.left);
-
-  // Shorten the title rect by 6 chars when rating stars are visible.
-  // When rating stars are hidden, widen by 9 chars to reclaim freed space.
-  Gdiplus::RectF titleCharBounds6;
-  g.MeasureString(L"XXXXXX", 6, m_font_title.get(), Gdiplus::PointF(0, 0), &titleCharBounds6);
-  Gdiplus::RectF titleCharBounds9;
-  g.MeasureString(L"XXXXXXXXX", 9, m_font_title.get(), Gdiplus::PointF(0, 0), &titleCharBounds9);
-  float title_w;
-  if (get_nowbar_rating_visible()) {
-    title_w = text_w - titleCharBounds6.Width;
-  } else {
-    title_w = text_w + titleCharBounds9.Width;
-  }
-  // In Spectrum mode, shorten title by an additional 3 chars;
-  // but widen by 8 chars when rating stars are enabled.
-  if (get_nowbar_visualization_mode() == 1) {
-    Gdiplus::RectF specCharBounds;
-    g.MeasureString(L"XXX", 3, m_font_title.get(), Gdiplus::PointF(0, 0), &specCharBounds);
-    title_w -= specCharBounds.Width;
-    if (get_nowbar_rating_visible()) {
-      Gdiplus::RectF specRatingBounds;
-      g.MeasureString(L"XXXXXXXX", 8, m_font_title.get(), Gdiplus::PointF(0, 0), &specRatingBounds);
-      title_w += specRatingBounds.Width;
-    }
-  }
-  // In Waveform or Normal mode with rating stars enabled, widen title by 6 chars
-  if ((get_nowbar_visualization_mode() == 2 || get_nowbar_visualization_mode() == 0) && get_nowbar_rating_visible()) {
-    Gdiplus::RectF waveCharBounds;
-    g.MeasureString(L"XXXXXX", 6, m_font_title.get(), Gdiplus::PointF(0, 0), &waveCharBounds);
-    title_w += waveCharBounds.Width;
-  }
-  // When all right-side elements are hidden (smaller min width), shorten title by 6 chars
-  {
-    bool has_any_cbutton = false;
-    for (int i = 0; i < 6; i++) {
-      if (get_nowbar_cbutton_enabled(i)) { has_any_cbutton = true; break; }
-    }
-    bool volume_vis = get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible();
-    if (!volume_vis && !get_nowbar_miniplayer_icon_visible() && !has_any_cbutton) {
-      Gdiplus::RectF minCharBounds;
-      g.MeasureString(L"XXXXXX", 6, m_font_title.get(), Gdiplus::PointF(0, 0), &minCharBounds);
-      title_w -= minCharBounds.Width;
-    }
-  }
-  if (title_w < 0) title_w = 0;
+  float title_w = text_w;
 
   Gdiplus::RectF titleRect(
       (float)m_rect_track_info.left, (float)m_rect_track_info.top,
@@ -3343,20 +3294,19 @@ static float a_weight(float freq) {
   return std::max(0.0f, std::min(2.0f, linear));
 }
 
-// 7-tap neighbor smoothing kernel [1,2,3,5,3,2,1] / 17
+// 5-tap neighbor smoothing kernel [1,3,5,3,1] / 13
 static void apply_neighbor_smoothing(std::vector<float>& values) {
   int n = (int)values.size();
   if (n < 3) return;
-  static const float kernel[] = {1.0f, 2.0f, 3.0f, 5.0f, 3.0f, 2.0f, 1.0f};
-  static const float kernel_sum = 17.0f;
+  static const float kernel[] = {1.0f, 3.0f, 5.0f, 3.0f, 1.0f};
   std::vector<float> smoothed(n);
   for (int i = 0; i < n; i++) {
     float sum = 0.0f;
     float wsum = 0.0f;
-    for (int k = -3; k <= 3; k++) {
+    for (int k = -2; k <= 2; k++) {
       int j = i + k;
       if (j >= 0 && j < n) {
-        float w = kernel[k + 3];
+        float w = kernel[k + 2];
         sum += values[j] * w;
         wsum += w;
       }
@@ -3393,34 +3343,24 @@ static void process_channel_bars(const audio_sample* data, int sample_count, int
       if (val > magnitude) magnitude = val;
     }
 
-    float normalized = std::pow(magnitude, 0.75f);
+    // Amplify and compress: sqrt for perceptual scaling, 3x boost
+    float normalized = std::sqrt(magnitude) * 3.0f;
     if (normalized > 1.0f) normalized = 1.0f;
     out_values[i] = normalized;
   }
-
-  apply_neighbor_smoothing(out_values);
 }
 
 // Apply smoothing, floor, and peak tracking to one channel's bar data
 static void apply_bar_dynamics(const std::vector<float>& normalized_values, int bar_count,
                                 std::vector<float>& bars, std::vector<float>& peaks,
                                 std::vector<float>& peak_velocity) {
-  float total_energy = 0.0f;
-  for (int i = 0; i < bar_count; i++) total_energy += normalized_values[i];
-
-  float avg_energy = total_energy / bar_count;
-  float energy_factor = std::min(1.0f, avg_energy * 4.0f);
-  const float SPECTRUM_FLOOR = 0.25f;
-  float effective_floor = SPECTRUM_FLOOR * energy_factor;
-
   for (int i = 0; i < bar_count; i++) {
-    float normalized = normalized_values[i];
-    float target = (normalized < 0.02f) ? effective_floor : std::max(normalized, effective_floor);
+    float target = normalized_values[i];
     float current = bars[i];
     if (target > current) {
-      bars[i] = current + (target - current) * 0.85f;
+      bars[i] = current + (target - current) * 0.92f;  // Fast attack
     } else {
-      bars[i] = current + (target - current) * 0.15f;
+      bars[i] = current + (target - current) * 0.25f;  // Smooth decay
     }
   }
 
@@ -3431,7 +3371,7 @@ static void apply_bar_dynamics(const std::vector<float>& normalized_values, int 
       peaks[i] = bar_val;
       peak_velocity[i] = 0.0f;
     } else {
-      peak_velocity[i] += 0.002f;
+      peak_velocity[i] += 0.004f;
       peaks[i] -= peak_velocity[i];
       if (peaks[i] < 0.0f) peaks[i] = 0.0f;
     }
@@ -3452,8 +3392,8 @@ void ControlPanelCore::update_spectrum_data() {
   if (!data || sample_count == 0) return;
 
   int nch = chunk.get_channels();
-  int style = get_nowbar_spectrum_style();
-  bool stereo = (style == 1 && nch >= 2);
+  // Style 0=Mono, 1=Curve (both use mono data)
+  bool stereo = false;
 
   // Resize bars array if panel width changed
   int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
@@ -3495,12 +3435,15 @@ void ControlPanelCore::update_spectrum_data() {
     for (int i = 0; i < m_spectrum_bar_count; i++) {
       float f_lo = std::pow(10.0f, log_min + (log_max - log_min) * i / m_spectrum_bar_count);
       float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / m_spectrum_bar_count);
+      float f_center = (f_lo + f_hi) * 0.5f;
 
       int bin_lo = (int)(f_lo / bin_freq_step);
       int bin_hi = (int)(f_hi / bin_freq_step);
       if (bin_lo < 0) bin_lo = 0;
       if (bin_hi >= (int)sample_count) bin_hi = (int)sample_count - 1;
       if (bin_lo > bin_hi) bin_lo = bin_hi;
+
+      float aw = a_weight(f_center);
 
       float magnitude = 0.0f;
       if (nch >= 2) {
@@ -3509,15 +3452,18 @@ void ControlPanelCore::update_spectrum_data() {
           float avg = 0.0f;
           for (int ch = 0; ch < nch; ch++) avg += data[b * nch + ch];
           avg /= (float)nch;
+          avg *= aw;
           if (avg > magnitude) magnitude = avg;
         }
       } else {
         for (int b = bin_lo; b <= bin_hi; b++) {
-          if (data[b] > magnitude) magnitude = data[b];
+          float val = data[b] * aw;
+          if (val > magnitude) magnitude = val;
         }
       }
 
-      float normalized = std::pow(magnitude, 0.75f);
+      // Amplify and compress: sqrt for perceptual scaling, 3x boost
+      float normalized = std::sqrt(magnitude) * 3.0f;
       if (normalized > 1.0f) normalized = 1.0f;
       normalized_values[i] = normalized;
     }
@@ -3591,8 +3537,15 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   int bar_count = m_spectrum_bar_count;
   if (bar_count <= 0) return;
 
-  int stereo_style = get_nowbar_spectrum_style();
-  bool stereo = (stereo_style == 1);
+  int spec_style = get_nowbar_spectrum_style();
+
+  // Curve mode: delegate to curve renderer
+  if (spec_style == 1) {
+    draw_spectrum_curve(g, m_rect_spectrum);
+    return;
+  }
+
+  bool stereo = false;
 
   // Colors from preferences
   COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
@@ -3650,9 +3603,9 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
     }
 
     if (gradient_mode == 2) {
-      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 270.0f : 0.0f;
-      if (stereo && is_right) hue = 270.0f - hue;  // Mirror frequency colors
-      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 300.0f : 0.0f;
+      if (stereo && is_right) hue = 300.0f - hue;  // Mirror frequency colors
+      COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
       if (spec_shape == 0) {
         path.Reset();
@@ -3715,9 +3668,9 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
     float peak_y = bottom_f - peak_val * (float)area_h;
     BYTE pr, pg, pb;
     if (gradient_mode == 2) {
-      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 270.0f : 0.0f;
-      if (stereo && is_right) hue = 270.0f - hue;
-      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 300.0f : 0.0f;
+      if (stereo && is_right) hue = 300.0f - hue;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       pr = GetRValue(freq_color); pg = GetGValue(freq_color); pb = GetBValue(freq_color);
     } else if (stereo && gradient_mode != 1) {
       pr = is_right ? rr1 : lr1; pg = is_right ? rg1 : lg1; pb = is_right ? rb1 : lb1;
@@ -3768,6 +3721,157 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
       if (i < (int)m_spectrum_peaks.size())
         draw_peak(x, m_spectrum_peaks[i], m_spectrum_bars[i], i, bar_count, false);
     }
+  }
+
+  g.SetSmoothingMode(oldSmoothing);
+  g.SetPixelOffsetMode(oldPixelOffset);
+}
+
+void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& area_rect) {
+  int area_w = area_rect.right - area_rect.left;
+  int area_h = area_rect.bottom - area_rect.top;
+  if (area_w <= 0 || area_h <= 0 || m_spectrum_bar_count <= 1) return;
+
+  // Resample bar heights to SPECTRUM_CURVE_POINTS control points
+  int num_pts = SPECTRUM_CURVE_POINTS;
+  if (num_pts > m_spectrum_bar_count) num_pts = m_spectrum_bar_count;
+  std::vector<Gdiplus::PointF> points(num_pts);
+  float bottom_f = (float)area_rect.bottom;
+  float left_f = (float)area_rect.left;
+
+  for (int i = 0; i < num_pts; i++) {
+    float t = (float)i / (float)(num_pts - 1);
+    float bar_idx_f = t * (m_spectrum_bar_count - 1);
+    int idx0 = (int)bar_idx_f;
+    int idx1 = std::min(idx0 + 1, m_spectrum_bar_count - 1);
+    float frac = bar_idx_f - (float)idx0;
+    float value = m_spectrum_bars[idx0] * (1.0f - frac) + m_spectrum_bars[idx1] * frac;
+
+    float x = left_f + t * (float)area_w;
+    float y = bottom_f - value * (float)area_h;
+    points[i] = Gdiplus::PointF(x, y);
+  }
+
+  // Build Bezier control points from Catmull-Rom spline
+  // For N points we get (N-1) cubic segments = 1 + (N-1)*3 Bezier points
+  std::vector<Gdiplus::PointF> bezier;
+  bezier.reserve(1 + (num_pts - 1) * 3);
+  bezier.push_back(points[0]);
+
+  for (int i = 0; i < num_pts - 1; i++) {
+    // Catmull-Rom tangents with boundary clamping
+    Gdiplus::PointF pm1 = (i > 0) ? points[i - 1] : points[0];
+    Gdiplus::PointF p0 = points[i];
+    Gdiplus::PointF p1 = points[i + 1];
+    Gdiplus::PointF p2 = (i + 2 < num_pts) ? points[i + 2] : points[num_pts - 1];
+
+    // Convert Catmull-Rom to cubic Bezier control points
+    Gdiplus::PointF cp1(
+      p0.X + (p1.X - pm1.X) / 6.0f,
+      p0.Y + (p1.Y - pm1.Y) / 6.0f
+    );
+    Gdiplus::PointF cp2(
+      p1.X - (p2.X - p0.X) / 6.0f,
+      p1.Y - (p2.Y - p0.Y) / 6.0f
+    );
+
+    bezier.push_back(cp1);
+    bezier.push_back(cp2);
+    bezier.push_back(p1);
+  }
+
+  // Build filled path: curve on top, straight line along baseline
+  Gdiplus::GraphicsPath curvePath;
+  curvePath.AddBeziers(bezier.data(), (int)bezier.size());
+  // Close along baseline
+  curvePath.AddLine(points[num_pts - 1].X, bottom_f, left_f, bottom_f);
+  curvePath.CloseFigure();
+
+  // Color setup
+  COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
+      ? get_nowbar_spectrum_color() : m_theme_highlight;
+  int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
+  int alpha = (int)(user_alpha * m_spectrum_opacity * m_spectrum_hover_opacity);
+  if (alpha > 255) alpha = 255;
+  if (alpha < 0) alpha = 0;
+  BYTE cr = GetRValue(spec_color), cg = GetGValue(spec_color), cb = GetBValue(spec_color);
+
+  int gradient_mode = get_nowbar_spectrum_gradient_mode();
+  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  BYTE cr2 = GetRValue(spec_color2), cg2 = GetGValue(spec_color2), cb2 = GetBValue(spec_color2);
+
+  // Enable anti-aliasing for smooth curves
+  Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
+  Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
+  g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+
+  // Fill with gradient: full alpha at top fading to transparent at bottom
+  if (gradient_mode == 2) {
+    // Frequency-mapped: use a multi-stop horizontal gradient
+    Gdiplus::LinearGradientBrush fillBrush(
+        Gdiplus::PointF(left_f, 0), Gdiplus::PointF(left_f + (float)area_w, 0),
+        Gdiplus::Color(alpha, 255, 80, 50),
+        Gdiplus::Color(alpha, 80, 50, 255));
+    // Multi-stop rainbow
+    Gdiplus::Color colors[] = {
+        Gdiplus::Color(alpha, 255, 50, 50),    // red (bass)
+        Gdiplus::Color(alpha, 255, 180, 50),   // orange
+        Gdiplus::Color(alpha, 50, 220, 100),   // green (mid)
+        Gdiplus::Color(alpha, 50, 150, 255),   // blue
+        Gdiplus::Color(alpha, 140, 50, 255)    // violet (treble)
+    };
+    float positions[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+    fillBrush.SetInterpolationColors(colors, positions, 5);
+    g.FillPath(&fillBrush, &curvePath);
+  } else if (gradient_mode == 1) {
+    // User gradient: top color to bottom color (vertical)
+    Gdiplus::LinearGradientBrush fillBrush(
+        Gdiplus::PointF(0, (float)area_rect.top),
+        Gdiplus::PointF(0, bottom_f),
+        Gdiplus::Color(alpha, cr, cg, cb),
+        Gdiplus::Color(alpha / 4, cr2, cg2, cb2));
+    g.FillPath(&fillBrush, &curvePath);
+  } else {
+    // Solid: top = full alpha, bottom = faded
+    Gdiplus::LinearGradientBrush fillBrush(
+        Gdiplus::PointF(0, (float)area_rect.top),
+        Gdiplus::PointF(0, bottom_f),
+        Gdiplus::Color(alpha, cr, cg, cb),
+        Gdiplus::Color(alpha / 4, cr, cg, cb));
+    g.FillPath(&fillBrush, &curvePath);
+  }
+
+  // Stroke the curve top edge (brighter, 2px)
+  int stroke_alpha = std::min(255, alpha + 40);
+  BYTE bright_r = (BYTE)std::min(255, (int)cr + 30);
+  BYTE bright_g = (BYTE)std::min(255, (int)cg + 30);
+  BYTE bright_b = (BYTE)std::min(255, (int)cb + 30);
+
+  if (gradient_mode == 2) {
+    // Rainbow stroke
+    Gdiplus::LinearGradientBrush strokeBrush(
+        Gdiplus::PointF(left_f, 0), Gdiplus::PointF(left_f + (float)area_w, 0),
+        Gdiplus::Color(stroke_alpha, 255, 80, 50),
+        Gdiplus::Color(stroke_alpha, 80, 50, 255));
+    Gdiplus::Color colors[] = {
+        Gdiplus::Color(stroke_alpha, 255, 80, 80),
+        Gdiplus::Color(stroke_alpha, 255, 200, 80),
+        Gdiplus::Color(stroke_alpha, 80, 240, 130),
+        Gdiplus::Color(stroke_alpha, 80, 170, 255),
+        Gdiplus::Color(stroke_alpha, 160, 80, 255)
+    };
+    float positions[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+    strokeBrush.SetInterpolationColors(colors, positions, 5);
+    Gdiplus::Pen strokePen(&strokeBrush, 2.0f);
+    Gdiplus::GraphicsPath strokePath;
+    strokePath.AddBeziers(bezier.data(), (int)bezier.size());
+    g.DrawPath(&strokePen, &strokePath);
+  } else {
+    Gdiplus::Pen strokePen(Gdiplus::Color(stroke_alpha, bright_r, bright_g, bright_b), 2.0f);
+    Gdiplus::GraphicsPath strokePath;
+    strokePath.AddBeziers(bezier.data(), (int)bezier.size());
+    g.DrawPath(&strokePen, &strokePath);
   }
 
   g.SetSmoothingMode(oldSmoothing);
@@ -3942,8 +4046,16 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   int bar_count = m_spectrum_bar_count;
   if (bar_count <= 0) return;
 
-  int stereo_style = get_nowbar_spectrum_style();
-  bool stereo = (stereo_style == 1);
+  int spec_style = get_nowbar_spectrum_style();
+
+  // Curve mode needs GDI+ for smooth anti-aliased rendering
+  if (spec_style == 1) {
+    Gdiplus::Graphics g(hdc);
+    draw_spectrum_curve(g, m_rect_spectrum_full);
+    return;
+  }
+
+  bool stereo = false;
 
   // Colors from preferences
   COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
@@ -3988,9 +4100,9 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
     int base_r, base_g, base_b;
     int base_r2 = r1, base_g2 = g1, base_b2 = b1;
     if (gradient_mode == 2) {
-      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 270.0f : 0.0f;
-      if (stereo && is_right) hue = 270.0f - hue;
-      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 300.0f : 0.0f;
+      if (stereo && is_right) hue = 300.0f - hue;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       base_r = GetRValue(freq_color); base_g = GetGValue(freq_color); base_b = GetBValue(freq_color);
     } else if (stereo && gradient_mode == 1) {
       base_r = is_right ? r2 : r1; base_g = is_right ? g2 : g1; base_b = is_right ? b2 : b1;
@@ -4151,8 +4263,15 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   int bar_count = m_spectrum_bar_count;
   if (bar_count <= 0) return;
 
-  int stereo_style = get_nowbar_spectrum_style();
-  bool stereo = (stereo_style == 1);
+  int spec_style = get_nowbar_spectrum_style();
+
+  // Curve mode: delegate to curve renderer
+  if (spec_style == 1) {
+    draw_spectrum_curve(g, m_rect_spectrum_full);
+    return;
+  }
+
+  bool stereo = false;
 
   float bar_w = (float)bar_w_i;
   float radius = bar_w * 0.5f;
@@ -4202,9 +4321,9 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
     }
 
     if (gradient_mode == 2) {
-      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 270.0f : 0.0f;
-      if (stereo && is_right) hue = 270.0f - hue;
-      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 300.0f : 0.0f;
+      if (stereo && is_right) hue = 300.0f - hue;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
       if (spec_shape == 0) {
         path.Reset();
@@ -4266,9 +4385,9 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
     float peak_y = bottom_f - peak_val * (float)area_h;
     BYTE pr, pg, pb;
     if (gradient_mode == 2) {
-      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 270.0f : 0.0f;
-      if (stereo && is_right) hue = 270.0f - hue;
-      COLORREF freq_color = hsl_to_rgb(hue, 0.85f, 0.55f);
+      float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 300.0f : 0.0f;
+      if (stereo && is_right) hue = 300.0f - hue;
+      COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       pr = GetRValue(freq_color); pg = GetGValue(freq_color); pb = GetBValue(freq_color);
     } else if (stereo && gradient_mode != 1) {
       pr = is_right ? rr1 : lr1; pg = is_right ? rg1 : lg1; pb = is_right ? rb1 : lb1;
@@ -5455,6 +5574,11 @@ void ControlPanelCore::show_autoplaylist_menu() {
     ID_PREVIEW_35_PERCENT,
     ID_PREVIEW_50_PERCENT,
     ID_PREVIEW_60_SECONDS,
+    // Skip Low Rating submenu IDs
+    ID_SKIP_LOW_RATING_OFF,
+    ID_SKIP_LOW_RATING_1,
+    ID_SKIP_LOW_RATING_2,
+    ID_SKIP_LOW_RATING_3,
     ID_SETTINGS
   };
   
@@ -5544,6 +5668,26 @@ void ControlPanelCore::show_autoplaylist_menu() {
     AppendMenuW(preview_submenu, p60_flags, ID_PREVIEW_60_SECONDS, L"60 seconds");
 
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)preview_submenu, L"Playback Preview");
+  }
+
+  // Group 7: Skip Low Rating submenu
+  HMENU skip_submenu = CreatePopupMenu();
+  if (skip_submenu) {
+    bool skip_enabled = get_nowbar_skip_low_rating_enabled();
+    int skip_threshold = get_nowbar_skip_low_rating_threshold();
+
+    UINT off_flags = MF_STRING | (!skip_enabled ? MF_CHECKED : 0);
+    UINT s1_flags = MF_STRING | (skip_enabled && skip_threshold == 1 ? MF_CHECKED : 0);
+    UINT s2_flags = MF_STRING | (skip_enabled && skip_threshold == 2 ? MF_CHECKED : 0);
+    UINT s3_flags = MF_STRING | (skip_enabled && skip_threshold == 3 ? MF_CHECKED : 0);
+
+    AppendMenuW(skip_submenu, off_flags, ID_SKIP_LOW_RATING_OFF, L"Off");
+    AppendMenuW(skip_submenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(skip_submenu, s1_flags, ID_SKIP_LOW_RATING_1, L"Skip if rating = 1");
+    AppendMenuW(skip_submenu, s2_flags, ID_SKIP_LOW_RATING_2, L"Skip if rating \x2264 2");
+    AppendMenuW(skip_submenu, s3_flags, ID_SKIP_LOW_RATING_3, L"Skip if rating \x2264 3");
+
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)skip_submenu, L"Skip Low Rating");
   }
 
   // Separator before Settings
@@ -5694,6 +5838,21 @@ void ControlPanelCore::show_autoplaylist_menu() {
       break;
     case ID_PREVIEW_60_SECONDS:
       set_nowbar_preview_mode(3);
+      break;
+    case ID_SKIP_LOW_RATING_OFF:
+      set_nowbar_skip_low_rating_enabled(false);
+      break;
+    case ID_SKIP_LOW_RATING_1:
+      set_nowbar_skip_low_rating_enabled(true);
+      set_nowbar_skip_low_rating_threshold(1);
+      break;
+    case ID_SKIP_LOW_RATING_2:
+      set_nowbar_skip_low_rating_enabled(true);
+      set_nowbar_skip_low_rating_threshold(2);
+      break;
+    case ID_SKIP_LOW_RATING_3:
+      set_nowbar_skip_low_rating_enabled(true);
+      set_nowbar_skip_low_rating_threshold(3);
       break;
     case ID_SETTINGS:
       ui_control::get()->show_preferences(guid_nowbar_preferences_page);
