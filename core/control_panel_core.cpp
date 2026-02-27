@@ -1536,12 +1536,11 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   }
   // seekbar_length_mode == 0: Fixed (current Normal behavior, no change)
 
-  // Clamp track info right edge if Scaling pushed the seekbar/spectrum leftward.
-  // Use a fixed timer width (same as timer_reserve below) so the clamp is
-  // consistent regardless of which left-side element (rating / heart / core)
-  // set timer_space — the elapsed time display always needs ~65 DPI-scaled px.
+  // Clamp track info right edge if Scaling pushed the seekbar leftward.
+  // In Spectrum mode the spectrum sits below the track info (not beside it)
+  // and the timer is in the top-right corner, so no clamp is needed.
   int timer_reserve = static_cast<int>(65 * m_dpi_scale);
-  if (seekbar_length_mode == 1) {
+  if (seekbar_length_mode == 1 && vis_mode != 1) {
     int adjusted_info_right = seekbar_left - timer_reserve;
     if (adjusted_info_right < m_rect_track_info.right)
       m_rect_track_info.right = adjusted_info_right;
