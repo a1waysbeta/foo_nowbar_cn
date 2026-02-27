@@ -259,7 +259,7 @@ static cfg_int cfg_nowbar_spectrum_shape(
 
 static cfg_int cfg_nowbar_spectrum_style(
     GUID{0xABCDEF8A, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8A}},
-    0  // Default: Mono (0=Mono, 1=Stereo Mirrored)
+    1  // Default: Curve (0=Mono, 1=Curve)
 );
 
 static cfg_int cfg_nowbar_spectrum_opacity(
@@ -1673,6 +1673,16 @@ bool get_nowbar_skip_low_rating_enabled() {
     return cfg_nowbar_skip_low_rating_enabled != 0;
 }
 
+void set_nowbar_skip_low_rating_enabled(bool enabled) {
+    cfg_nowbar_skip_low_rating_enabled = enabled ? 1 : 0;
+}
+
+void set_nowbar_skip_low_rating_threshold(int threshold) {
+    if (threshold < 1) threshold = 1;
+    if (threshold > 3) threshold = 3;
+    cfg_nowbar_skip_low_rating_threshold = threshold;
+}
+
 int get_nowbar_visualization_mode() {
     int mode = cfg_nowbar_visualization_mode;
     if (mode < 0) mode = 0;
@@ -1705,7 +1715,7 @@ int get_nowbar_spectrum_shape() {
 int get_nowbar_spectrum_style() {
     int s = cfg_nowbar_spectrum_style;
     if (s < 0) s = 0;
-    if (s > 1) s = 1;
+    if (s > 1) s = 1;  // 0=Mono, 1=Curve
     return s;
 }
 
@@ -3197,7 +3207,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             // Populate spectrum style combo (Mono/Stereo)
             HWND hSpecStyle = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO);
             SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Mono");
-            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Stereo");
+            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Curve");
             SendMessage(hSpecStyle, CB_SETCURSEL, cfg_nowbar_spectrum_style, 0);
 
             // Initialize spectrum opacity slider (0-100)
@@ -4456,7 +4466,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_vis_type = 1;  // Default: Spectrum
             cfg_nowbar_spectrum_width = 1;  // Default: Normal
             cfg_nowbar_spectrum_shape = 0;  // Default: Pill
-            cfg_nowbar_spectrum_style = 0;  // Default: Mono
+            cfg_nowbar_spectrum_style = 1;  // Default: Curve
             cfg_nowbar_waveform_width = 1;  // Default: Normal
             cfg_nowbar_vis_60fps = 0;  // Default: Disabled
 
