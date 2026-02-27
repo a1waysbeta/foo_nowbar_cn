@@ -1756,11 +1756,19 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   update_layout(panel_rect);
 
   // Cache rect = union of spectrum + progress bar + time display
+  // Pad by 2px to cover any anti-aliased curve stroke edges that extend
+  // beyond m_rect_spectrum_full (GDI+ 2px pen with anti-aliasing).
   RECT cache_rect;
   UnionRect(&cache_rect, &m_rect_spectrum_full, &m_rect_thin_progress);
   RECT cache_union;
   UnionRect(&cache_union, &cache_rect, &m_rect_time);
   cache_rect = cache_union;
+  InflateRect(&cache_rect, 2, 2);
+  // Clamp to panel bounds
+  if (cache_rect.left < panel_rect.left) cache_rect.left = panel_rect.left;
+  if (cache_rect.top < panel_rect.top) cache_rect.top = panel_rect.top;
+  if (cache_rect.right > panel_rect.right) cache_rect.right = panel_rect.right;
+  if (cache_rect.bottom > panel_rect.bottom) cache_rect.bottom = panel_rect.bottom;
   int cache_w = cache_rect.right - cache_rect.left;
   int cache_h = cache_rect.bottom - cache_rect.top;
 
@@ -1777,17 +1785,21 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
     g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
 
+    // Clip to individual element rects (not the union) so draw_background
+    // doesn't overwrite artwork, track info, or volume in the gaps between
+    // them.  Each rect is padded by 2px to match the cache_rect inflation,
+    // covering anti-aliased curve stroke edges.
     Gdiplus::Region clip;
     clip.MakeEmpty();
-    clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left, m_rect_spectrum_full.top,
-        m_rect_spectrum_full.right - m_rect_spectrum_full.left,
-        m_rect_spectrum_full.bottom - m_rect_spectrum_full.top));
-    clip.Union(Gdiplus::Rect(m_rect_thin_progress.left, m_rect_thin_progress.top,
-        m_rect_thin_progress.right - m_rect_thin_progress.left,
-        m_rect_thin_progress.bottom - m_rect_thin_progress.top));
-    clip.Union(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
-        m_rect_time.right - m_rect_time.left,
-        m_rect_time.bottom - m_rect_time.top));
+    clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left - 2, m_rect_spectrum_full.top - 2,
+        m_rect_spectrum_full.right - m_rect_spectrum_full.left + 4,
+        m_rect_spectrum_full.bottom - m_rect_spectrum_full.top + 4));
+    clip.Union(Gdiplus::Rect(m_rect_thin_progress.left - 2, m_rect_thin_progress.top - 2,
+        m_rect_thin_progress.right - m_rect_thin_progress.left + 4,
+        m_rect_thin_progress.bottom - m_rect_thin_progress.top + 4));
+    clip.Union(Gdiplus::Rect(m_rect_time.left - 2, m_rect_time.top - 2,
+        m_rect_time.right - m_rect_time.left + 4,
+        m_rect_time.bottom - m_rect_time.top + 4));
     g.SetClip(&clip);
 
     draw_background(g, panel_rect);
@@ -3378,22 +3390,73 @@ static void apply_bar_dynamics(const std::vector<float>& normalized_values, int 
   }
 }
 
+void ControlPanelCore::update_spectrum_hotspots(float dt) {
+  if (!m_spectrum_hotspots_initialized) {
+    m_spectrum_hotspots_initialized = true;
+    std::uniform_real_distribution<float> pos_dist(0.1f, 0.9f);
+    std::uniform_real_distribution<float> hold_dist(0.5f, 2.0f);
+    for (int i = 0; i < SPECTRUM_HOTSPOT_COUNT; i++) {
+      float p = pos_dist(m_spectrum_rng);
+      m_spectrum_hotspots[i].position = p;
+      m_spectrum_hotspots[i].start = p;
+      m_spectrum_hotspots[i].target = p;
+      m_spectrum_hotspots[i].transition = 1.0f;
+      m_spectrum_hotspots[i].hold_remaining = hold_dist(m_spectrum_rng);
+    }
+  }
+
+  std::uniform_real_distribution<float> pos_dist(0.05f, 0.95f);
+  std::uniform_real_distribution<float> hold_dist(0.5f, 2.0f);
+
+  for (int i = 0; i < SPECTRUM_HOTSPOT_COUNT; i++) {
+    auto& h = m_spectrum_hotspots[i];
+    if (h.transition < 1.0f) {
+      h.transition += dt / 0.15f;  // 150ms snappy transition
+      if (h.transition >= 1.0f) {
+        h.transition = 1.0f;
+        h.position = h.target;
+        h.hold_remaining = hold_dist(m_spectrum_rng);
+      } else {
+        float t = h.transition;
+        float ease = 1.0f - (1.0f - t) * (1.0f - t);  // ease-out
+        h.position = h.start + (h.target - h.start) * ease;
+      }
+    } else {
+      h.hold_remaining -= dt;
+      if (h.hold_remaining <= 0.0f) {
+        h.start = h.position;
+        h.target = pos_dist(m_spectrum_rng);
+        h.transition = 0.0f;
+      }
+    }
+  }
+}
+
+static void apply_hotspot_gain(std::vector<float>& values, int bar_count,
+                                const float* hotspot_positions, int hotspot_count) {
+  if (bar_count <= 1) return;
+  for (int i = 0; i < bar_count; i++) {
+    float bar_pos = (float)i / (float)(bar_count - 1);
+    float gain = 0.7f;
+    for (int h = 0; h < hotspot_count; h++) {
+      float dist = bar_pos - hotspot_positions[h];
+      float sigma = 0.15f;
+      float boost = 0.7f * std::exp(-(dist * dist) / (2.0f * sigma * sigma));
+      gain += boost;
+    }
+    if (gain > 1.5f) gain = 1.5f;
+    values[i] *= gain;
+    if (values[i] > 1.0f) values[i] = 1.0f;
+  }
+}
+
 void ControlPanelCore::update_spectrum_data() {
-  if (!m_vis_stream.is_valid()) return;
-
-  double abs_time;
-  if (!m_vis_stream->get_absolute_time(abs_time)) return;
-
-  audio_chunk_impl chunk;
-  if (!m_vis_stream->get_spectrum_absolute(chunk, abs_time, SPECTRUM_FFT_SIZE)) return;
-
-  const audio_sample* data = chunk.get_data();
-  t_size sample_count = chunk.get_sample_count();
-  if (!data || sample_count == 0) return;
-
-  int nch = chunk.get_channels();
-  // Style 0=Mono, 1=Curve (both use mono data)
-  bool stereo = false;
+  // Advance hotspot wandering regardless of audio data availability
+  auto now = std::chrono::steady_clock::now();
+  float dt = std::chrono::duration<float>(now - m_spectrum_hotspot_last_time).count();
+  if (dt > 0.1f) dt = 0.033f;  // clamp on first frame or after pause
+  m_spectrum_hotspot_last_time = now;
+  update_spectrum_hotspots(dt);
 
   // Resize bars array if panel width changed
   int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
@@ -3409,6 +3472,36 @@ void ControlPanelCore::update_spectrum_data() {
     m_spectrum_peak_velocity_right.resize(new_count, 0.0f);
   }
   if (m_spectrum_bar_count <= 0) return;
+
+  // Try to get audio data; if unavailable, decay bars toward zero instead of freezing
+  bool have_data = false;
+  audio_chunk_impl chunk;
+  const audio_sample* data = nullptr;
+  t_size sample_count = 0;
+  int nch = 1;
+
+  if (m_vis_stream.is_valid()) {
+    double abs_time;
+    if (m_vis_stream->get_absolute_time(abs_time)) {
+      if (m_vis_stream->get_spectrum_absolute(chunk, abs_time, SPECTRUM_FFT_SIZE)) {
+        data = chunk.get_data();
+        sample_count = chunk.get_sample_count();
+        nch = chunk.get_channels();
+        if (data && sample_count > 0) have_data = true;
+      }
+    }
+  }
+
+  if (!have_data) {
+    // No audio data — apply dynamics with zero input so bars decay smoothly
+    std::vector<float> silence(m_spectrum_bar_count, 0.0f);
+    apply_bar_dynamics(silence, m_spectrum_bar_count,
+                        m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
+    return;
+  }
+
+  // Style 0=Mono, 1=Curve (both use mono data)
+  bool stereo = false;
 
   float freq_min = 60.0f;
   float freq_max = 16000.0f;
@@ -3467,6 +3560,12 @@ void ControlPanelCore::update_spectrum_data() {
       if (normalized > 1.0f) normalized = 1.0f;
       normalized_values[i] = normalized;
     }
+
+    float hotspot_positions[SPECTRUM_HOTSPOT_COUNT];
+    for (int i = 0; i < SPECTRUM_HOTSPOT_COUNT; i++)
+      hotspot_positions[i] = m_spectrum_hotspots[i].position;
+    apply_hotspot_gain(normalized_values, m_spectrum_bar_count,
+                        hotspot_positions, SPECTRUM_HOTSPOT_COUNT);
 
     apply_bar_dynamics(normalized_values, m_spectrum_bar_count,
                         m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
@@ -4048,12 +4147,20 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
   int spec_style = get_nowbar_spectrum_style();
 
-  // Curve mode needs GDI+ for smooth anti-aliased rendering
+  // Curve mode: render into the overlay DIBSECTION via a GDI+ Bitmap
+  // wrapper, then let AlphaBlend composite it onto the paint surface.
+  // Drawing directly onto the paint HDC caused "tide mark" ghost artifacts
+  // on Windows 11 because GDI+ SourceOver on a device-compatible DC
+  // corrupts the alpha channel, and DWM interprets stale alpha as
+  // transparency.
   if (spec_style == 1) {
-    Gdiplus::Graphics g(hdc);
-    draw_spectrum_curve(g, m_rect_spectrum_full);
-    return;
-  }
+    Gdiplus::Bitmap bmp(area_w, area_h, area_w * 4,
+                        PixelFormat32bppPARGB,
+                        reinterpret_cast<BYTE*>(m_spectrum_overlay_bits));
+    Gdiplus::Graphics g(&bmp);
+    RECT overlay_rect = { 0, 0, area_w, area_h };
+    draw_spectrum_curve(g, overlay_rect);
+  } else {
 
   bool stereo = false;
 
@@ -4206,6 +4313,7 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
       render_dib_bar(bx, m_spectrum_bars[i], i, bar_count, false, m_spectrum_peaks, m_spectrum_bars);
     }
   }
+  } // end curve/bar if-else
 
   // Single AlphaBlend call composites the entire spectrum overlay onto the paint surface
   BLENDFUNCTION bf;
@@ -4988,7 +5096,9 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     m_prev_hover_region = m_hover_region;
     m_hover_change_time = std::chrono::steady_clock::now();
     m_hover_region = new_region;
-    m_needs_full_repaint = true;
+    // Skip full repaint when spectrum fast path is active — paint_spectrum_only()
+    // already redraws buttons with hover states each frame
+    if (!m_spectrum_animating) m_needs_full_repaint = true;
     invalidate();
   }
 
@@ -5008,12 +5118,12 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     }
     if (new_hover_star != m_rating_hover_star) {
       m_rating_hover_star = new_hover_star;
-      m_needs_full_repaint = true;
+      if (!m_spectrum_animating) m_needs_full_repaint = true;
       invalidate();
     }
   } else if (m_rating_hover_star != 0) {
     m_rating_hover_star = 0;
-    m_needs_full_repaint = true;
+    if (!m_spectrum_animating) m_needs_full_repaint = true;
     invalidate();
   }
 
@@ -5139,7 +5249,9 @@ void ControlPanelCore::on_mouse_leave() {
 
   if (m_hover_region != HitRegion::None) {
     m_hover_region = HitRegion::None;
-    m_needs_full_repaint = true;
+    // Skip full repaint when spectrum fast path is active — paint_spectrum_only()
+    // already redraws buttons with hover states each frame
+    if (!m_spectrum_animating) m_needs_full_repaint = true;
     invalidate();
   }
 
@@ -5855,7 +5967,9 @@ void ControlPanelCore::show_autoplaylist_menu() {
       set_nowbar_skip_low_rating_threshold(3);
       break;
     case ID_SETTINGS:
-      ui_control::get()->show_preferences(guid_nowbar_preferences_page);
+      // Defer via one-shot timer so show_autoplaylist_menu() returns first,
+      // allowing animation frames between menu close and preferences open
+      SetTimer(m_hwnd, SHOW_PREFS_TIMER_ID, 1, nullptr);
       break;
     default:
       break;
@@ -7959,6 +8073,11 @@ void ControlPanelCore::stop_command_state_timer() {
   if (!m_hwnd || !m_command_state_timer_active) return;
   KillTimer(m_hwnd, COMMAND_STATE_TIMER_ID);
   m_command_state_timer_active = false;
+}
+
+void ControlPanelCore::do_show_preferences() {
+  KillTimer(m_hwnd, SHOW_PREFS_TIMER_ID);
+  ui_control::get()->show_preferences(guid_nowbar_preferences_page);
 }
 
 void ControlPanelCore::poll_custom_button_states() {
