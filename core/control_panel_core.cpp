@@ -1785,9 +1785,14 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
 
     // Clip to individual element rects (not the union) so draw_background
-    // doesn't overwrite artwork, track info, or volume in the gaps between
-    // them.  Each rect is padded by 2px to match the cache_rect inflation,
+    // doesn't overwrite artwork or track info in the gaps between them.
+    // Each rect is padded by 2px to match the cache_rect inflation,
     // covering anti-aliased curve stroke edges.
+    // Volume and miniplayer rects are included so the cache stores clean
+    // background under them — paint_spectrum_only() redraws these elements
+    // every frame, and without a clean base the anti-aliased edges of
+    // icons drawn on top of their cached prior rendering accumulate,
+    // causing a visible brightening artifact.
     Gdiplus::Region clip;
     clip.MakeEmpty();
     clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left - 2, m_rect_spectrum_full.top - 2,
@@ -1799,6 +1804,21 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     clip.Union(Gdiplus::Rect(m_rect_time.left - 2, m_rect_time.top - 2,
         m_rect_time.right - m_rect_time.left + 4,
         m_rect_time.bottom - m_rect_time.top + 4));
+    if (m_rect_volume.right > m_rect_volume.left) {
+      // Volume icon hover circle: centered on icon, diameter = button height.
+      int icon_sz = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+      int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
+      int vol_h = m_rect_volume.bottom - m_rect_volume.top;
+      int icon_center_x = m_rect_volume.left - icon_gap + icon_sz / 2;
+      int vol_left = icon_center_x - vol_h / 2;
+      clip.Union(Gdiplus::Rect(vol_left - 2, m_rect_volume.top - 2,
+          m_rect_volume.right - vol_left + 4, vol_h + 4));
+    }
+    if (m_rect_miniplayer.right > m_rect_miniplayer.left) {
+      clip.Union(Gdiplus::Rect(m_rect_miniplayer.left - 2, m_rect_miniplayer.top - 2,
+          m_rect_miniplayer.right - m_rect_miniplayer.left + 4,
+          m_rect_miniplayer.bottom - m_rect_miniplayer.top + 4));
+    }
     g.SetClip(&clip);
 
     draw_background(g, panel_rect);
@@ -1911,9 +1931,53 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   draw_thin_progress_bar(g2);
   draw_time_display_top_right(g2);
 
-  // Redraw miniplayer button — the time display rect (top-right) overlaps
-  // the miniplayer area vertically, and the background restoration above
-  // erases it. Must draw after time display to maintain correct z-order.
+  // Restore clean background under volume and miniplayer before redrawing.
+  // The background cache BitBlt covers the entire panel (because
+  // m_rect_thin_progress spans full width), so it restores stale rendered
+  // content in the volume/miniplayer areas from the previous full paint.
+  // Drawing icons on top of their cached prior rendering causes
+  // anti-aliased edge pixels to accumulate and visibly brighten.
+  {
+    Gdiplus::Graphics gv(hdc);
+    gv.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+    gv.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+    gv.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+    Gdiplus::Region vol_clip;
+    vol_clip.MakeEmpty();
+    if (m_rect_volume.right > m_rect_volume.left) {
+      // Volume icon hover circle: centered on icon, diameter = button height.
+      // icon_center_x = m_rect_volume.left - icon_gap + icon_size/2
+      // circle extends icon_center_x ± vol_h/2
+      int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+      int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
+      int vol_h = m_rect_volume.bottom - m_rect_volume.top;
+      int icon_center_x = m_rect_volume.left - icon_gap + icon_size / 2;
+      int vol_left = icon_center_x - vol_h / 2;
+      vol_clip.Union(Gdiplus::Rect(vol_left, m_rect_volume.top,
+          m_rect_volume.right - vol_left, vol_h));
+    }
+    if (m_rect_miniplayer.right > m_rect_miniplayer.left) {
+      int mpw = m_rect_miniplayer.right - m_rect_miniplayer.left;
+      int mph = m_rect_miniplayer.bottom - m_rect_miniplayer.top;
+      int pad = static_cast<int>(mpw * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
+      vol_clip.Union(Gdiplus::Rect(
+          m_rect_miniplayer.left - pad, m_rect_miniplayer.top - pad,
+          mpw + pad * 2, mph + pad * 2));
+    }
+    // Exclude the time display rect — at minimum panel height it overlaps the
+    // volume/miniplayer area and we must not wipe the already-drawn text.
+    if (m_rect_time.right > m_rect_time.left) {
+      vol_clip.Exclude(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
+          m_rect_time.right - m_rect_time.left,
+          m_rect_time.bottom - m_rect_time.top));
+    }
+    if (!vol_clip.IsEmpty(&gv)) {
+      gv.SetClip(&vol_clip);
+      draw_background(gv, panel_rect);
+    }
+  }
+
+  draw_volume(g2);
   draw_miniplayer_button(g2);
 
   // Draw tooltips last so they render on top of all other elements
@@ -1954,6 +2018,11 @@ void ControlPanelCore::paint_waveform_only(HDC hdc, const RECT& panel_rect) {
     draw_playback_buttons(g);
     draw_waveform_tooltip(g);
     draw_time_display(g);
+
+    // Reset clip before drawing volume — the waveform clip region above
+    // only covers waveform + time areas, which may not include the volume.
+    g.ResetClip();
+    draw_volume(g);
 
     // Kill orphaned animation timer — waveform mode doesn't use continuous animation,
     // but a timer may still be running from a previous spectrum mode session.
@@ -2887,7 +2956,7 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
         }
       }
 
-      // Composite onto main graphics with visual centering offset
+      // Composite onto main graphics with visual centering offset.
       Gdiplus::Bitmap glyphBmp(gw, gh, gw * 4, PixelFormat32bppARGB, pBits);
       g.DrawImage(&glyphBmp,
                   (INT)iconRect.left + center_offset_x,
