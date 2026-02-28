@@ -1295,14 +1295,35 @@ static INT_PTR CALLBACK InputDialogProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 // Show input dialog at cursor position
 // Returns true if OK was pressed, false if cancelled
 // Result is stored in out_result
-static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar_t* prompt, 
+static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar_t* prompt,
                               const wchar_t* initial_value, pfc::string8& out_result) {
     // Copy initial value to buffer and get cursor position
     wcsncpy_s(s_input_dialog_buffer, initial_value, 255);
     GetCursorPos(&s_input_dialog_pos);
-    
-    // Build dialog template in memory
-    BYTE dlg_buffer[1024] = {};
+
+    // Calculate required buffer size for the dialog template to avoid overflow.
+    // Each string is stored as wchar_t (2 bytes per character) including null terminator.
+    const wchar_t* ok_text = L"OK";
+    const wchar_t* cancel_text = L"Cancel";
+    const wchar_t* font = L"MS Shell Dlg";
+    size_t title_len = wcslen(title) + 1;
+    size_t font_len = wcslen(font) + 1;
+    size_t prompt_len = wcslen(prompt) + 1;
+    size_t ok_len = wcslen(ok_text) + 1;
+    size_t cancel_len = wcslen(cancel_text) + 1;
+
+    // Estimate total size: DLGTEMPLATE + menu/class + strings + 4 DLGITEMTEMPLATE + alignment padding
+    size_t needed = sizeof(DLGTEMPLATE) + 4  // menu + class words
+        + (title_len + font_len + prompt_len + ok_len + cancel_len) * sizeof(wchar_t)
+        + 2  // font size word
+        + 4 * (sizeof(DLGITEMTEMPLATE) + 6)  // 4 controls with class + creation data
+        + 64;  // alignment padding headroom
+    if (needed < 2048) needed = 2048;  // minimum safe size
+
+    // Allocate on heap to handle any string length safely
+    std::vector<BYTE> dlg_storage(needed, 0);
+    BYTE* dlg_buffer = dlg_storage.data();
+
     DLGTEMPLATE* pTemplate = (DLGTEMPLATE*)dlg_buffer;
     pTemplate->style = DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_SETFONT;
     pTemplate->dwExtendedStyle = 0;
@@ -1311,26 +1332,23 @@ static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar
     pTemplate->y = 0;
     pTemplate->cx = 200;
     pTemplate->cy = 70;
-    
+
     WORD* pWord = (WORD*)(pTemplate + 1);
     *pWord++ = 0;  // No menu
     *pWord++ = 0;  // Default window class
-    
+
     // Title
-    size_t title_len = wcslen(title) + 1;
     memcpy(pWord, title, title_len * sizeof(wchar_t));
     pWord += title_len;
-    
+
     // Font (required with DS_SETFONT)
     *pWord++ = 8;  // Font size
-    const wchar_t* font = L"MS Shell Dlg";
-    size_t font_len = wcslen(font) + 1;
     memcpy(pWord, font, font_len * sizeof(wchar_t));
     pWord += font_len;
-    
+
     // Align to DWORD
     pWord = (WORD*)(((ULONG_PTR)pWord + 3) & ~3);
-    
+
     // Static text control
     DLGITEMTEMPLATE* pItem = (DLGITEMTEMPLATE*)pWord;
     pItem->style = WS_VISIBLE | WS_CHILD | SS_LEFT;
@@ -1339,12 +1357,11 @@ static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar
     pItem->id = 100;
     pWord = (WORD*)(pItem + 1);
     *pWord++ = 0xFFFF; *pWord++ = 0x0082;  // Static class
-    size_t prompt_len = wcslen(prompt) + 1;
     memcpy(pWord, prompt, prompt_len * sizeof(wchar_t));
     pWord += prompt_len;
     *pWord++ = 0;  // No creation data
     pWord = (WORD*)(((ULONG_PTR)pWord + 3) & ~3);
-    
+
     // Edit control
     pItem = (DLGITEMTEMPLATE*)pWord;
     pItem->style = WS_VISIBLE | WS_CHILD | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL;
@@ -1356,7 +1373,7 @@ static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar
     *pWord++ = 0;  // No text
     *pWord++ = 0;  // No creation data
     pWord = (WORD*)(((ULONG_PTR)pWord + 3) & ~3);
-    
+
     // OK button
     pItem = (DLGITEMTEMPLATE*)pWord;
     pItem->style = WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON;
@@ -1365,12 +1382,11 @@ static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar
     pItem->id = IDOK;
     pWord = (WORD*)(pItem + 1);
     *pWord++ = 0xFFFF; *pWord++ = 0x0080;  // Button class
-    const wchar_t* ok_text = L"OK";
-    memcpy(pWord, ok_text, 3 * sizeof(wchar_t));
-    pWord += 3;
+    memcpy(pWord, ok_text, ok_len * sizeof(wchar_t));
+    pWord += ok_len;
     *pWord++ = 0;  // No creation data
     pWord = (WORD*)(((ULONG_PTR)pWord + 3) & ~3);
-    
+
     // Cancel button
     pItem = (DLGITEMTEMPLATE*)pWord;
     pItem->style = WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON;
@@ -1379,13 +1395,12 @@ static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar
     pItem->id = IDCANCEL;
     pWord = (WORD*)(pItem + 1);
     *pWord++ = 0xFFFF; *pWord++ = 0x0080;  // Button class
-    const wchar_t* cancel_text = L"Cancel";
-    memcpy(pWord, cancel_text, 7 * sizeof(wchar_t));
-    pWord += 7;
+    memcpy(pWord, cancel_text, cancel_len * sizeof(wchar_t));
+    pWord += cancel_len;
     *pWord++ = 0;  // No creation data
-    
+
     INT_PTR dlgResult = DialogBoxIndirectW(g_hInstance, pTemplate, hwndParent, InputDialogProc);
-    
+
     if (dlgResult == IDOK && wcslen(s_input_dialog_buffer) > 0) {
         pfc::stringcvt::string_utf8_from_wide utf8_result(s_input_dialog_buffer);
         out_result = utf8_result.get_ptr();
@@ -4762,10 +4777,11 @@ void nowbar_preferences::select_time_font() {
 
 pfc::string8 nowbar_preferences::format_font_name(const LOGFONT& lf) {
     pfc::string8 result;
-    
-    // Convert face name to UTF-8
-    char face_name[64];
-    WideCharToMultiByte(CP_UTF8, 0, lf.lfFaceName, -1, face_name, sizeof(face_name), nullptr, nullptr);
+
+    // Convert face name to UTF-8 (LF_FACESIZE=32 wchar_t can need up to 96 bytes in UTF-8)
+    char face_name[128];
+    int conv = WideCharToMultiByte(CP_UTF8, 0, lf.lfFaceName, -1, face_name, sizeof(face_name), nullptr, nullptr);
+    if (conv <= 0) face_name[0] = '\0';  // Fallback on conversion failure
     
     // Calculate point size from height
     HDC hdc = GetDC(nullptr);
