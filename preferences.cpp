@@ -2315,6 +2315,23 @@ CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_m
 
                 mainmenu_node::ptr node = commands_v2->dynamic_instantiate(command_index);
 
+                // Build base path (static menu groups above the dynamic command,
+                // excluding the command name itself) before the lambda so it can
+                // be captured by reference.
+                std::list<pfc::string8> base_parts;
+                pfc::string8 base_path_str;
+                {
+                    bool first_bp = true;
+                    for (const auto& p : name_parts) {
+                        if (&p != &name_parts.back()) {
+                            base_parts.push_back(p);
+                            if (!first_bp) base_path_str << "/";
+                            base_path_str << p;
+                            first_bp = false;
+                        }
+                    }
+                }
+
                 // Recursive lambda to search dynamic nodes
                 std::function<bool(const mainmenu_node::ptr&, std::list<pfc::string8>)> search_node;
                 search_node = [&](const mainmenu_node::ptr& n, std::list<pfc::string8> parts) -> bool {
@@ -2341,29 +2358,18 @@ CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_m
                             result.checked = (node_flags & mainmenu_commands::flag_checked) != 0;
                             result.disabled = (node_flags & mainmenu_commands::flag_disabled) != 0;
 
-                            // Cache for fast polling — store service + index + base path
+                            // Cache for fast polling — store service + index + base path.
+                            // base_path_str contains only the static menu groups above the
+                            // dynamic command entry.  poll_fb2k_action_state() re-traverses
+                            // the dynamic tree from its root, so the base path must NOT
+                            // include path segments added by the tree itself.
                             result.cache_valid = true;
                             result.is_context_menu = false;
                             result.is_dynamic = true;
                             result.cached_service = commands;
                             result.cached_command_index = command_index;
-                            // Store full target path and base path for dynamic tree search
                             result.cached_dynamic_subpath = target_path;
-                            // Build base path from parts before the command name was added
-                            {
-                                pfc::string8 bp_str;
-                                bool first_bp = true;
-                                // parts has display_name as last element; skip it for base path
-                                auto it = parts.begin();
-                                auto end_it = parts.end();
-                                if (!parts.empty()) --end_it;  // exclude last (command name)
-                                for (; it != end_it; ++it) {
-                                    if (!first_bp) bp_str << "/";
-                                    bp_str << *it;
-                                    first_bp = false;
-                                }
-                                result.cached_dynamic_basepath = bp_str;
-                            }
+                            result.cached_dynamic_basepath = base_path_str;
                             return true;
                         }
                         return false;
@@ -2385,13 +2391,6 @@ CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_m
                     }
                 };
 
-                // Start search from root with parent path
-                std::list<pfc::string8> base_parts;
-                for (const auto& p : name_parts) {
-                    if (&p != &name_parts.back()) {
-                        base_parts.push_back(p);
-                    }
-                }
                 if (search_node(node, base_parts)) {
                     return result;
                 }
