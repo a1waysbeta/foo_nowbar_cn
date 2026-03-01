@@ -8174,8 +8174,10 @@ void ControlPanelCore::poll_custom_button_states() {
         needs_repaint = true;
       }
     } else {
-      // First poll or path changed: full lookup (caches reference for next time)
-      CommandState new_state = get_fb2k_action_state_by_path(path.c_str());
+      // First poll or path changed: full lookup (caches reference for next time).
+      // Skip context menu search — init_context() builds the full context menu
+      // tree for all components, which can crash non-thread-safe components.
+      CommandState new_state = get_fb2k_action_state_by_path(path.c_str(), true);
       if (new_state.found != m_cbutton_states[i].found ||
           new_state.checked != m_cbutton_states[i].checked ||
           new_state.disabled != m_cbutton_states[i].disabled) {
