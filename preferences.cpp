@@ -4871,7 +4871,7 @@ void nowbar_preferences::select_track_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
 
     if (ChooseFont(&cf)) {
         set_nowbar_track_font(lf);
@@ -4887,7 +4887,7 @@ void nowbar_preferences::select_artist_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
 
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
@@ -4903,7 +4903,7 @@ void nowbar_preferences::select_time_font() {
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
 
     if (ChooseFont(&cf)) {
         set_nowbar_time_font(lf);
