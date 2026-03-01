@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "control_panel_core.h"
 #include "../preferences.h"
 #include "../resource.h"
@@ -5501,7 +5501,7 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
         for (t_uint32 i = 0; i < ptr->get_command_count(); i++) {
           pfc::string8 name;
           ptr->get_name(i, name);
-          if (pfc::string_find_first(name, "Launch MiniPlayer") !=
+          if (pfc::string_find_first(name, reinterpret_cast<const char*>(u8"启动迷你播放器")) !=
               pfc::infinite_size) {
             ptr->execute(i, nullptr);
             break;
@@ -5864,24 +5864,24 @@ void ControlPanelCore::show_autoplaylist_menu() {
   }
   
   // Add menu items - Group 1: Play count related
-  AppendMenuW(menu, MF_STRING, ID_NEVER_PLAYED, L"Tracks never played");
-  AppendMenuW(menu, MF_STRING, ID_PLAYED_LAST_5_DAYS, L"Tracks played in last 5 days");
+  AppendMenuW(menu, MF_STRING, ID_NEVER_PLAYED, L"从未播放");
+  AppendMenuW(menu, MF_STRING, ID_PLAYED_LAST_5_DAYS, L"近5天播放");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   
   // Group 2: Rating related
-  AppendMenuW(menu, MF_STRING, ID_UNRATED, L"Tracks unrated");
-  AppendMenuW(menu, MF_STRING, ID_RATED_3_TO_5, L"Tracks rated 3 to 5");
-  AppendMenuW(menu, MF_STRING, ID_RATED_4, L"Tracks rated 4");
-  AppendMenuW(menu, MF_STRING, ID_RATED_5, L"Tracks rated 5");
+  AppendMenuW(menu, MF_STRING, ID_UNRATED, L"未评级");
+  AppendMenuW(menu, MF_STRING, ID_RATED_3_TO_5, L"评级为 3-5");
+  AppendMenuW(menu, MF_STRING, ID_RATED_4, L"评级为 4");
+  AppendMenuW(menu, MF_STRING, ID_RATED_5, L"评级为 5");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   
   // Group 3: Special
-  AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"Loved Tracks");
-  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"Recently added");
+  AppendMenuW(menu, MF_STRING, ID_LOVED_TRACKS, L"我的收藏");
+  AppendMenuW(menu, MF_STRING, ID_RECENTLY_ADDED, L"近2周添加");
   
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -5889,15 +5889,15 @@ void ControlPanelCore::show_autoplaylist_menu() {
   // Group 4: Dynamic (based on currently selected track)
   UINT artist_flags = MF_STRING | (current_artist.is_empty() ? MF_GRAYED : 0);
   UINT title_flags = MF_STRING | (current_title.is_empty() ? MF_GRAYED : 0);
-  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"Same artist as currently selected");
-  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"Same title as currently selected");
+  AppendMenuW(menu, artist_flags, ID_SAME_ARTIST, L"相同艺术家");
+  AppendMenuW(menu, title_flags, ID_SAME_TITLE, L"相同标题");
 
   // Separator
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
   // Group 5: Playback mode
   UINT infinite_flags = MF_STRING | (get_nowbar_infinite_playback_enabled() ? MF_CHECKED : 0);
-  AppendMenuW(menu, infinite_flags, ID_INFINITE_PLAYBACK, L"Infinite playback");
+  AppendMenuW(menu, infinite_flags, ID_INFINITE_PLAYBACK, L"无限播放");
 
   // Group 6: Playback Preview submenu
   HMENU preview_submenu = CreatePopupMenu();
@@ -5909,14 +5909,14 @@ void ControlPanelCore::show_autoplaylist_menu() {
     UINT p50_flags = MF_STRING | (current_preview_mode == 2 ? MF_CHECKED : 0);
     UINT p60_flags = MF_STRING | (current_preview_mode == 3 ? MF_CHECKED : 0);
 
-    AppendMenuW(preview_submenu, off_flags, ID_PREVIEW_OFF, L"Off");
+    AppendMenuW(preview_submenu, off_flags, ID_PREVIEW_OFF, L"关闭");
     AppendMenuW(preview_submenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(preview_submenu, p35_flags, ID_PREVIEW_35_PERCENT, L"35% of track");
-    AppendMenuW(preview_submenu, p50_flags, ID_PREVIEW_50_PERCENT, L"50% of track");
+    AppendMenuW(preview_submenu, p35_flags, ID_PREVIEW_35_PERCENT, L"播放时长的35%");
+    AppendMenuW(preview_submenu, p50_flags, ID_PREVIEW_50_PERCENT, L"播放时长的50%");
     AppendMenuW(preview_submenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(preview_submenu, p60_flags, ID_PREVIEW_60_SECONDS, L"60 seconds");
+    AppendMenuW(preview_submenu, p60_flags, ID_PREVIEW_60_SECONDS, L"播放60秒");
 
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)preview_submenu, L"Playback Preview");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)preview_submenu, L"播放预览");
   }
 
   // Group 7: Skip Low Rating submenu
@@ -5930,20 +5930,20 @@ void ControlPanelCore::show_autoplaylist_menu() {
     UINT s2_flags = MF_STRING | (skip_enabled && skip_threshold == 2 ? MF_CHECKED : 0);
     UINT s3_flags = MF_STRING | (skip_enabled && skip_threshold == 3 ? MF_CHECKED : 0);
 
-    AppendMenuW(skip_submenu, off_flags, ID_SKIP_LOW_RATING_OFF, L"Off");
+    AppendMenuW(skip_submenu, off_flags, ID_SKIP_LOW_RATING_OFF, L"关闭");
     AppendMenuW(skip_submenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(skip_submenu, s1_flags, ID_SKIP_LOW_RATING_1, L"Skip if rating = 1");
-    AppendMenuW(skip_submenu, s2_flags, ID_SKIP_LOW_RATING_2, L"Skip if rating \x2264 2");
-    AppendMenuW(skip_submenu, s3_flags, ID_SKIP_LOW_RATING_3, L"Skip if rating \x2264 3");
+    AppendMenuW(skip_submenu, s1_flags, ID_SKIP_LOW_RATING_1, L"等级 = 1 时跳过");
+    AppendMenuW(skip_submenu, s2_flags, ID_SKIP_LOW_RATING_2, L"等级 \x2264 2 时跳过");
+    AppendMenuW(skip_submenu, s3_flags, ID_SKIP_LOW_RATING_3, L"等级 \x2264 3 时跳过");
 
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)skip_submenu, L"Skip Low Rating");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)skip_submenu, L"跳过低等级音轨");
   }
 
   // Separator before Settings
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
   // Settings option - opens Now Bar preferences page
-  AppendMenuW(menu, MF_STRING, ID_SETTINGS, L"Settings");
+  AppendMenuW(menu, MF_STRING, ID_SETTINGS, L"设置");
 
   // Get Super button position for menu placement
   POINT pt;
@@ -5963,32 +5963,32 @@ void ControlPanelCore::show_autoplaylist_menu() {
   // Handle selection
   switch (cmd) {
     case ID_NEVER_PLAYED:
-      create_autoplaylist("Tracks never played", 
+      create_autoplaylist(reinterpret_cast<const char*>(u8"从未播放"), 
                           "%play_count% MISSING",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_PLAYED_LAST_5_DAYS:
-      create_autoplaylist("Tracks played in last 5 days",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"近5天播放"),
                           "%last_played% DURING LAST 5 DAYS",
                           "%last_played%");
       break;
     case ID_UNRATED:
-      create_autoplaylist("Tracks unrated",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"未评级"),
                           "%rating% MISSING",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_RATED_3_TO_5:
-      create_autoplaylist("Tracks rated 3 to 5",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"评级为 3-5"),
                           "%rating% GREATER 2",
                           "%rating% | %album artist% | %album%");
       break;
     case ID_RATED_4:
-      create_autoplaylist("Tracks rated 4",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"评级为 4"),
                           "%rating% EQUAL 4",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
     case ID_RATED_5:
-      create_autoplaylist("Tracks rated 5",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"评级为 5"),
                           "%rating% EQUAL 5",
                           "%album artist% | %album% | %discnumber% | %tracknumber%");
       break;
@@ -6034,11 +6034,11 @@ void ControlPanelCore::show_autoplaylist_menu() {
       sort.add_string(tag_name);
       sort.add_string("% | %album artist% | %album%");
 
-      create_autoplaylist("Loved Tracks", query.c_str(), sort.c_str());
+      create_autoplaylist(reinterpret_cast<const char*>(u8"我的收藏"), query.c_str(), sort.c_str());
       break;
     }
     case ID_RECENTLY_ADDED:
-      create_autoplaylist("Recently added",
+      create_autoplaylist(reinterpret_cast<const char*>(u8"近2周添加"),
                           "%added% DURING LAST 2 WEEKS",
                           "%added%");
       break;
@@ -6051,7 +6051,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
         query << "artist IS \"" << escaped_artist << "\"";
         
         pfc::string8 name;
-        name << "Artist: " << current_artist;
+        name << reinterpret_cast<const char*>(u8"艺术家：") << current_artist;
         
         create_autoplaylist(name.c_str(), query.c_str(),
                             "%album% | %discnumber% | %tracknumber%");
@@ -6066,7 +6066,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
         query << "title IS \"" << escaped_title << "\"";
 
         pfc::string8 name;
-        name << "Title: " << current_title;
+        name << reinterpret_cast<const char*>(u8"标题：") << current_title;
 
         create_autoplaylist(name.c_str(), query.c_str(),
                             "%album artist% | %album%");
@@ -6211,12 +6211,12 @@ void ControlPanelCore::do_set_rating(int star) {
 
   // Build target command path for foo_playcount's context menu
   // e.g. "Playback Statistics/Rating/3" or "Playback Statistics/Rating/<not set>"
-  pfc::string8 target_path("Playback Statistics/Rating/");
+  pfc::string8 target_path("播放统计信息/等级/");
   if (new_rating >= 1 && new_rating <= 5) {
     char buf[2] = { (char)('0' + new_rating), 0 };
     target_path += buf;
   } else {
-    target_path += "<not set>";
+    target_path += "<未设置>";
   }
 
   // Execute via context menu on the target track
@@ -7548,6 +7548,7 @@ void ControlPanelCore::draw_alternate_play_icon(Gdiplus::Graphics &g, const RECT
 }
 
 // Draw alternate pause icon - outline style from pause_24dp.svg
+// 修改为 Material Icons Regular - U+E034 图标
 // Two outlined rectangles
 void ControlPanelCore::draw_alternate_pause_icon(Gdiplus::Graphics &g, const RECT &rect,
                                                   const Gdiplus::Color &color) {
@@ -7570,37 +7571,49 @@ void ControlPanelCore::draw_alternate_pause_icon(Gdiplus::Graphics &g, const REC
   
   // Left bar - outer rect then inner hole
   // Outer: 200-200 to 440-760
+  // 新图标: 左边条从256-214到426-810，Y坐标取反并调整重心（左移X：21个单位，下移Y：32个单位）
   path.StartFigure();
-  path.AddLine(svgToNorm(200, -200), svgToNorm(200, -760));
-  path.AddLine(svgToNorm(200, -760), svgToNorm(440, -760));
-  path.AddLine(svgToNorm(440, -760), svgToNorm(440, -200));
-  path.AddLine(svgToNorm(440, -200), svgToNorm(200, -200));
+  // path.AddLine(svgToNorm(200, -200), svgToNorm(200, -760));
+  // path.AddLine(svgToNorm(200, -760), svgToNorm(440, -760));
+  // path.AddLine(svgToNorm(440, -760), svgToNorm(440, -200));
+  // path.AddLine(svgToNorm(440, -200), svgToNorm(200, -200));
+  path.AddLine(svgToNorm(235, -182), svgToNorm(235, -778));
+  path.AddLine(svgToNorm(235, -778), svgToNorm(405, -778));
+  path.AddLine(svgToNorm(405, -778), svgToNorm(405, -182));
+  path.AddLine(svgToNorm(405, -182), svgToNorm(235, -182));
   path.CloseFigure();
   
   // Left bar inner hole
-  path.StartFigure();
-  path.AddLine(svgToNorm(280, -280), svgToNorm(360, -280));
-  path.AddLine(svgToNorm(360, -280), svgToNorm(360, -680));
-  path.AddLine(svgToNorm(360, -680), svgToNorm(280, -680));
-  path.AddLine(svgToNorm(280, -680), svgToNorm(280, -280));
-  path.CloseFigure();
+  // 内孔位置，整体注释，填充实心
+  // path.StartFigure();
+  // path.AddLine(svgToNorm(280, -280), svgToNorm(360, -280));
+  // path.AddLine(svgToNorm(360, -280), svgToNorm(360, -680));
+  // path.AddLine(svgToNorm(360, -680), svgToNorm(280, -680));
+  // path.AddLine(svgToNorm(280, -680), svgToNorm(280, -280));
+  // path.CloseFigure();
 
   // Right bar - outer rect then inner hole
   // Outer: 520-200 to 760-760
+  // 新图标: 右边条从598-214到768-810，Y坐标取反并调整重心（左移X：21个单位，下移Y：32个单位）
   path.StartFigure();
-  path.AddLine(svgToNorm(520, -200), svgToNorm(520, -760));
-  path.AddLine(svgToNorm(520, -760), svgToNorm(760, -760));
-  path.AddLine(svgToNorm(760, -760), svgToNorm(760, -200));
-  path.AddLine(svgToNorm(760, -200), svgToNorm(520, -200));
+  // path.AddLine(svgToNorm(520, -200), svgToNorm(520, -760));
+  // path.AddLine(svgToNorm(520, -760), svgToNorm(760, -760));
+  // path.AddLine(svgToNorm(760, -760), svgToNorm(760, -200));
+  // path.AddLine(svgToNorm(760, -200), svgToNorm(520, -200));
+  path.AddLine(svgToNorm(577, -182), svgToNorm(577, -778));
+  path.AddLine(svgToNorm(577, -778), svgToNorm(747, -778));
+  path.AddLine(svgToNorm(747, -778), svgToNorm(747, -182));
+  path.AddLine(svgToNorm(747, -182), svgToNorm(577, -182));
   path.CloseFigure();
 
   // Right bar inner hole
-  path.StartFigure();
-  path.AddLine(svgToNorm(600, -280), svgToNorm(680, -280));
-  path.AddLine(svgToNorm(680, -280), svgToNorm(680, -680));
-  path.AddLine(svgToNorm(680, -680), svgToNorm(600, -680));
-  path.AddLine(svgToNorm(600, -680), svgToNorm(600, -280));
-  path.CloseFigure();
+  // 内孔位置，整体注释，填充实心
+  // path.StartFigure();
+  // path.AddLine(svgToNorm(600, -280), svgToNorm(680, -280));
+  // path.AddLine(svgToNorm(680, -280), svgToNorm(680, -680));
+  // path.AddLine(svgToNorm(680, -680), svgToNorm(600, -680));
+  // path.AddLine(svgToNorm(600, -680), svgToNorm(600, -280));
+  // path.CloseFigure();
 
   path.SetFillMode(Gdiplus::FillModeWinding);
   g.FillPath(&brush, &path);
