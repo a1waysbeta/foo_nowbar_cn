@@ -1851,6 +1851,16 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
           m_rect_miniplayer.right - m_rect_miniplayer.left + 4,
           m_rect_miniplayer.bottom - m_rect_miniplayer.top + 4));
     }
+    // Exclude artwork so the padded element rects above don't bleed
+    // draw_background into the top rows of the artwork image.  Those
+    // pixels are only drawn during full paint(); overwriting them here
+    // would produce a visible gap that flickers on hover transitions.
+    if (get_nowbar_cover_artwork_visible() &&
+        m_rect_artwork.right > m_rect_artwork.left) {
+      clip.Exclude(Gdiplus::Rect(m_rect_artwork.left, m_rect_artwork.top,
+          m_rect_artwork.right - m_rect_artwork.left,
+          m_rect_artwork.bottom - m_rect_artwork.top));
+    }
     g.SetClip(&clip);
 
     draw_background(g, panel_rect);
