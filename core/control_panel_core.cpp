@@ -600,6 +600,11 @@ void ControlPanelCore::on_settings_changed() {
     }
   }
 
+  // Invalidate cached command references so next poll does a fresh lookup
+  for (int i = 0; i < 6; i++) {
+    m_cbutton_states[i] = {};
+  }
+
   // Repaint to reflect any visual changes
   invalidate();
 }
@@ -8158,15 +8163,25 @@ void ControlPanelCore::poll_custom_button_states() {
     
     pfc::string8 path = get_nowbar_cbutton_path(i);
     if (path.is_empty()) continue;
-    
-    CommandState new_state = get_fb2k_action_state_by_path(path.c_str());
-    
-    // Check if state changed
-    if (new_state.found != m_cbutton_states[i].found ||
-        new_state.checked != m_cbutton_states[i].checked ||
-        new_state.disabled != m_cbutton_states[i].disabled) {
+
+    if (m_cbutton_states[i].cache_valid) {
+      // Fast path: use cached service reference, no full enumeration
+      bool old_checked = m_cbutton_states[i].checked;
+      bool old_disabled = m_cbutton_states[i].disabled;
+      poll_fb2k_action_state(m_cbutton_states[i]);
+      if (old_checked != m_cbutton_states[i].checked ||
+          old_disabled != m_cbutton_states[i].disabled) {
+        needs_repaint = true;
+      }
+    } else {
+      // First poll or path changed: full lookup (caches reference for next time)
+      CommandState new_state = get_fb2k_action_state_by_path(path.c_str());
+      if (new_state.found != m_cbutton_states[i].found ||
+          new_state.checked != m_cbutton_states[i].checked ||
+          new_state.disabled != m_cbutton_states[i].disabled) {
+        needs_repaint = true;
+      }
       m_cbutton_states[i] = new_state;
-      needs_repaint = true;
     }
   }
 
