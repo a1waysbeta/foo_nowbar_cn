@@ -712,6 +712,25 @@ void ControlPanelCore::update_fonts() {
   Gdiplus::Font *titleFont = new Gdiplus::Font(hdc, &lf_track);
   Gdiplus::Font *artistFont = new Gdiplus::Font(hdc, &lf_artist);
   Gdiplus::Font *timeFont = new Gdiplus::Font(hdc, &lf_time);
+
+  // Validate fonts — GDI+ silently fails on bitmap/raster fonts.
+  // Fall back to defaults if the selected font can't be used.
+  if (titleFont->GetLastStatus() != Gdiplus::Ok) {
+    delete titleFont;
+    lf_track = get_nowbar_default_font(false);
+    titleFont = new Gdiplus::Font(hdc, &lf_track);
+  }
+  if (artistFont->GetLastStatus() != Gdiplus::Ok) {
+    delete artistFont;
+    lf_artist = get_nowbar_default_font(true);
+    artistFont = new Gdiplus::Font(hdc, &lf_artist);
+  }
+  if (timeFont->GetLastStatus() != Gdiplus::Ok) {
+    delete timeFont;
+    lf_time = get_nowbar_default_time_font();
+    timeFont = new Gdiplus::Font(hdc, &lf_time);
+  }
+
   ReleaseDC(m_hwnd, hdc);
 
   m_font_title.reset(titleFont);
@@ -3308,13 +3327,20 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
     remaining = 0;
   std::wstring remaining_str = L"-" + format_time(remaining);
 
-  Gdiplus::StringFormat sfLeft;
+  // Use GenericTypographic to eliminate variable internal padding that
+  // MeasureString adds by default — this ensures measurement matches rendering
+  // and prevents timer position shifting when the font changes.
+  Gdiplus::StringFormat sfLeft(Gdiplus::StringFormat::GenericTypographic());
   sfLeft.SetAlignment(Gdiplus::StringAlignmentNear);
   sfLeft.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  sfLeft.SetFormatFlags(sfLeft.GetFormatFlags() | Gdiplus::StringFormatFlagsNoClip);
 
-  Gdiplus::StringFormat sfRight;
+  Gdiplus::StringFormat sfRight(Gdiplus::StringFormat::GenericTypographic());
   sfRight.SetAlignment(Gdiplus::StringAlignmentFar);
   sfRight.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  sfRight.SetFormatFlags(sfRight.GetFormatFlags() | Gdiplus::StringFormatFlagsNoClip);
+
+  Gdiplus::StringFormat sfMeasure(Gdiplus::StringFormat::GenericTypographic());
 
   // Position time at the ends of the seekbar (vertically centered with seekbar)
   int seekbar_center_y = (m_rect_seekbar.top + m_rect_seekbar.bottom) / 2;
@@ -3324,11 +3350,11 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   // Use "9:59:59" as reference for elapsed time and "-9:59:59" for remaining time
   // This handles tracks over 59 minutes that use h:mm:ss format
   Gdiplus::RectF refBoundRect;
-  g.MeasureString(L"9:59:59", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &refBoundRect);
+  g.MeasureString(L"9:59:59", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &sfMeasure, &refBoundRect);
   float time_width = refBoundRect.Width + 4 * m_dpi_scale; // Add small padding
 
   Gdiplus::RectF refBoundRectRemaining;
-  g.MeasureString(L"-9:59:59", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &refBoundRectRemaining);
+  g.MeasureString(L"-9:59:59", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &sfMeasure, &refBoundRectRemaining);
   float time_offset = refBoundRectRemaining.Width + 4 * m_dpi_scale; // Add small padding
 
   // Left side: elapsed time (before seekbar)
@@ -3353,7 +3379,7 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   
   Gdiplus::RectF leftTimeRect(timer_left,
                               (float)(seekbar_center_y - time_height / 2),
-                              time_width, (float)time_height);
+                              timer_right - timer_left, (float)time_height);
   g.DrawString(elapsed.c_str(), -1, m_font_time.get(), leftTimeRect, &sfRight,
                &timeBrush);
 
@@ -4844,9 +4870,10 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
       ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
   Gdiplus::SolidBrush timeBrush(time_color);
 
-  Gdiplus::StringFormat sf;
+  Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
   sf.SetAlignment(Gdiplus::StringAlignmentFar);
   sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  sf.SetFormatFlags(sf.GetFormatFlags() | Gdiplus::StringFormatFlagsNoClip);
 
   // Draw directly to the caller's Graphics — the DC already has an opaque
   // background (from draw_background or the spectrum bg cache restoration),
