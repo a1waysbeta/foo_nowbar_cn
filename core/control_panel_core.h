@@ -315,6 +315,10 @@ private:
     // Playlist focus tracking for rating display
     class PlaylistFocusCallback;
     std::unique_ptr<PlaylistFocusCallback> m_playlist_focus_callback;
+
+    // Metadb change tracking (rating/mood updates from foo_playcount etc.)
+    class MetadbChangeCallback;
+    std::unique_ptr<MetadbChangeCallback> m_metadb_change_callback;
     bool m_stop_after_current_active = false;  // "Stop after current" toggle state for icon color
     
     // Native Windows tooltip control for custom buttons
