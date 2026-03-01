@@ -125,7 +125,7 @@ struct CommandState {
 // Query the state of a foobar2000 menu command without executing it.
 // On first call for a given path, does full enumeration and caches the result.
 // On subsequent calls with a cached CommandState, uses the fast path.
-CommandState get_fb2k_action_state_by_path(const char* path);
+CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_menu = false);
 void poll_fb2k_action_state(CommandState& state);
 
 // Get the effective background color for the current theme mode configuration
