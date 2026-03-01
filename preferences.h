@@ -107,10 +107,26 @@ struct CommandState {
     bool found = false;      // Command exists in menu system
     bool checked = false;    // Toggle is ON (flag_checked)
     bool disabled = false;   // Command unavailable (flag_disabled)
+
+    // Cached lookup reference to avoid re-enumerating all services on every poll.
+    // After the first successful lookup, subsequent polls use the cached reference
+    // and call get_display() directly, avoiding dynamic_instantiate() calls on
+    // other components' menu trees (which can crash if those components aren't
+    // thread-safe, e.g. ESLyric with multi-threaded rendering).
+    bool cache_valid = false;
+    bool is_context_menu = false;  // true = context menu, false = main menu
+    bool is_dynamic = false;       // true = dynamic sub-command
+    service_ptr_t<mainmenu_commands> cached_service;
+    uint32_t cached_command_index = 0;
+    pfc::string8 cached_dynamic_subpath;   // For dynamic commands: full target path to match
+    pfc::string8 cached_dynamic_basepath;  // For dynamic commands: parent group path prefix
 };
 
-// Query the state of a foobar2000 menu command without executing it
+// Query the state of a foobar2000 menu command without executing it.
+// On first call for a given path, does full enumeration and caches the result.
+// On subsequent calls with a cached CommandState, uses the fast path.
 CommandState get_fb2k_action_state_by_path(const char* path);
+void poll_fb2k_action_state(CommandState& state);
 
 // Get the effective background color for the current theme mode configuration
 // Can be called early before core is fully initialized
