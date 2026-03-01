@@ -17,7 +17,7 @@ public:
     }
     
     void get_category(pfc::string_base& out) const override {
-        out = "Panels";
+        out = "面板";
     }
     
     bool get_description(pfc::string_base& out) const override {
