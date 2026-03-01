@@ -2278,6 +2278,13 @@ CommandState get_fb2k_action_state_by_path(const char* path) {
 
                 result.checked = (flags & mainmenu_commands::flag_checked) != 0;
                 result.disabled = (flags & mainmenu_commands::flag_disabled) != 0;
+
+                // Cache the reference for fast polling
+                result.cache_valid = true;
+                result.is_context_menu = false;
+                result.is_dynamic = false;
+                result.cached_service = commands;
+                result.cached_command_index = command_index;
                 return result;
             }
 
@@ -2310,6 +2317,30 @@ CommandState get_fb2k_action_state_by_path(const char* path) {
                             result.found = true;
                             result.checked = (node_flags & mainmenu_commands::flag_checked) != 0;
                             result.disabled = (node_flags & mainmenu_commands::flag_disabled) != 0;
+
+                            // Cache for fast polling — store service + index + base path
+                            result.cache_valid = true;
+                            result.is_context_menu = false;
+                            result.is_dynamic = true;
+                            result.cached_service = commands;
+                            result.cached_command_index = command_index;
+                            // Store full target path and base path for dynamic tree search
+                            result.cached_dynamic_subpath = target_path;
+                            // Build base path from parts before the command name was added
+                            {
+                                pfc::string8 bp_str;
+                                bool first_bp = true;
+                                // parts has display_name as last element; skip it for base path
+                                auto it = parts.begin();
+                                auto end_it = parts.end();
+                                if (!parts.empty()) --end_it;  // exclude last (command name)
+                                for (; it != end_it; ++it) {
+                                    if (!first_bp) bp_str << "/";
+                                    bp_str << *it;
+                                    first_bp = false;
+                                }
+                                result.cached_dynamic_basepath = bp_str;
+                            }
                             return true;
                         }
                         return false;
@@ -2433,8 +2464,84 @@ CommandState get_fb2k_action_state_by_path(const char* path) {
     if (root && search_context_node(root, "")) {
         return result;
     }
-    
+
+    // Command not found — cache this result so we don't re-enumerate every poll
+    result.cache_valid = true;
     return result;
+}
+
+void poll_fb2k_action_state(CommandState& state) {
+    if (!state.cache_valid) return;
+    if (!state.found) return;  // Command not found on first lookup; skip re-enumeration
+
+    if (state.is_context_menu) {
+        // Context menu commands can't be cheaply re-polled without
+        // re-creating the context menu tree, so just leave state as-is.
+        // The full lookup will refresh on next settings change.
+        return;
+    }
+
+    if (!state.is_dynamic) {
+        // Static main menu command — direct get_display() call, no enumeration
+        pfc::string8 display_text;
+        t_uint32 flags = 0;
+        state.cached_service->get_display(state.cached_command_index, display_text, flags);
+        state.checked = (flags & mainmenu_commands::flag_checked) != 0;
+        state.disabled = (flags & mainmenu_commands::flag_disabled) != 0;
+        return;
+    }
+
+    // Dynamic command — must call dynamic_instantiate on the specific cached
+    // service/index only (not enumerate all services)
+    service_ptr_t<mainmenu_commands_v2> commands_v2;
+    state.cached_service->service_query_t(commands_v2);
+    if (!commands_v2.is_valid()) return;
+
+    mainmenu_node::ptr node = commands_v2->dynamic_instantiate(state.cached_command_index);
+    if (!node.is_valid()) return;
+
+    pfc::string8 target_path = state.cached_dynamic_subpath;
+    pfc::string8 base_path = state.cached_dynamic_basepath;
+
+    // Search the dynamic tree starting from the cached base path
+    std::function<bool(const mainmenu_node::ptr&, pfc::string8)> search_node;
+    search_node = [&](const mainmenu_node::ptr& n, pfc::string8 current_path) -> bool {
+        if (!n.is_valid()) return false;
+
+        pfc::string8 display_name;
+        uint32_t node_flags;
+        n->get_display(display_name, node_flags);
+
+        switch (n->get_type()) {
+        case mainmenu_node::type_command: {
+            pfc::string8 node_path = current_path;
+            if (!node_path.is_empty()) node_path << "/";
+            node_path << display_name;
+
+            if (stricmp_utf8(node_path.c_str(), target_path.c_str()) == 0) {
+                state.checked = (node_flags & mainmenu_commands::flag_checked) != 0;
+                state.disabled = (node_flags & mainmenu_commands::flag_disabled) != 0;
+                return true;
+            }
+            return false;
+        }
+        case mainmenu_node::type_group: {
+            pfc::string8 group_path = current_path;
+            if (!display_name.is_empty()) {
+                if (!group_path.is_empty()) group_path << "/";
+                group_path << display_name;
+            }
+            for (size_t i = 0, count = n->get_children_count(); i < count; i++) {
+                if (search_node(n->get_child(i), group_path)) return true;
+            }
+            return false;
+        }
+        default:
+            return false;
+        }
+    };
+
+    search_node(node, base_path);
 }
 
 COLORREF get_nowbar_initial_bg_color() {
