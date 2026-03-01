@@ -199,6 +199,29 @@ private:
   ControlPanelCore* m_owner;
 };
 
+// Metadb change callback - updates rating/mood when track metadata changes
+// (e.g. foo_playcount updates its rating database and calls dispatch_refresh)
+class ControlPanelCore::MetadbChangeCallback : public metadb_io_callback_dynamic_impl_base {
+public:
+  MetadbChangeCallback(ControlPanelCore* owner) : m_owner(owner) {}
+
+  void on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) override {
+    // Check if the currently displayed track is among the changed items
+    metadb_handle_ptr track = m_owner->get_rating_track();
+    if (!track.is_valid()) return;
+
+    if (t_size index{}; p_items_sorted.bsearch_t(
+            pfc::compare_t<metadb_handle_ptr, metadb_handle_ptr>, track, index)) {
+      m_owner->update_rating_state();
+      m_owner->update_mood_state();
+      m_owner->invalidate();
+    }
+  }
+
+private:
+  ControlPanelCore* m_owner;
+};
+
 ControlPanelCore::ControlPanelCore() {
   // Register for playback callbacks
   PlaybackStateManager::get().register_callback(this);
@@ -206,6 +229,9 @@ ControlPanelCore::ControlPanelCore() {
 
   // Register for playlist focus changes (rating display)
   m_playlist_focus_callback = std::make_unique<PlaylistFocusCallback>(this);
+
+  // Register for metadb changes (rating/mood updates from foo_playcount etc.)
+  m_metadb_change_callback = std::make_unique<MetadbChangeCallback>(this);
 
   // Register for theme change notifications
   register_instance(this);
@@ -220,7 +246,8 @@ ControlPanelCore::ControlPanelCore() {
 }
 
 ControlPanelCore::~ControlPanelCore() {
-  // Destroy playlist callback before services are gone
+  // Destroy callbacks before services are gone
+  m_metadb_change_callback.reset();
   m_playlist_focus_callback.reset();
 
   // Stop command state polling timer
