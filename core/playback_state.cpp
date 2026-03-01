@@ -141,11 +141,15 @@ void PlaybackStateManager::on_playback_pause(bool p_state) {
 }
 
 void PlaybackStateManager::on_playback_time(double p_time) {
-    m_state.playback_time = p_time;
-    notify_time_changed(p_time);
-
-    // Check for playback preview skip
-    check_preview_skip(p_time);
+    // on_playback_time fires on the audio decoder thread.
+    // Marshal to the main thread to avoid data races with UI paint().
+    fb2k::inMainThread([p_time]() {
+        if (!is_available()) return;
+        auto& mgr = get();
+        mgr.m_state.playback_time = p_time;
+        mgr.notify_time_changed(p_time);
+        mgr.check_preview_skip(p_time);
+    });
 }
 
 void PlaybackStateManager::on_volume_change(float p_new_val) {
