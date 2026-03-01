@@ -2212,7 +2212,7 @@ bool execute_fb2k_action_by_path(const char* path) {
 
 // Query the state of a foobar2000 menu command without executing it
 // Returns checked/disabled flags for toggle-type commands
-CommandState get_fb2k_action_state_by_path(const char* path) {
+CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_menu) {
     CommandState result;
     if (!path || !*path) return result;
 
@@ -2288,8 +2288,31 @@ CommandState get_fb2k_action_state_by_path(const char* path) {
                 return result;
             }
 
-            // For dynamic commands, check sub-items
+            // For dynamic commands, check sub-items — but only if the parent
+            // path could be a prefix of the target. This avoids calling
+            // dynamic_instantiate() on unrelated components (e.g. ESLyric),
+            // which can crash if the component isn't thread-safe.
             if (commands_v2.is_valid() && commands_v2->is_command_dynamic(command_index)) {
+                // Build parent path (groups above this command, excluding command name)
+                pfc::string8 parent_prefix;
+                {
+                    bool first_pp = true;
+                    for (const auto& p : name_parts) {
+                        if (&p != &name_parts.back()) {
+                            if (!first_pp) parent_prefix << "/";
+                            parent_prefix << p;
+                            first_pp = false;
+                        }
+                    }
+                }
+                // Skip if target can't be under this parent
+                if (!parent_prefix.is_empty()) {
+                    bool is_prefix = (target_path.length() > parent_prefix.length() &&
+                        _strnicmp(target_path.c_str(), parent_prefix.c_str(), parent_prefix.length()) == 0 &&
+                        target_path.c_str()[parent_prefix.length()] == '/');
+                    if (!is_prefix) continue;
+                }
+
                 mainmenu_node::ptr node = commands_v2->dynamic_instantiate(command_index);
 
                 // Recursive lambda to search dynamic nodes
@@ -2376,11 +2399,19 @@ CommandState get_fb2k_action_state_by_path(const char* path) {
         }
     }
 
-    // Main menu command not found - try context menu commands
+    // Main menu command not found - try context menu commands.
+    // Skip during polling because init_context() builds the full context menu
+    // tree for all components, which can crash components that aren't
+    // thread-safe (e.g. ESLyric with multi-threaded rendering).
+    if (skip_context_menu) {
+        result.cache_valid = true;
+        return result;
+    }
+
     // Get selected tracks from the active playlist
     auto pm = playlist_manager::get();
     metadb_handle_list tracks;
-    
+
     t_size active_playlist = pm->get_active_playlist();
     if (active_playlist != pfc_infinite) {
         bit_array_bittable selection(pm->playlist_get_item_count(active_playlist));
