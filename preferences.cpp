@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "preferences.h"
 #include "core/control_panel_core.h"
 #include <uxtheme.h>
@@ -350,7 +350,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_artist_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -366,7 +366,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_track_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -382,7 +382,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_time_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -586,7 +586,7 @@ static cfg_string cfg_cbutton_profiles(
 );
 static cfg_string cfg_cbutton_current_profile(
     GUID{0xABCDEF71, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF7}},
-    "Default"  // Default profile name
+    reinterpret_cast<const char*>(u8"默认")  // Default profile name
 );
 
 //=============================================================================
@@ -687,16 +687,18 @@ static void create_default_config_file() {
     // Write UTF-8 BOM for proper encoding detection
     file.write("\xEF\xBB\xBF", 3);
     
-    file << "# Now Bar Custom Buttons Configuration\n";
-    file << "# Buttons 1-6: Visible on panel + keyboard shortcuts\n";
-    file << "# Buttons 7-12: Hidden (keyboard shortcuts only)\n";
+    file << "# 播放控制面板自定义按钮配置\n";
+    file << "# 按钮 1–6：在面板中显示，并支持键盘快捷键\n";
+    file << "# 按钮 7–12：隐藏按钮（仅支持键盘快捷键）\n";
     file << "#\n";
-    file << "# Action values: none, url, executable, foobar2k, open_folder\n";
-    file << "# Path: URL for 'url', executable path for 'executable',\n";
-    file << "#       menu path like 'Library/Search' for 'foobar2k',\n";
-    file << "#       or leave empty for 'open_folder' (opens the playing track's folder)\n";
+    file << "# Action 可用值：none、url、executable、foobar2k、open_folder\n";
+    file << "# Path:\n";
+    file << "#    - 当 action 为 url 时：填写 URL\n";
+    file << "#    - 当 action 为 executable 时：填写可执行文件路径\n";
+    file << "#    - 当 action 为 foobar2k 时：填写菜单路径，如 '媒体库/搜索'\n";
+    file << "#    - 当 action 为 open_folder 时：留空（打开当前选中项所在文件夹）\n";
     file << "#\n";
-    file << "# Title formatting is supported in URLs and paths (e.g., %artist%, %title%)\n";
+    file << "# URL 与路径中支持标题格式（Title Formatting），例如：%artist%、%title%\n";
     file << "\n";
     
     // Buttons 1-6 (visible)
@@ -717,7 +719,7 @@ static void create_default_config_file() {
         file << "[button:" << i << "]\n";
         file << "action = none\n";
         file << "path = \n";
-        file << "label = Custom Button " << i << "\n";
+        file << "label = 自定义按钮 " << i << "\n";
         file << "\n";
     }
 
@@ -732,7 +734,7 @@ static void load_config_file() {
     for (int i = 0; i < 12; i++) {
         g_config_buttons[i] = ConfigFileButtonConfig();
         pfc::string8 label;
-        label << "Custom Button " << (i + 1);
+        label << "自定义按钮 " << (i + 1);
         g_config_buttons[i].label = label;
     }
     
@@ -834,16 +836,18 @@ static void save_config_file() {
     // Write UTF-8 BOM for proper encoding detection
     file.write("\xEF\xBB\xBF", 3);
     
-    file << "# Now Bar Custom Buttons Configuration\n";
-    file << "# Buttons 1-6: Visible on panel + keyboard shortcuts\n";
-    file << "# Buttons 7-12: Hidden (keyboard shortcuts only)\n";
+    file << "# 播放控制面板自定义按钮配置\n";
+    file << "# 按钮 1–6：在面板中显示，并支持键盘快捷键\n";
+    file << "# 按钮 7–12：隐藏按钮（仅支持键盘快捷键）\n";
     file << "#\n";
-    file << "# Action values: none, url, executable, foobar2k, open_folder\n";
-    file << "# Path: URL for 'url', executable path for 'executable',\n";
-    file << "#       menu path like 'Library/Search' for 'foobar2k',\n";
-    file << "#       or leave empty for 'open_folder' (opens the playing track's folder)\n";
+    file << "# Action 可用值：none、url、executable、foobar2k、open_folder\n";
+    file << "# Path:\n";
+    file << "#    - 当 action 为 url 时：填写 URL\n";
+    file << "#    - 当 action 为 executable 时：填写可执行文件路径\n";
+    file << "#    - 当 action 为 foobar2k 时：填写菜单路径，如 '媒体库/搜索'\n";
+    file << "#    - 当 action 为 open_folder 时：留空（打开当前选中项所在文件夹）\n";
     file << "#\n";
-    file << "# Title formatting is supported in URLs and paths (e.g., %artist%, %title%)\n";
+    file << "# URL 与路径中支持标题格式（Title Formatting），例如：%artist%、%title%\n";
     file << "\n";
     
     // Buttons 1-6 (visible) - read from preferences (cfg_* variables)
@@ -1164,7 +1168,7 @@ static std::vector<CButtonProfile> get_all_profiles() {
     if (data.is_empty()) {
         // Create default profile with current settings
         CButtonProfile def;
-        def.name = "Default";
+        def.name = reinterpret_cast<const char*>(u8"默认");
         for (int i = 0; i < 6; i++) {
             def.buttons[i].enabled = get_nowbar_cbutton_enabled(i);
             def.buttons[i].action = get_nowbar_cbutton_action(i);
@@ -1206,7 +1210,7 @@ static std::vector<CButtonProfile> get_all_profiles() {
     
     if (profiles.empty()) {
         CButtonProfile def;
-        def.name = "Default";
+        def.name = reinterpret_cast<const char*>(u8"默认");
         profiles.push_back(def);
     }
     
@@ -1303,8 +1307,8 @@ static bool show_input_dialog(HWND hwndParent, const wchar_t* title, const wchar
 
     // Calculate required buffer size for the dialog template to avoid overflow.
     // Each string is stored as wchar_t (2 bytes per character) including null terminator.
-    const wchar_t* ok_text = L"OK";
-    const wchar_t* cancel_text = L"Cancel";
+    const wchar_t* ok_text = L"确定";
+    const wchar_t* cancel_text = L"取消";
     const wchar_t* font = L"MS Shell Dlg";
     size_t title_len = wcslen(title) + 1;
     size_t font_len = wcslen(font) + 1;
@@ -1956,7 +1960,7 @@ pfc::string8 get_nowbar_cbutton_label(int button_index) {
     }
     // Return default "Button #N" if label is empty
     if (label.is_empty()) {
-        label << "Button #" << (button_index + 1);
+        label << "按钮 #" << (button_index + 1);
     }
     return label;
 }
@@ -1976,7 +1980,7 @@ pfc::string8 get_config_button_label(int button_index) {
     const auto& cfg = get_config_button(button_index);
     if (cfg.label.is_empty()) {
         pfc::string8 default_label;
-        default_label << "Custom Button " << (button_index + 1);
+        default_label << "自定义按钮 " << (button_index + 1);
         return default_label;
     }
     return cfg.label;
@@ -2672,7 +2676,7 @@ LOGFONT get_nowbar_default_font(bool is_artist) {
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     lf.lfQuality = CLEARTYPE_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
 
     return lf;
 }
@@ -2691,7 +2695,7 @@ LOGFONT get_nowbar_default_time_font() {
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     lf.lfQuality = CLEARTYPE_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
 
     return lf;
 }
@@ -2740,22 +2744,22 @@ void nowbar_preferences::init_tab_control() {
     TCITEM tie = {};
     tie.mask = TCIF_TEXT;
 
-    tie.pszText = (LPWSTR)L"General";
+    tie.pszText = (LPWSTR)L"常规";
     TabCtrl_InsertItem(hTab, 0, &tie);
 
-    tie.pszText = (LPWSTR)L"Appearance";
+    tie.pszText = (LPWSTR)L"外观";
     TabCtrl_InsertItem(hTab, 1, &tie);
 
-    tie.pszText = (LPWSTR)L"Icons";
+    tie.pszText = (LPWSTR)L"图标";
     TabCtrl_InsertItem(hTab, 2, &tie);
 
-    tie.pszText = (LPWSTR)L"Custom Button";
+    tie.pszText = (LPWSTR)L"自定义按钮";
     TabCtrl_InsertItem(hTab, 3, &tie);
 
-    tie.pszText = (LPWSTR)L"Fonts && Colors";
+    tie.pszText = (LPWSTR)L"字体和颜色";
     TabCtrl_InsertItem(hTab, 4, &tie);
 
-    tie.pszText = (LPWSTR)L"About";
+    tie.pszText = (LPWSTR)L"关于";
     TabCtrl_InsertItem(hTab, 5, &tie);
 }
 
@@ -3161,16 +3165,16 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         
         // Initialize theme mode combobox
         HWND hThemeCombo = GetDlgItem(hwnd, IDC_THEME_MODE_COMBO);
-        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Auto");
-        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Dark");
-        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Light");
-        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Custom");
+        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"自动");
+        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"深色");
+        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"浅色");
+        SendMessage(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"自定义");
         SendMessage(hThemeCombo, CB_SETCURSEL, cfg_nowbar_theme_mode, 0);
 
         // Initialize cover artwork visibility combobox
         HWND hCoverArtworkCombo = GetDlgItem(hwnd, IDC_COVER_ARTWORK_COMBO);
-        SendMessage(hCoverArtworkCombo, CB_ADDSTRING, 0, (LPARAM)L"Yes");
-        SendMessage(hCoverArtworkCombo, CB_ADDSTRING, 0, (LPARAM)L"No");
+        SendMessage(hCoverArtworkCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hCoverArtworkCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hCoverArtworkCombo, CB_SETCURSEL, cfg_nowbar_cover_artwork_visible ? 0 : 1, 0);
 
         // Initialize online artwork checkbox
@@ -3178,27 +3182,27 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         // Initialize smooth animations combobox (moved from end of list, now after Theme Mode)
         HWND hSmoothAnimCombo = GetDlgItem(hwnd, IDC_SMOOTH_ANIMATIONS_COMBO);
-        SendMessage(hSmoothAnimCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
-        SendMessage(hSmoothAnimCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
+        SendMessage(hSmoothAnimCombo, CB_ADDSTRING, 0, (LPARAM)L"启用");
+        SendMessage(hSmoothAnimCombo, CB_ADDSTRING, 0, (LPARAM)L"禁用");
         SendMessage(hSmoothAnimCombo, CB_SETCURSEL, cfg_nowbar_smooth_animations ? 0 : 1, 0);
         
         // Initialize background style combobox
         HWND hBgStyleCombo = GetDlgItem(hwnd, IDC_BACKGROUND_STYLE_COMBO);
-        SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Solid");
-        SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Artwork Colors");
-        SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Blurred Artwork");
+        SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"纯色");
+        SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"专辑封面配色");
+        SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"模糊专辑封面");
         SendMessage(hBgStyleCombo, CB_SETCURSEL, cfg_nowbar_background_style, 0);
         
         // Initialize bar style combobox
         HWND hBarStyleCombo = GetDlgItem(hwnd, IDC_BAR_STYLE_COMBO);
-        SendMessage(hBarStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Pill-shaped");
-        SendMessage(hBarStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Rectangular");
+        SendMessage(hBarStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"胶囊形");
+        SendMessage(hBarStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"矩形");
         SendMessage(hBarStyleCombo, CB_SETCURSEL, cfg_nowbar_bar_style, 0);
 
         // Initialize seekbar length combobox
         HWND hSeekbarLengthCombo = GetDlgItem(hwnd, IDC_SEEKBAR_LENGTH_COMBO);
-        SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"Fixed");
-        SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"Scaling");
+        SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"固定");
+        SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"缩放");
         SendMessage(hSeekbarLengthCombo, CB_SETCURSEL, cfg_nowbar_seekbar_length, 0);
 
         // Initialize seekbar position slider (-100 to +100, mapped to 0-200)
@@ -3217,8 +3221,8 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         // Initialize cover margin combobox
         HWND hCoverMarginCombo = GetDlgItem(hwnd, IDC_COVER_MARGIN_COMBO);
-        SendMessage(hCoverMarginCombo, CB_ADDSTRING, 0, (LPARAM)L"Yes");
-        SendMessage(hCoverMarginCombo, CB_ADDSTRING, 0, (LPARAM)L"No");
+        SendMessage(hCoverMarginCombo, CB_ADDSTRING, 0, (LPARAM)L"启用");
+        SendMessage(hCoverMarginCombo, CB_ADDSTRING, 0, (LPARAM)L"禁用");
         SendMessage(hCoverMarginCombo, CB_SETCURSEL, cfg_nowbar_cover_margin ? 0 : 1, 0);
 
         // Update Cover Margin state based on Cover Artwork visibility
@@ -3226,86 +3230,86 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         // Initialize mood icon visibility combobox
         HWND hMoodIconCombo = GetDlgItem(hwnd, IDC_MOOD_ICON_COMBO);
-        SendMessage(hMoodIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hMoodIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hMoodIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hMoodIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hMoodIconCombo, CB_SETCURSEL, cfg_nowbar_mood_icon_visible ? 0 : 1, 0);
 
         // Initialize shuffle icon visibility combobox
         HWND hShuffleIconCombo = GetDlgItem(hwnd, IDC_SHUFFLE_ICON_COMBO);
-        SendMessage(hShuffleIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hShuffleIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hShuffleIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hShuffleIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hShuffleIconCombo, CB_SETCURSEL, cfg_nowbar_shuffle_icon_visible ? 0 : 1, 0);
 
         // Initialize repeat icon visibility combobox
         HWND hRepeatIconCombo = GetDlgItem(hwnd, IDC_REPEAT_ICON_COMBO);
-        SendMessage(hRepeatIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hRepeatIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hRepeatIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hRepeatIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hRepeatIconCombo, CB_SETCURSEL, cfg_nowbar_repeat_icon_visible ? 0 : 1, 0);
 
         // Initialize rating stars visibility combobox
         HWND hRatingStarsCombo = GetDlgItem(hwnd, IDC_RATING_STARS_COMBO);
-        SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hRatingStarsCombo, CB_SETCURSEL, cfg_nowbar_rating_visible ? 0 : 1, 0);
 
         // Initialize stop icon visibility combobox
         HWND hStopIconCombo = GetDlgItem(hwnd, IDC_STOP_ICON_COMBO);
-        SendMessage(hStopIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hStopIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hStopIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hStopIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hStopIconCombo, CB_SETCURSEL, cfg_nowbar_stop_icon_visible ? 0 : 1, 0);
 
         // Initialize stop after current icon visibility combobox
         HWND hStopAfterCurrentCombo = GetDlgItem(hwnd, IDC_STOP_AFTER_CURRENT_COMBO);
-        SendMessage(hStopAfterCurrentCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hStopAfterCurrentCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hStopAfterCurrentCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hStopAfterCurrentCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hStopAfterCurrentCombo, CB_SETCURSEL, cfg_nowbar_stop_after_current_icon_visible ? 0 : 1, 0);
 
         // Initialize super icon visibility combobox
         HWND hSuperIconCombo = GetDlgItem(hwnd, IDC_SUPER_ICON_COMBO);
-        SendMessage(hSuperIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hSuperIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hSuperIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hSuperIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hSuperIconCombo, CB_SETCURSEL, cfg_nowbar_super_icon_visible ? 0 : 1, 0);
 
         // Initialize miniplayer icon visibility combobox
         HWND hMiniplayerIconCombo = GetDlgItem(hwnd, IDC_MINIPLAYER_ICON_COMBO);
-        SendMessage(hMiniplayerIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hMiniplayerIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hMiniplayerIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hMiniplayerIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hMiniplayerIconCombo, CB_SETCURSEL, cfg_nowbar_miniplayer_icon_visible ? 0 : 1, 0);
 
         // Initialize hover circles combobox
         HWND hHoverCirclesCombo = GetDlgItem(hwnd, IDC_HOVER_CIRCLES_COMBO);
-        SendMessage(hHoverCirclesCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hHoverCirclesCombo, CB_ADDSTRING, 0, (LPARAM)L"Hide");
+        SendMessage(hHoverCirclesCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hHoverCirclesCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hHoverCirclesCombo, CB_SETCURSEL, cfg_nowbar_hover_circles ? 0 : 1, 0);
 
         // Initialize alternate icons combobox
         HWND hAlternateIconsCombo = GetDlgItem(hwnd, IDC_ALTERNATE_ICONS_COMBO);
-        SendMessage(hAlternateIconsCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
-        SendMessage(hAlternateIconsCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
+        SendMessage(hAlternateIconsCombo, CB_ADDSTRING, 0, (LPARAM)L"启用");
+        SendMessage(hAlternateIconsCombo, CB_ADDSTRING, 0, (LPARAM)L"禁用");
         SendMessage(hAlternateIconsCombo, CB_SETCURSEL, cfg_nowbar_alternate_icons ? 0 : 1, 0);
 
         // Initialize play icon style combobox
         HWND hPlayIconStyleCombo = GetDlgItem(hwnd, IDC_PLAY_ICON_STYLE_COMBO);
-        SendMessage(hPlayIconStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Normal");
-        SendMessage(hPlayIconStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Inverted");
+        SendMessage(hPlayIconStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"正常");
+        SendMessage(hPlayIconStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"反相");
         SendMessage(hPlayIconStyleCombo, CB_SETCURSEL, cfg_nowbar_play_icon_style, 0);
 
         // Initialize auto-hide C-buttons combobox
         HWND hAutohideCbuttonsCombo = GetDlgItem(hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO);
-        SendMessage(hAutohideCbuttonsCombo, CB_ADDSTRING, 0, (LPARAM)L"Yes");
-        SendMessage(hAutohideCbuttonsCombo, CB_ADDSTRING, 0, (LPARAM)L"No");
+        SendMessage(hAutohideCbuttonsCombo, CB_ADDSTRING, 0, (LPARAM)L"是");
+        SendMessage(hAutohideCbuttonsCombo, CB_ADDSTRING, 0, (LPARAM)L"否");
         SendMessage(hAutohideCbuttonsCombo, CB_SETCURSEL, cfg_nowbar_cbutton_autohide ? 0 : 1, 0);
 
         // Initialize volume icon visibility combobox
         HWND hVolumeIconCombo = GetDlgItem(hwnd, IDC_VOLUME_ICON_COMBO);
-        SendMessage(hVolumeIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hVolumeIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hVolumeIconCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hVolumeIconCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hVolumeIconCombo, CB_SETCURSEL, cfg_nowbar_volume_icon_visible ? 0 : 1, 0);
 
         // Initialize volume bar visibility combobox
         HWND hVolumeBarCombo = GetDlgItem(hwnd, IDC_VOLUME_BAR_COMBO);
-        SendMessage(hVolumeBarCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
-        SendMessage(hVolumeBarCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+        SendMessage(hVolumeBarCombo, CB_ADDSTRING, 0, (LPARAM)L"显示");
+        SendMessage(hVolumeBarCombo, CB_ADDSTRING, 0, (LPARAM)L"隐藏");
         SendMessage(hVolumeBarCombo, CB_SETCURSEL, cfg_nowbar_volume_bar_visible ? 0 : 1, 0);
 
         // Initialize mood tag combobox
@@ -3319,15 +3323,15 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         // Initialize skip low rating combobox
         HWND hSkipLowRatingCombo = GetDlgItem(hwnd, IDC_SKIP_LOW_RATING_COMBO);
-        SendMessage(hSkipLowRatingCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
-        SendMessage(hSkipLowRatingCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
+        SendMessage(hSkipLowRatingCombo, CB_ADDSTRING, 0, (LPARAM)L"禁用");
+        SendMessage(hSkipLowRatingCombo, CB_ADDSTRING, 0, (LPARAM)L"启用");
         SendMessage(hSkipLowRatingCombo, CB_SETCURSEL, cfg_nowbar_skip_low_rating_enabled ? 1 : 0, 0);
 
         // Initialize skip rating threshold combobox
         HWND hSkipRatingThresholdCombo = GetDlgItem(hwnd, IDC_SKIP_RATING_THRESHOLD_COMBO);
-        SendMessage(hSkipRatingThresholdCombo, CB_ADDSTRING, 0, (LPARAM)L"1 (skip if rating = 1)");
-        SendMessage(hSkipRatingThresholdCombo, CB_ADDSTRING, 0, (LPARAM)L"2 (skip if rating <= 2)");
-        SendMessage(hSkipRatingThresholdCombo, CB_ADDSTRING, 0, (LPARAM)L"3 (skip if rating <= 3)");
+        SendMessage(hSkipRatingThresholdCombo, CB_ADDSTRING, 0, (LPARAM)L"1（等级 = 1 时跳过）");
+        SendMessage(hSkipRatingThresholdCombo, CB_ADDSTRING, 0, (LPARAM)L"2（等级 ≤ 2 时跳过）");
+        SendMessage(hSkipRatingThresholdCombo, CB_ADDSTRING, 0, (LPARAM)L"3（等级 ≤ 3 时跳过）");
         SendMessage(hSkipRatingThresholdCombo, CB_SETCURSEL, cfg_nowbar_skip_low_rating_threshold - 1, 0);
         // Enable/disable threshold combo based on skip low rating setting
         EnableWindow(hSkipRatingThresholdCombo, cfg_nowbar_skip_low_rating_enabled != 0);
@@ -3345,21 +3349,21 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
             // Populate spectrum width combo (Thin/Normal/Wide)
             HWND hSpecWidth = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO);
-            SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"Thin");
-            SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"Normal");
-            SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide");
+            SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"细");
+            SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"正常");
+            SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"宽");
             SendMessage(hSpecWidth, CB_SETCURSEL, cfg_nowbar_spectrum_width, 0);
 
             // Populate spectrum shape combo (Pill-shaped/Rectangle)
             HWND hSpecShape = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_SHAPE_COMBO);
-            SendMessage(hSpecShape, CB_ADDSTRING, 0, (LPARAM)L"Pill-shaped");
-            SendMessage(hSpecShape, CB_ADDSTRING, 0, (LPARAM)L"Rectangle");
+            SendMessage(hSpecShape, CB_ADDSTRING, 0, (LPARAM)L"胶囊形");
+            SendMessage(hSpecShape, CB_ADDSTRING, 0, (LPARAM)L"矩形");
             SendMessage(hSpecShape, CB_SETCURSEL, cfg_nowbar_spectrum_shape, 0);
 
             // Populate spectrum style combo (Mono/Stereo)
             HWND hSpecStyle = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO);
-            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Mono");
-            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Curve");
+            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"单声道");
+            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"曲线");
             SendMessage(hSpecStyle, CB_SETCURSEL, cfg_nowbar_spectrum_style, 0);
 
             // Initialize spectrum opacity slider (0-100)
@@ -3375,17 +3379,17 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             // Initialize color mode combo
             {
                 HWND hColorMode = GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO);
-                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Solid");
-                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Gradient");
-                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Frequency");
+                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"纯色");
+                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"渐变");
+                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"频率");
                 SendMessage(hColorMode, CB_SETCURSEL, cfg_nowbar_spectrum_gradient_mode, 0);
             }
 
             // Populate waveform width combo (Thin/Normal/Wide)
             HWND hWaveWidth = GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO);
-            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Thin");
-            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Normal");
-            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide");
+            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"细");
+            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"正常");
+            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"宽");
             SendMessage(hWaveWidth, CB_SETCURSEL, cfg_nowbar_waveform_width, 0);
 
             update_vis_section_state(hwnd);
@@ -3429,11 +3433,11 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         for (int id : cbutton_action_combos) {
             HWND hCombo = GetDlgItem(hwnd, id);
-            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"None");
-            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Open URL");
-            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Run Executable");
-            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Foobar2k Action");
-            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Open Folder");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"无");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"打开链接");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"运行程序");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Foobar2k 操作");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"打开所在文件夹");
         }
         
         // Set checkbox and combobox states from config
@@ -3508,7 +3512,9 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             swprintf_s(about_name, L"foo_nowbar v%hs", FOO_NOWBAR_VERSION_STRING);
             SetDlgItemTextW(hwnd, IDC_ABOUT_NAME, about_name);
             wchar_t about_desc[256];
-            swprintf_s(about_desc, L"%hs", FOO_NOWBAR_DESCRIPTION);
+            // swprintf_s(about_desc, L"%hs", FOO_NOWBAR_DESCRIPTION);
+            // 正确转换 UTF-8 -> UTF-16
+            MultiByteToWideChar(CP_UTF8, 0, FOO_NOWBAR_DESCRIPTION, -1, about_desc, 256);
             SetDlgItemTextW(hwnd, IDC_ABOUT_DESCRIPTION, about_desc);
         }
 
@@ -3741,13 +3747,13 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 
                 // Create and show popup menu
                 HMENU hMenu = CreatePopupMenu();
-                AppendMenu(hMenu, MF_STRING, 1, L"New");
-                AppendMenu(hMenu, MF_STRING, 2, L"Rename");
+                AppendMenu(hMenu, MF_STRING, 1, L"新建");
+                AppendMenu(hMenu, MF_STRING, 2, L"重命名");
                 // Gray out Delete if only one profile exists
-                AppendMenu(hMenu, (profiles.size() <= 1) ? (MF_STRING | MF_GRAYED) : MF_STRING, 3, L"Delete");
+                AppendMenu(hMenu, (profiles.size() <= 1) ? (MF_STRING | MF_GRAYED) : MF_STRING, 3, L"删除");
                 AppendMenu(hMenu, MF_SEPARATOR, 0, nullptr);
-                AppendMenu(hMenu, MF_STRING, 4, L"Export...");
-                AppendMenu(hMenu, MF_STRING, 5, L"Import...");
+                AppendMenu(hMenu, MF_STRING, 4, L"导出...");
+                AppendMenu(hMenu, MF_STRING, 5, L"导入...");
                 
                 // Get button position for menu placement
                 RECT rc;
@@ -3759,7 +3765,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 switch (cmd) {
                 case 1: { // New - show input dialog for profile name
                     // Generate a suggested unique name
-                    pfc::string8 base_name = "Profile ";
+                    pfc::string8 base_name = reinterpret_cast<const char*>(u8"配置 ");
                     int num = (int)profiles.size() + 1;
                     pfc::string8 suggested_name;
                     suggested_name << base_name << num;
@@ -3772,10 +3778,10 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     // Show input dialog
                     pfc::stringcvt::string_wide_from_utf8 suggested_wide(suggested_name.c_str());
                     pfc::string8 new_name;
-                    if (show_input_dialog(hwnd, L"New Profile", L"Enter profile name:", suggested_wide.get_ptr(), new_name)) {
+                    if (show_input_dialog(hwnd, L"新建配置", L"请输入配置名称：", suggested_wide.get_ptr(), new_name)) {
                         // Check if name already exists
                         if (find_profile(profiles, new_name.c_str())) {
-                            MessageBoxW(hwnd, L"A profile with this name already exists.", L"Error", MB_OK | MB_ICONWARNING);
+                            MessageBoxW(hwnd, L"已存在同名配置。", L"错误", MB_OK | MB_ICONWARNING);
                             break;
                         }
                         
@@ -3808,11 +3814,11 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     if (prof) {
                         pfc::stringcvt::string_wide_from_utf8 current_wide(current_name.c_str());
                         pfc::string8 new_name;
-                        if (show_input_dialog(hwnd, L"Rename Profile", L"Enter new profile name:", current_wide.get_ptr(), new_name)) {
+                        if (show_input_dialog(hwnd, L"重命名配置", L"请输入新的配置名称：", current_wide.get_ptr(), new_name)) {
                             // Check if name already exists (and is different from current)
                             if (stricmp_utf8(new_name.c_str(), current_name.c_str()) != 0 &&
                                 find_profile(profiles, new_name.c_str())) {
-                                MessageBoxW(hwnd, L"A profile with this name already exists.", L"Error", MB_OK | MB_ICONWARNING);
+                                MessageBoxW(hwnd, L"已存在同名配置。", L"错误", MB_OK | MB_ICONWARNING);
                             } else if (!new_name.is_empty()) {
                                 prof->name = new_name;
                                 save_all_profiles(profiles);
@@ -3844,11 +3850,11 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 case 3: { // Delete
                     // Show confirmation dialog
                     pfc::stringcvt::string_wide_from_utf8 current_wide(current_name.c_str());
-                    std::wstring confirm_msg = L"Are you sure you want to delete the profile \"";
+                    std::wstring confirm_msg = L"确定要删除该配置 “";
                     confirm_msg += current_wide.get_ptr();
-                    confirm_msg += L"\"?";
+                    confirm_msg += L"” 吗？";
                     
-                    if (MessageBoxW(hwnd, confirm_msg.c_str(), L"Delete Profile", MB_YESNO | MB_ICONQUESTION) != IDYES) {
+                    if (MessageBoxW(hwnd, confirm_msg.c_str(), L"删除配置", MB_YESNO | MB_ICONQUESTION) != IDYES) {
                         break;  // User cancelled
                     }
                     
@@ -3936,7 +3942,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                         OPENFILENAMEW ofn = {};
                         ofn.lStructSize = sizeof(ofn);
                         ofn.hwndOwner = hwnd;
-                        ofn.lpstrFilter = L"JSON Files (*.json)\0*.json\0All Files (*.*)\0*.*\0";
+                        ofn.lpstrFilter = L"JSON 文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0";
                         ofn.lpstrFile = filename;
                         ofn.nMaxFile = MAX_PATH;
                         ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
@@ -3944,9 +3950,9 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                         
                         if (GetSaveFileNameW(&ofn)) {
                             if (export_profile_to_file(*prof, filename)) {
-                                MessageBoxW(hwnd, L"Profile exported successfully.", L"Export", MB_OK | MB_ICONINFORMATION);
+                                MessageBoxW(hwnd, L"配置导出成功。", L"导出", MB_OK | MB_ICONINFORMATION);
                             } else {
-                                MessageBoxW(hwnd, L"Failed to export profile.", L"Error", MB_OK | MB_ICONERROR);
+                                MessageBoxW(hwnd, L"配置导出失败。", L"错误", MB_OK | MB_ICONERROR);
                             }
                         }
                     }
@@ -3957,7 +3963,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     OPENFILENAMEW ofn = {};
                     ofn.lStructSize = sizeof(ofn);
                     ofn.hwndOwner = hwnd;
-                    ofn.lpstrFilter = L"JSON Files (*.json)\0*.json\0All Files (*.*)\0*.*\0";
+                    ofn.lpstrFilter = L"JSON 文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0";
                     ofn.lpstrFile = filename;
                     ofn.nMaxFile = MAX_PATH;
                     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
@@ -4048,9 +4054,9 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                             update_all_cbutton_path_states(hwnd);
                             p_this->on_changed();
 
-                            MessageBoxW(hwnd, L"Profile imported successfully.", L"Import", MB_OK | MB_ICONINFORMATION);
+                            MessageBoxW(hwnd, L"配置导入成功。", L"导入", MB_OK | MB_ICONINFORMATION);
                         } else {
-                            MessageBoxW(hwnd, L"Failed to import profile. Invalid file format.", L"Error", MB_OK | MB_ICONERROR);
+                            MessageBoxW(hwnd, L"配置导入失败：文件格式无效。", L"错误", MB_OK | MB_ICONERROR);
                         }
                     }
                     break;
@@ -4114,7 +4120,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 OPENFILENAMEW ofn = {};
                 ofn.lStructSize = sizeof(ofn);
                 ofn.hwndOwner = hwnd;
-                ofn.lpstrFilter = L"Executable Files (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+                ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0";
                 ofn.lpstrFile = filename;
                 ofn.nMaxFile = MAX_PATH;
                 ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
@@ -4842,7 +4848,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_TRACK_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_TRACK_FONT_DISPLAY, "Microsoft YaHei, 15pt, Bold (Default)");
+        uSetDlgItemText(m_hwnd, IDC_TRACK_FONT_DISPLAY, "Microsoft YaHei UI, 15pt, Bold (Default)");
     }
     
     // Artist font
@@ -4851,7 +4857,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, "Microsoft YaHei, 13pt, Regular (Default)");
+        uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, "Microsoft YaHei UI, 13pt, Regular (Default)");
     }
 
     // Time font
@@ -4860,7 +4866,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, "Microsoft YaHei, 9pt, Regular (Default)");
+        uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, "Microsoft YaHei UI, 9pt, Regular (Default)");
     }
 }
 
@@ -4942,7 +4948,7 @@ pfc::string8 nowbar_preferences::format_font_name(const LOGFONT& lf) {
 //=============================================================================
 
 const char* nowbar_preferences_page::get_name() {
-    return "Now Bar";
+    return reinterpret_cast<const char*>(u8"播放控制面板");
 }
 
 GUID nowbar_preferences_page::get_guid() {

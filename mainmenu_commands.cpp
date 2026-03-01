@@ -194,7 +194,7 @@ static mainmenu_group_popup_factory g_nowbar_menu_group(
     guid_nowbar_menu_group,
     mainmenu_groups::file,
     mainmenu_commands::sort_priority_base + 1000,  // Low priority to appear near bottom
-    "Now Bar"
+    "播放控制面板"
 );
 
 // Main menu commands implementation
@@ -214,7 +214,7 @@ public:
     void get_name(t_uint32 p_index, pfc::string_base& p_out) override {
         if (p_index < 12) {
             p_out.reset();
-            p_out << "Custom Button " << (p_index + 1);
+            p_out << "自定义按钮 " << (p_index + 1);
         }
     }
     
@@ -239,23 +239,23 @@ public:
             if (is_enabled) {
                 switch (action) {
                     case 1:
-                        p_out << "Open URL: " << (path.is_empty() ? "(not configured)" : path.c_str());
+                        p_out << "打开链接：" << (path.is_empty() ? "（未配置）" : path.c_str());
                         break;
                     case 2:
-                        p_out << "Run program: " << (path.is_empty() ? "(not configured)" : path.c_str());
+                        p_out << "运行程序：" << (path.is_empty() ? "（未配置）" : path.c_str());
                         break;
                     case 3:
-                        p_out << "foobar2000 action: " << (path.is_empty() ? "(not configured)" : path.c_str());
+                        p_out << "foobar2000 操作：" << (path.is_empty() ? "（未配置）" : path.c_str());
                         break;
                     case 4:
-                        p_out << "Open folder of playing track";
+                        p_out << "打开当前选中项所在文件夹";
                         break;
                     default:
-                        p_out << "No action configured";
+                        p_out << "未配置任何操作";
                         break;
                 }
             } else {
-                p_out << "Button disabled";
+                p_out << "按钮已禁用";
             }
             return true;
         }
