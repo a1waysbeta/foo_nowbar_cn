@@ -118,6 +118,11 @@ public:
     // Force a full repaint on the next WM_PAINT (disables spectrum-only fast path for one frame)
     void force_full_repaint() { m_needs_full_repaint = true; }
 
+    // Returns the current background color as a COLORREF (for initial FillRect / dirty rect clearing)
+    COLORREF get_bg_colorref() const {
+        return RGB(m_bg_color.GetRed(), m_bg_color.GetGreen(), m_bg_color.GetBlue());
+    }
+
     // Spectrum-only repaint: redraws spectrum, thin progress bar, time display, and buttons
     void paint_spectrum_only(HDC hdc, const RECT& panel_rect);
     const RECT& get_spectrum_full_rect() const { return m_rect_spectrum_full; }
@@ -143,7 +148,9 @@ public:
     // Waveform-only repaint: redraws waveform bar, tooltip, and time display
     void paint_waveform_only(HDC hdc, const RECT& panel_rect);
     const RECT& get_waveform_rect() const { return m_rect_waveform; }
-    // Clears only the rects that paint_waveform_only will redraw
+    // Clears the rects that paint_waveform_only will redraw.
+    // Bottom margin is NOT cleared here — it's stable (always-tall waveform)
+    // and preserved from the last full paint.
     void clear_waveform_dirty_rects(HDC hdc, COLORREF bg) const {
         HBRUSH brush = CreateSolidBrush(bg);
         FillRect(hdc, &m_rect_waveform, brush);
@@ -430,6 +437,11 @@ private:
     pfc::string8 m_waveform_track_path;
     bool m_waveform_valid = false;
     bool m_waveform_is_stream = false;
+
+    // Waveform reveal animation
+    std::atomic<int> m_waveform_decode_count{0};   // Segments decoded so far (0-WAVEFORM_SEGMENTS)
+    float m_waveform_reveal_pos = 0.0f;            // Animated reveal cursor (0.0 - WAVEFORM_SEGMENTS)
+    bool m_waveform_reveal_active = false;          // Reveal animation in progress
 
     void draw_waveform_bar(Gdiplus::Graphics& g);
     void draw_waveform_tooltip(Gdiplus::Graphics& g);
