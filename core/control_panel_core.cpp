@@ -562,6 +562,7 @@ void ControlPanelCore::apply_theme() {
 void ControlPanelCore::on_settings_changed() {
   m_needs_full_repaint = true;
   m_spectrum_bg_cache_valid = false;
+  m_bg_cache_valid = false;
 
   // Apply theme based on current settings and playback state
   apply_theme();
@@ -1643,10 +1644,11 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       if (left_gap > 0) spectrum_left -= left_gap / 2;
       if (right_gap > 0) spectrum_right += right_gap / 2;
     }
-    int spectrum_top = m_rect_play.top;
-    // Clamp spectrum top so it doesn't overlap the track info text
-    if (spectrum_top < m_rect_track_info.bottom)
-      spectrum_top = m_rect_track_info.bottom;
+    // Spectrum area extends from the panel midpoint to the bottom so
+    // that peak-amplitude bars rise to about halfway up the panel,
+    // naturally appearing behind the control buttons.
+    // Track info and buttons are drawn on top of the spectrum overlay.
+    int spectrum_top = (rect.top + rect.bottom) / 2;
     m_rect_spectrum_full = {spectrum_left, spectrum_top, spectrum_right, rect.bottom};
 
     // Time display in top-right corner, just below thin progress bar
@@ -1659,15 +1661,8 @@ void ControlPanelCore::update_layout(const RECT &rect) {
                    m_rect_thin_progress.bottom + static_cast<int>(2 * m_dpi_scale) + time_height};
 
   } else if (vis_mode == 2) {
-    // Mode 2 (Waveform): bottom-aligned, taller when waveform data is active
-    bool waveform_active;
-    {
-      std::lock_guard<std::mutex> lock(m_waveform_mutex);
-      waveform_active = m_waveform_valid && !m_waveform_peaks.empty() && !m_waveform_is_stream;
-    }
-    int waveform_height = waveform_active
-        ? static_cast<int>(m_metrics.seekbar_height * m_size_scale * 4) - 1
-        : static_cast<int>(m_metrics.seekbar_height * m_size_scale);
+    // Always use tall height — reveal animation fills bars progressively
+    int waveform_height = static_cast<int>(m_metrics.seekbar_height * m_size_scale * 4) - 1;
     int bottom_margin = static_cast<int>(4 * m_dpi_scale);
     int waveform_top = rect.bottom - bottom_margin - waveform_height;
     m_rect_waveform = {seekbar_left, waveform_top, seekbar_right, rect.bottom - bottom_margin};
@@ -1906,6 +1901,15 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // This is drawn BEFORE buttons so spectrum appears behind them
   draw_full_spectrum(hdc);
 
+  // Redraw track info on top of the spectrum — the background cache restore
+  // above wipes it because the spectrum area extends above the track info.
+  {
+    Gdiplus::Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+    g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    draw_track_info(g);
+  }
+
   // Restore background behind core button rects that extend above the spectrum
   // area.  At small panel heights the track info text clamp pushes
   // m_rect_spectrum_full.top below the button tops, so the cache_rect restore
@@ -2085,9 +2089,9 @@ void ControlPanelCore::paint_waveform_only(HDC hdc, const RECT& panel_rect) {
     g.ResetClip();
     draw_volume(g);
 
-    // Kill orphaned animation timer — waveform mode doesn't use continuous animation,
-    // but a timer may still be running from a previous spectrum mode session.
-    if (m_animation_timer_active) {
+    // Kill orphaned animation timer from a previous spectrum mode session,
+    // but keep it alive if the waveform reveal animation is still in progress.
+    if (m_animation_timer_active && !m_waveform_animating) {
         KillTimer(m_hwnd, ANIMATION_TIMER_ID);
         m_animation_timer_active = false;
         m_animation_requested = false;
@@ -2215,8 +2219,9 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
       draw_current_bg(target_g, true);
     }
 
-    // 2. Draw cached previous background (opaque)
-    g.DrawImage(m_prev_background.get(), r.X, r.Y);
+    // 2. Draw cached previous background (opaque) — explicit dimensions
+    // to avoid DPI metadata mismatch leaving gaps at panel edges
+    g.DrawImage(m_prev_background.get(), r.X, r.Y, width, height);
     
     // 3. Draw cached target background (with alpha) - fast blit
     Gdiplus::ColorMatrix cm = {
@@ -2241,8 +2246,9 @@ void ControlPanelCore::draw_background(Gdiplus::Graphics &g, const RECT &rect) {
     if (m_bg_cache_valid && m_prev_background && 
         m_prev_background_size.cx == width && 
         m_prev_background_size.cy == height) {
-      // Draw from cache - much faster than regenerating
-      g.DrawImage(m_prev_background.get(), r.X, r.Y);
+      // Draw from cache - much faster than regenerating.
+      // Explicit dimensions prevent DPI metadata mismatch gaps at panel edges.
+      g.DrawImage(m_prev_background.get(), r.X, r.Y, width, height);
     } else {
       // Cache miss - draw directly (will be cached below)
       draw_current_bg(g);
@@ -3787,9 +3793,12 @@ void ControlPanelCore::update_spectrum_data() {
         }
       }
 
-      // Amplify and compress: sqrt for perceptual scaling, 3x boost
+      // Amplify and compress: sqrt for perceptual scaling, 3x boost.
+      // Soft ceiling: linear up to 0.7, then exponential taper so bars
+      // never quite hit the top of the spectrum area (no hard cutoff).
       float normalized = std::sqrt(magnitude) * 3.0f;
-      if (normalized > 1.0f) normalized = 1.0f;
+      if (normalized > 0.7f)
+        normalized = 0.7f + 0.3f * (1.0f - std::exp(-(normalized - 0.7f) / 0.3f));
       normalized_values[i] = normalized;
     }
 
@@ -4828,43 +4837,32 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     is_stream = m_waveform_is_stream;
   }
 
-  if (!valid || peaks.empty() || is_stream) {
-    // Placeholder: subtle gray background bar
+  if (is_stream) {
+    // Streams: keep simple placeholder (can't be decoded ahead of time)
     Gdiplus::SolidBrush placeholderBrush(Gdiplus::Color(60, 140, 140, 140));
-    if (is_pill) {
-      int track_h = h;
-      int radius = track_h / 2;
-      Gdiplus::GraphicsPath trackPath;
-      int r = std::min(radius, w / 2);
-      trackPath.AddArc(m_rect_waveform.left, m_rect_waveform.top, r * 2, track_h, 90, 180);
-      trackPath.AddArc(m_rect_waveform.left + w - r * 2, m_rect_waveform.top, r * 2, track_h, 270, 180);
-      trackPath.CloseFigure();
-      g.FillPath(&placeholderBrush, &trackPath);
-    } else {
-      g.FillRectangle(&placeholderBrush, m_rect_waveform.left, m_rect_waveform.top, w, h);
-    }
-
-    // Show progress even on placeholder
+    g.FillRectangle(&placeholderBrush, m_rect_waveform.left, m_rect_waveform.top, w, h);
     int progress_w = static_cast<int>(w * progress);
     if (progress_w > 0) {
       Gdiplus::SolidBrush progressBrush(Gdiplus::Color(120, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color)));
-      if (is_pill && progress_w > h) {
-        int radius = h / 2;
-        Gdiplus::GraphicsPath progressPath;
-        int r = std::min(radius, progress_w / 2);
-        progressPath.AddArc(m_rect_waveform.left, m_rect_waveform.top, r * 2, h, 90, 180);
-        progressPath.AddArc(m_rect_waveform.left + progress_w - r * 2, m_rect_waveform.top, r * 2, h, 270, 180);
-        progressPath.CloseFigure();
-        g.FillPath(&progressBrush, &progressPath);
-      } else {
-        g.FillRectangle(&progressBrush, m_rect_waveform.left, m_rect_waveform.top, progress_w, h);
-      }
+      g.FillRectangle(&progressBrush, m_rect_waveform.left, m_rect_waveform.top, progress_w, h);
     }
     m_waveform_animating = false;
-    // Fall through to seek handle below
   } else {
-    // Draw waveform bars (half-waveform, top half only, bottom-aligned)
-    // Fixed bar widths: Thin=0.5px, Normal=1px, Wide=2px
+    // Advance reveal cursor toward decode count (ease-out)
+    float decode_target = static_cast<float>(m_waveform_decode_count.load(std::memory_order_relaxed));
+    if (decode_target > 0.0f && !m_waveform_reveal_active && m_waveform_reveal_pos < decode_target - 0.5f) {
+      m_waveform_reveal_active = true;  // Activate on main thread when decode starts producing data
+    }
+    if (m_waveform_reveal_pos < decode_target) {
+      m_waveform_reveal_pos += (decode_target - m_waveform_reveal_pos) * 0.15f;
+      if (decode_target - m_waveform_reveal_pos < 0.5f) {
+        m_waveform_reveal_pos = decode_target;
+      }
+    }
+
+    bool still_animating = (m_waveform_reveal_pos < decode_target);
+
+    // Draw waveform bars with reveal cutoff
     int wave_w_setting = get_nowbar_waveform_width();
     float bar_w_f = (wave_w_setting == 0) ? 0.5f : (wave_w_setting == 2) ? 2.0f : 1.0f;
     float gap = 1.0f;
@@ -4872,9 +4870,16 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     int display_count = (int)((float)w / bar_total_w);
     if (display_count < 1) display_count = 1;
     int num_segments = (int)peaks.size();
+    if (num_segments < 1) num_segments = 1;
     float min_bar_h = 1.0f * m_dpi_scale;
 
+    // Map reveal_pos (in segment space 0-400) to display bar index
+    float reveal_bar_limit = (m_waveform_reveal_pos / (float)WAVEFORM_SEGMENTS) * display_count;
+
     for (int i = 0; i < display_count; i++) {
+      // Skip bars beyond the reveal cursor
+      if ((float)i >= reveal_bar_limit) break;
+
       // Resample from peaks using linear interpolation
       float src = (float)i / display_count * num_segments;
       int lo = (int)src;
@@ -4897,7 +4902,18 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
       g.FillRectangle(played ? m_waveform_brush_accent.get() : m_waveform_brush_dim.get(),
                       bx, by, bar_w_f, bar_h);
     }
-    m_waveform_animating = false;
+
+    // Keep animating if reveal hasn't caught up to decoded segments
+    if (still_animating || m_waveform_reveal_active) {
+      m_waveform_animating = true;
+      request_animation();
+      // Clear reveal_active once fully revealed
+      if (m_waveform_reveal_pos >= (float)WAVEFORM_SEGMENTS) {
+        m_waveform_reveal_active = false;
+      }
+    } else {
+      m_waveform_animating = false;
+    }
   }
 
 }
@@ -6598,11 +6614,8 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
     if (is_playing_now && !m_waveform_valid && !m_waveform_computing.load()) {
       start_waveform_computation();
     } else if (is_stopped) {
+      // Cancel any in-progress decode but keep the computed waveform visible
       cancel_waveform_computation();
-      std::lock_guard<std::mutex> lock(m_waveform_mutex);
-      m_waveform_valid = false;
-      m_waveform_peaks.clear();
-      m_waveform_track_path = "";
     }
   }
 
@@ -6636,6 +6649,11 @@ void ControlPanelCore::on_volume_changed(float volume_db) {
 
 void ControlPanelCore::on_track_changed() {
   m_needs_full_repaint = true;
+  m_bg_cache_valid = false;
+
+  // Re-apply theme to ensure bg color is fresh (Custom theme depends on
+  // playback state for artwork-based backgrounds)
+  apply_theme();
 
   // Update mood state for new track
   update_mood_state();
@@ -6655,12 +6673,15 @@ void ControlPanelCore::on_track_changed() {
   m_animated_progress = 0.0;
   m_target_progress = 0.0;
 
-  // Waveform: clear and recompute if mode 2
+  // Waveform: reset reveal and recompute if mode 2
   if (get_nowbar_visualization_mode() == 2) {
+    m_waveform_reveal_pos = 0.0f;
+    m_waveform_decode_count.store(0, std::memory_order_relaxed);
+    m_waveform_reveal_active = false;
     {
       std::lock_guard<std::mutex> lock(m_waveform_mutex);
       m_waveform_valid = false;
-      m_waveform_peaks.clear();
+      m_waveform_peaks.assign(WAVEFORM_SEGMENTS, 0.0f);
     }
     start_waveform_computation();
   }
@@ -8095,18 +8116,32 @@ void ControlPanelCore::start_waveform_computation() {
   {
     std::vector<float> cached_peaks;
     if (lookup_waveform_cache(path.c_str(), cached_peaks)) {
-      std::lock_guard<std::mutex> lock(m_waveform_mutex);
-      m_waveform_peaks = std::move(cached_peaks);
-      m_waveform_valid = true;
-      m_waveform_is_stream = false;
-      m_waveform_track_path = path.c_str();
-      invalidate();
+      {
+        std::lock_guard<std::mutex> lock(m_waveform_mutex);
+        m_waveform_peaks = std::move(cached_peaks);
+        m_waveform_valid = true;
+        m_waveform_is_stream = false;
+        m_waveform_track_path = path.c_str();
+      }
+      // All segments available — reveal animation will sweep across
+      m_waveform_decode_count.store(WAVEFORM_SEGMENTS, std::memory_order_relaxed);
+      m_waveform_reveal_active = true;
+      m_waveform_animating = true;
+      request_animation();
       return;
     }
   }
 
   m_waveform_cancel = false;
   m_waveform_computing = true;
+
+  // Pre-size peaks so the render loop can read partially-filled data
+  {
+    std::lock_guard<std::mutex> lock(m_waveform_mutex);
+    m_waveform_peaks.assign(WAVEFORM_SEGMENTS, 0.0f);
+    m_waveform_is_stream = false;
+    m_waveform_track_path = path.c_str();
+  }
 
   HWND hwnd = m_hwnd;
   double track_length = m_state.track_length;
@@ -8172,8 +8207,34 @@ void ControlPanelCore::start_waveform_computation() {
             rms_sums[seg] += (double)(val * val);
             rms_counts[seg]++;
 
-            // Track segment progress for early exit
-            if (seg > current_segment) current_segment = seg;
+            // Track segment progress and report with running normalization
+            if (seg > current_segment) {
+              // Finalize RMS for completed segments
+              for (int k = current_segment; k < seg; k++) {
+                if (rms_counts[k] > 0) {
+                  peaks[k] = std::sqrt((float)(rms_sums[k] / rms_counts[k]));
+                }
+              }
+              current_segment = seg;
+
+              // Publish normalized peaks periodically
+              if ((seg % 20) == 0 && hwnd && ::IsWindow(hwnd)) {
+                // Running max across all decoded segments
+                float running_max = 0.0f;
+                for (int k = 0; k < seg; k++) {
+                  if (peaks[k] > running_max) running_max = peaks[k];
+                }
+                if (running_max > 0.0f) {
+                  std::lock_guard<std::mutex> lock(m_waveform_mutex);
+                  for (int k = 0; k < seg; k++) {
+                    float norm = peaks[k] / running_max;
+                    m_waveform_peaks[k] = std::pow(norm, 0.65f);
+                  }
+                }
+                m_waveform_decode_count.store(seg, std::memory_order_relaxed);
+                ::InvalidateRect(hwnd, nullptr, FALSE);
+              }
+            }
           }
 
           segment_start = chunk_end_time;
@@ -8206,20 +8267,19 @@ void ControlPanelCore::start_waveform_computation() {
       // Persist to disk cache (file I/O only, no shared state)
       save_waveform_entry(path.c_str(), peaks);
 
-      // Store result and update in-memory cache under the same lock
+      // Store final normalized peaks and update in-memory cache
       {
         std::lock_guard<std::mutex> lock(m_waveform_mutex);
         m_waveform_cache[std::string(path.c_str())] = peaks;
         m_waveform_peaks = std::move(peaks);
         m_waveform_valid = true;
-        m_waveform_is_stream = false;
-        m_waveform_track_path = path.c_str();
       }
       m_waveform_computing = false;
 
-      // Trigger full repaint on main thread via InvalidateRect (the correct
-      // cross-thread repaint mechanism on Windows). The main thread's WM_PAINT
-      // handler sets m_needs_full_repaint itself — do not write it from here.
+      // All segments decoded — main thread will pick up via decode_count
+      m_waveform_decode_count.store(WAVEFORM_SEGMENTS, std::memory_order_relaxed);
+
+      // Trigger repaint on main thread via InvalidateRect (safe cross-thread).
       if (hwnd && ::IsWindow(hwnd)) {
         ::InvalidateRect(hwnd, nullptr, FALSE);
       }
