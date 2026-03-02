@@ -2402,9 +2402,10 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
     // which applies anti-aliasing to the path edges for smooth corners.
     Gdiplus::TextureBrush texBrush(&offscreen, Gdiplus::WrapModeClamp);
     texBrush.TranslateTransform((float)m_rect_artwork.left, (float)m_rect_artwork.top);
+    Gdiplus::SmoothingMode prevSmoothing = g.GetSmoothingMode();
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     g.FillPath(&texBrush, &roundedPath);
-    g.SetSmoothingMode(Gdiplus::SmoothingModeDefault);
+    g.SetSmoothingMode(prevSmoothing);
   } else {
     // Square mode — draw directly, no offscreen bitmap needed
     if (m_artwork_thumbnail) {
@@ -2675,10 +2676,10 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   int play_rect_w = playRect.right - playRect.left;
   int play_rect_h = playRect.bottom - playRect.top;
 
-  bool use_alternate_icons = get_nowbar_alternate_icons_enabled();
-  
-  if (use_alternate_icons) {
-    // Alternate icons: no background circle, just draw hover effect if enabled
+  int icon_style = get_nowbar_alternate_icons_style();
+
+  if (icon_style == 1) {
+    // Style 2: no background circle, outline icons
     float play_opacity = get_hover_opacity(HitRegion::PlayButton);
     if (play_opacity > 0.01f && show_hover) {
       BYTE alpha = static_cast<BYTE>(play_opacity * icon_hover_color.GetA());
@@ -2686,14 +2687,27 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       Gdiplus::SolidBrush hoverBrush(hoverColor);
       g.FillEllipse(&hoverBrush, playRect.left, playRect.top, play_rect_w, play_rect_h);
     }
-    // Draw play or pause icon
     if (m_state.is_playing && !m_state.is_paused) {
       draw_alternate_pause_icon(g, playRect, icon_secondary_color);
     } else {
       draw_alternate_play_icon(g, playRect, icon_secondary_color);
     }
+  } else if (icon_style == 2) {
+    // Style 3: no background circle, solid filled icons (Material Icons style)
+    float play_opacity = get_hover_opacity(HitRegion::PlayButton);
+    if (play_opacity > 0.01f && show_hover) {
+      BYTE alpha = static_cast<BYTE>(play_opacity * icon_hover_color.GetA());
+      Gdiplus::Color hoverColor(alpha, icon_hover_color.GetR(), icon_hover_color.GetG(), icon_hover_color.GetB());
+      Gdiplus::SolidBrush hoverBrush(hoverColor);
+      g.FillEllipse(&hoverBrush, playRect.left, playRect.top, play_rect_w, play_rect_h);
+    }
+    if (m_state.is_playing && !m_state.is_paused) {
+      draw_style3_pause_icon(g, playRect, icon_secondary_color);
+    } else {
+      draw_style3_play_icon(g, playRect, icon_secondary_color);
+    }
   } else {
-    // Default icons: background circle + icon
+    // Style 1 (default): background circle + filled icon
     // Normal (style 0): accent circle, dark icon
     // Inverted (style 1): accent circle, white icon
     bool inverted = (get_nowbar_play_icon_style() == 1);
@@ -7689,7 +7703,78 @@ void ControlPanelCore::draw_alternate_pause_icon(Gdiplus::Graphics &g, const REC
   g.SetTransform(&oldMatrix);
 }
 
+// Draw Style 3 play icon - solid filled triangle (no inner cutout)
+void ControlPanelCore::draw_style3_play_icon(Gdiplus::Graphics &g, const RECT &rect,
+                                              const Gdiplus::Color &color) {
+  float iconSize = static_cast<float>(std::min(rect.right - rect.left,
+                                               rect.bottom - rect.top));
+  float cx = (rect.left + rect.right) / 2.0f;
+  float cy = (rect.top + rect.bottom) / 2.0f;
+  float scale = iconSize / 24.0f;
 
+  Gdiplus::Matrix oldMatrix;
+  g.GetTransform(&oldMatrix);
+
+  Gdiplus::Matrix matrix;
+  matrix.Translate(cx - 12 * scale, cy - 12 * scale);
+  matrix.Scale(scale, scale);
+  g.SetTransform(&matrix);
+
+  Gdiplus::SolidBrush brush(color);
+  Gdiplus::GraphicsPath path;
+
+  // Solid triangle (no inner cutout)
+  path.StartFigure();
+  path.AddLine(svgToNorm(320, -200), svgToNorm(320, -760));
+  path.AddLine(svgToNorm(320, -760), svgToNorm(760, -480));
+  path.AddLine(svgToNorm(760, -480), svgToNorm(320, -200));
+  path.CloseFigure();
+
+  path.SetFillMode(Gdiplus::FillModeWinding);
+  g.FillPath(&brush, &path);
+  g.SetTransform(&oldMatrix);
+}
+
+// Draw Style 3 pause icon - solid filled bars from Material Icons Regular U+E034
+void ControlPanelCore::draw_style3_pause_icon(Gdiplus::Graphics &g, const RECT &rect,
+                                               const Gdiplus::Color &color) {
+  float iconSize = static_cast<float>(std::min(rect.right - rect.left,
+                                               rect.bottom - rect.top));
+  float cx = (rect.left + rect.right) / 2.0f;
+  float cy = (rect.top + rect.bottom) / 2.0f;
+  float scale = iconSize / 24.0f;
+
+  Gdiplus::Matrix oldMatrix;
+  g.GetTransform(&oldMatrix);
+
+  Gdiplus::Matrix matrix;
+  matrix.Translate(cx - 12 * scale, cy - 12 * scale);
+  matrix.Scale(scale, scale);
+  g.SetTransform(&matrix);
+
+  Gdiplus::SolidBrush brush(color);
+  Gdiplus::GraphicsPath path;
+
+  // Left bar - solid filled
+  path.StartFigure();
+  path.AddLine(svgToNorm(235, -182), svgToNorm(235, -778));
+  path.AddLine(svgToNorm(235, -778), svgToNorm(405, -778));
+  path.AddLine(svgToNorm(405, -778), svgToNorm(405, -182));
+  path.AddLine(svgToNorm(405, -182), svgToNorm(235, -182));
+  path.CloseFigure();
+
+  // Right bar - solid filled
+  path.StartFigure();
+  path.AddLine(svgToNorm(577, -182), svgToNorm(577, -778));
+  path.AddLine(svgToNorm(577, -778), svgToNorm(747, -778));
+  path.AddLine(svgToNorm(747, -778), svgToNorm(747, -182));
+  path.AddLine(svgToNorm(747, -182), svgToNorm(577, -182));
+  path.CloseFigure();
+
+  path.SetFillMode(Gdiplus::FillModeWinding);
+  g.FillPath(&brush, &path);
+  g.SetTransform(&oldMatrix);
+}
 
 void ControlPanelCore::update_title_formats() {
   auto compiler = titleformat_compiler::get();
