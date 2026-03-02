@@ -27,7 +27,7 @@ static cfg_int cfg_nowbar_cover_margin(
 
 static cfg_int cfg_nowbar_cover_style(
     GUID{0xABCDEF54, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE4}},
-    0  // Default: Square
+    1  // Default: Rounded (0=Square, 1=Rounded)
 );
 
 static cfg_int cfg_nowbar_cover_artwork_visible(
@@ -147,7 +147,7 @@ static cfg_int cfg_nowbar_smooth_animations(
 );
 
 static cfg_int cfg_nowbar_button_accent_color(
-    GUID{0xABCDEF54, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xE4}},
+    GUID{0xABCDEFC0, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC0}},
     RGB(100, 180, 255)  // Default: Light blue (matches current m_accent_color)
 );
 
@@ -1576,7 +1576,8 @@ bool get_nowbar_cover_margin() {
 }
 
 int get_nowbar_cover_style() {
-    return cfg_nowbar_cover_style;
+    int v = cfg_nowbar_cover_style;
+    return (v >= 0 && v <= 1) ? v : 1;  // Clamp to valid range; default Rounded
 }
 
 bool get_nowbar_cover_artwork_visible() {
@@ -3242,7 +3243,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         HWND hCoverStyleCombo = GetDlgItem(hwnd, IDC_COVER_STYLE_COMBO);
         SendMessage(hCoverStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Square");
         SendMessage(hCoverStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Rounded");
-        SendMessage(hCoverStyleCombo, CB_SETCURSEL, cfg_nowbar_cover_style, 0);
+        SendMessage(hCoverStyleCombo, CB_SETCURSEL, get_nowbar_cover_style(), 0);
 
         // Update Cover Margin state based on Cover Artwork visibility
         update_cover_margin_state(hwnd);
@@ -4676,7 +4677,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_theme_mode = 0;  // Auto
             cfg_nowbar_cover_artwork_visible = 1;  // Yes (show artwork)
             cfg_nowbar_cover_margin = 1;  // Yes (margin enabled)
-            cfg_nowbar_cover_style = 0;  // Square
+            cfg_nowbar_cover_style = 1;  // Rounded
             cfg_nowbar_background_style = 0;  // Solid
             cfg_nowbar_bar_style = 0;  // Pill-shaped
             cfg_nowbar_smooth_animations = 0;  // Disabled (default for performance)
@@ -4686,7 +4687,7 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_THEME_MODE_COMBO), CB_SETCURSEL, 0, 0);
             SendMessage(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_COMBO), CB_SETCURSEL, 0, 0);  // Default: Yes
             SendMessage(GetDlgItem(m_hwnd, IDC_COVER_MARGIN_COMBO), CB_SETCURSEL, 0, 0);  // Default: Yes
-            SendMessage(GetDlgItem(m_hwnd, IDC_COVER_STYLE_COMBO), CB_SETCURSEL, 0, 0);  // Default: Square
+            SendMessage(GetDlgItem(m_hwnd, IDC_COVER_STYLE_COMBO), CB_SETCURSEL, 1, 0);  // Default: Rounded
             SendMessage(GetDlgItem(m_hwnd, IDC_BACKGROUND_STYLE_COMBO), CB_SETCURSEL, 0, 0);  // Default: Solid
             SendMessage(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), CB_SETCURSEL, 0, 0);
             cfg_nowbar_seekbar_length = 0;  // Default: Fixed
