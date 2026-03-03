@@ -3608,6 +3608,8 @@ int ControlPanelCore::compute_spectrum_bar_count(int area_w) const {
   if (spec_width == 0) { bar_w = 2; gap = 1; }       // Thin
   else if (spec_width == 2) { bar_w = 8; gap = 3; }   // Wide
   else { bar_w = 4; gap = 2; }                          // Normal
+  // Dominoes mode: tight 1px gap between bars
+  if (get_nowbar_spectrum_style() == 2) gap = 1;
   int unit = bar_w + gap;
   if (unit < 1) unit = 1;
   return std::max(1, area_w / unit);
@@ -4500,6 +4502,13 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
   int spec_style = get_nowbar_spectrum_style();
 
+  // Dominoes mode: override inter-bar gap to 1px for tight columns
+  bool is_dominoes = (spec_style == 2);
+  if (is_dominoes) {
+    gap_w = 1;
+    unit_w = bar_w + gap_w;
+  }
+
   // Curve mode: render into the overlay DIBSECTION via a GDI+ Bitmap
   // wrapper, then let AlphaBlend composite it onto the paint surface.
   // Drawing directly onto the paint HDC caused "tide mark" ghost artifacts
@@ -4553,8 +4562,13 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
     if (bw < 1 || bx < 0) return;
     int by = area_h - bar_h;
 
-    int rad = (spec_shape == 0) ? bw / 2 : 0;
+    int rad = (spec_shape == 0 && !is_dominoes) ? bw / 2 : 0;
     float rad_f = (float)rad;
+
+    // Dominoes segmentation: 4px segments with 2px gaps, aligned from bottom
+    constexpr int domino_seg_h = 4;
+    constexpr int domino_gap_h = 2;
+    constexpr int domino_cell_h = domino_seg_h + domino_gap_h;
 
     // Determine bar color
     int base_r, base_g, base_b;
@@ -4576,6 +4590,14 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
     for (int row = by; row < area_h; row++) {
       if (row < 0 || row >= area_h) continue;
+
+      // Dominoes: skip rows that fall in the gap between segments
+      if (is_dominoes) {
+        int dist_from_bottom = area_h - 1 - row;
+        int pos_in_cell = dist_from_bottom % domino_cell_h;
+        if (pos_in_cell >= domino_seg_h) continue;  // In the gap
+      }
+
       int left = bx;
       int right = bx + bw;
 
@@ -4726,6 +4748,13 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
 
   int spec_style = get_nowbar_spectrum_style();
 
+  // Dominoes mode: override inter-bar gap to 1px for tight columns
+  bool is_dominoes = (spec_style == 2);
+  if (is_dominoes) {
+    gap_w_i = 1;
+    unit_w = bar_w_i + gap_w_i;
+  }
+
   // Curve mode: delegate to curve renderer
   if (spec_style == 1) {
     draw_spectrum_curve(g, m_rect_spectrum_full);
@@ -4764,6 +4793,33 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   Gdiplus::GraphicsPath path;
   float bottom_f = (float)m_rect_spectrum_full.bottom;
 
+  // Dominoes segmentation constants
+  constexpr float domino_seg_h = 4.0f;
+  constexpr float domino_gap_h = 2.0f;
+  constexpr float domino_cell_h = domino_seg_h + domino_gap_h;
+
+  // Helper to draw domino segments for a bar using a pre-created brush.
+  // Batches all segment rectangles into a single GraphicsPath and fills once
+  // to avoid per-segment FillRectangle overhead in the GDI+ fallback path.
+  auto fill_domino_segments = [&](float x, float y, float height, Gdiplus::Brush& brush) {
+    path.Reset();
+    // Add full segments from bottom up, aligned to the bottom of the area
+    float seg_bottom = bottom_f;
+    while (seg_bottom - domino_seg_h > y) {
+      float seg_top = seg_bottom - domino_seg_h;
+      path.AddRectangle(Gdiplus::RectF(x, seg_top, bar_w, domino_seg_h));
+      seg_bottom -= domino_cell_h;  // Move up by segment + gap
+    }
+    // Partial top segment (clip to bar top)
+    if (seg_bottom > y) {
+      float partial_h = seg_bottom - y;
+      if (partial_h > 0.5f) {
+        path.AddRectangle(Gdiplus::RectF(x, y, bar_w, partial_h));
+      }
+    }
+    g.FillPath(&brush, &path);
+  };
+
   // Lambda to draw one bar at a given x position
   auto draw_gdiplus_bar = [&](float x, float value, int bar_idx, int half_count, bool is_right) {
     float height = value * (float)area_h;
@@ -4786,7 +4842,9 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
       if (stereo && is_right) hue = 300.0f - hue;
       COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
-      if (spec_shape == 0) {
+      if (is_dominoes) {
+        fill_domino_segments(x, y, height, barBrush);
+      } else if (spec_shape == 0) {
         path.Reset();
         if (height > radius * 2.0f) {
           path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
@@ -4806,7 +4864,9 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
           Gdiplus::PointF(x, y), Gdiplus::PointF(x, bottom_f),
           Gdiplus::Color(alpha, r1, g1, b1),
           Gdiplus::Color(alpha, r2, g2, b2));
-      if (spec_shape == 0) {
+      if (is_dominoes) {
+        fill_domino_segments(x, y, height, barBrush);
+      } else if (spec_shape == 0) {
         path.Reset();
         if (height > radius * 2.0f) {
           path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
@@ -4823,7 +4883,9 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
       }
     } else {
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, cr1, cg1, cb1));
-      if (spec_shape == 0) {
+      if (is_dominoes) {
+        fill_domino_segments(x, y, height, barBrush);
+      } else if (spec_shape == 0) {
         path.Reset();
         if (height > radius * 2.0f) {
           path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
