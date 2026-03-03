@@ -5091,14 +5091,14 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
       vol_hover_color = Gdiplus::Color(40, GetRValue(m_theme_selection), GetGValue(m_theme_selection), GetBValue(m_theme_selection));
   }
 
-  // Determine volume level based on bar position: 0=mute, 1=low, 2=full
-  float level = db_to_slider(m_state.volume_db); // 0.0 to 1.0
-
-  int vol_level = 2; // full (>50%)
-  if (level <= 0)
-    vol_level = 0; // mute (0%)
-  else if (level <= 0.5f)
-    vol_level = 1; // low (0-50%)
+  // Determine volume level: 0=mute, 1=low, 2=full
+  int vol_level;
+  if (m_state.volume_db <= -100.0f) {
+    vol_level = 0; // mute
+  } else {
+    float level = db_to_slider(m_state.volume_db); // 0.0 to 1.0
+    vol_level = (level <= 0.5f) ? 1 : 2;
+  }
 
   // Icon dimensions needed for bar offset calculation
   int icon_size =
