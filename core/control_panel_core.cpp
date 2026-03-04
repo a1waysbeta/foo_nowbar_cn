@@ -245,7 +245,32 @@ ControlPanelCore::ControlPanelCore() {
   m_button_hover_color = Gdiplus::Color(40, 255, 255, 255);
 }
 
+// Thread-pool timer callback — fires on a worker thread and posts a
+// normal-priority message so the animation frame is dispatched ahead of
+// WM_MOUSEMOVE input from neighbouring panels.
+static VOID CALLBACK anim_tp_callback(PVOID ctx, BOOLEAN) {
+  PostMessage(reinterpret_cast<HWND>(ctx),
+              ControlPanelCore::WM_NOWBAR_ANIMATE, 0, 0);
+}
+
+void ControlPanelCore::on_animation_timer_fired() {
+  if (!m_animation_timer_active) return;
+  // Non-blocking delete — safe because the callback has already completed
+  // (we're handling the message it posted).
+  DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, nullptr);
+  m_anim_tp_timer = nullptr;
+  m_animation_timer_active = false;
+}
+
 ControlPanelCore::~ControlPanelCore() {
+  // Cancel animation timer — blocking wait ensures the callback won't
+  // PostMessage to a destroyed HWND.
+  if (m_animation_timer_active) {
+    DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, INVALID_HANDLE_VALUE);
+    m_anim_tp_timer = nullptr;
+    m_animation_timer_active = false;
+  }
+
   // Destroy callbacks before services are gone
   m_metadb_change_callback.reset();
   m_playlist_focus_callback.reset();
@@ -779,7 +804,10 @@ void ControlPanelCore::create_artwork_thumbnail() {
 
     m_artwork_thumbnail.reset(new Gdiplus::Bitmap(thumbW, thumbH, PixelFormat32bppARGB));
     Gdiplus::Graphics gfx(m_artwork_thumbnail.get());
-    gfx.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    // Bilinear is much faster than HighQualityBicubic for large downscales and
+    // visually equivalent at this target size (thumbnail is used for small panel
+    // artwork display and as the source for further downscales like blur/colors).
+    gfx.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
     gfx.DrawImage(m_artwork_bitmap.get(), 0, 0, thumbW, thumbH);
 
     // Release full-resolution bitmap to save memory
@@ -788,19 +816,25 @@ void ControlPanelCore::create_artwork_thumbnail() {
 
 void ControlPanelCore::extract_artwork_colors() {
   m_artwork_colors_valid = false;
-  
-  if (!m_artwork_bitmap || m_artwork_bitmap->GetLastStatus() != Gdiplus::Ok) {
+
+  // Prefer thumbnail (already downscaled to <=512x512) over full-res bitmap.
+  // create_artwork_thumbnail() should be called before this function so that
+  // we avoid an expensive full-resolution downscale here.
+  Gdiplus::Bitmap* source = m_artwork_thumbnail ? m_artwork_thumbnail.get()
+                          : m_artwork_bitmap     ? m_artwork_bitmap.get()
+                          : nullptr;
+  if (!source || source->GetLastStatus() != Gdiplus::Ok) {
     return;
   }
-  
+
   // Downscale artwork to 8x8 for fast color averaging
   const int sample_size = 8;
   std::unique_ptr<Gdiplus::Bitmap> downscaled(new Gdiplus::Bitmap(sample_size, sample_size, PixelFormat32bppARGB));
-  
+
   {
     Gdiplus::Graphics gfx(downscaled.get());
     gfx.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
-    gfx.DrawImage(m_artwork_bitmap.get(), 0, 0, sample_size, sample_size);
+    gfx.DrawImage(source, 0, 0, sample_size, sample_size);
   }
   
   // Calculate average color from all pixels
@@ -1015,7 +1049,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // reserve space for the thin progress bar at the top of the panel
   int art_margin = get_nowbar_cover_margin() ? m_metrics.artwork_margin : 0;
   int art_top_offset = 0;
-  if (get_nowbar_visualization_mode() == 1 && art_margin == 0) {
+  if (get_nowbar_visualization_mode() == 1 && art_margin == 0 && get_nowbar_seekbar_visible()) {
     art_top_offset = static_cast<int>(3 * m_dpi_scale); // thin progress bar height
   }
   int art_available_h = h - art_top_offset;
@@ -1821,7 +1855,8 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     } else {
       // No animations active - make sure timer is stopped to avoid wasting CPU
       if (m_animation_timer_active) {
-        KillTimer(m_hwnd, ANIMATION_TIMER_ID);
+        DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, nullptr);
+        m_anim_tp_timer = nullptr;
         m_animation_timer_active = false;
       }
       m_animation_requested = false;
@@ -1831,7 +1866,8 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     // Kill the timer when spectrum is no longer animating to prevent orphaned timers
     // (e.g., after switching from spectrum to waveform mode).
     if (!m_spectrum_animating) {
-      KillTimer(m_hwnd, ANIMATION_TIMER_ID);
+      DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, nullptr);
+      m_anim_tp_timer = nullptr;
       m_animation_timer_active = false;
       m_animation_requested = false;
     }
@@ -2167,15 +2203,16 @@ void ControlPanelCore::paint_waveform_only(HDC hdc, const RECT& panel_rect) {
     draw_waveform_tooltip(g);
     draw_time_display(g);
 
-    // Reset clip before drawing volume — the waveform clip region above
-    // only covers waveform + time areas, which may not include the volume.
-    g.ResetClip();
-    draw_volume(g);
+    // Volume icon is NOT redrawn here — it is already in the cache bitmap
+    // from the last full paint, and any volume change triggers a full repaint
+    // via invalidate().  Drawing it again would overdraw anti-aliased edges,
+    // making the icon appear briefly bold on track change.
 
     // Kill orphaned animation timer from a previous spectrum mode session,
     // but keep it alive if the waveform reveal animation is still in progress.
     if (m_animation_timer_active && !m_waveform_animating) {
-        KillTimer(m_hwnd, ANIMATION_TIMER_ID);
+        DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, nullptr);
+        m_anim_tp_timer = nullptr;
         m_animation_timer_active = false;
         m_animation_requested = false;
     }
@@ -5516,13 +5553,22 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
 
   if (new_region != m_hover_region) {
     // Track previous hover for fade-out animation
+    HitRegion old_region = m_hover_region;
     m_prev_hover_region = m_hover_region;
     m_hover_change_time = std::chrono::steady_clock::now();
     m_hover_region = new_region;
-    // Skip full repaint when spectrum fast path is active — paint_spectrum_only()
-    // already redraws buttons with hover states each frame
-    if (!m_spectrum_animating) m_needs_full_repaint = true;
-    invalidate();
+    // Skip full repaint when visualization fast path is active —
+    // paint_spectrum_only() already redraws buttons with hover states each frame.
+    // Exception: ThinProgressBar draws a tooltip and expanded bar that extend
+    // outside the fast path's cached background, so transitioning to/from it
+    // needs a full repaint to clean up properly.
+    bool needs_full = (old_region == HitRegion::ThinProgressBar ||
+                       new_region == HitRegion::ThinProgressBar);
+    if (!needs_full && (m_spectrum_animating || m_waveform_animating)) {
+      invalidate_soft();
+    } else {
+      invalidate();
+    }
   }
 
   // Track which rating star the cursor is over
@@ -5541,13 +5587,19 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     }
     if (new_hover_star != m_rating_hover_star) {
       m_rating_hover_star = new_hover_star;
-      if (!m_spectrum_animating) m_needs_full_repaint = true;
-      invalidate();
+      if (m_spectrum_animating) {
+        invalidate_soft();
+      } else {
+        invalidate();
+      }
     }
   } else if (m_rating_hover_star != 0) {
     m_rating_hover_star = 0;
-    if (!m_spectrum_animating) m_needs_full_repaint = true;
-    invalidate();
+    if (m_spectrum_animating || m_waveform_animating) {
+      invalidate_soft();
+    } else {
+      invalidate();
+    }
   }
 
   // Spectrum hover fade (Mode 1): dim spectrum when hovering over buttons
@@ -5572,11 +5624,13 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
         m_spectrum_hover_opacity += step;
         request_animation();
       }
-      invalidate();
+      invalidate_soft();
     }
   }
 
-  // Track thin progress bar hover position for tooltip + invalidate for enlarge
+  // Track thin progress bar hover position for tooltip + invalidate for enlarge.
+  // Always use full invalidate — the tooltip and expanded bar extend outside the
+  // fast path's cached background area.
   if (new_region == HitRegion::ThinProgressBar) {
     m_seekbar_hover_x = x;
     invalidate();
@@ -5620,7 +5674,11 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
   // Track volume slider hover position for tooltip
   if (new_region == HitRegion::VolumeSlider) {
     m_volume_hover_x = x;
-    invalidate();
+    if (m_spectrum_animating || m_waveform_animating) {
+      invalidate_soft();
+    } else {
+      invalidate();
+    }
   }
 
   // Update native tooltip for custom buttons
@@ -5671,17 +5729,23 @@ void ControlPanelCore::on_mouse_leave() {
   m_rating_hover_star = 0;
 
   if (m_hover_region != HitRegion::None) {
+    // ThinProgressBar draws a tooltip and expanded bar outside the fast path's
+    // cached background — leaving it needs a full repaint to clean up artifacts.
+    bool was_thin_progress = (m_hover_region == HitRegion::ThinProgressBar);
     m_hover_region = HitRegion::None;
-    // Skip full repaint when spectrum fast path is active — paint_spectrum_only()
-    // already redraws buttons with hover states each frame
-    if (!m_spectrum_animating) m_needs_full_repaint = true;
-    invalidate();
+    // Skip full repaint when visualization fast path is active —
+    // paint_spectrum_only() already redraws buttons with hover states each frame.
+    if (!was_thin_progress && (m_spectrum_animating || m_waveform_animating)) {
+      invalidate_soft();
+    } else {
+      invalidate();
+    }
   }
 
   // Reset spectrum hover opacity when mouse leaves
   if (m_spectrum_hover_opacity != 1.0f) {
     m_spectrum_hover_opacity = 1.0f;
-    invalidate();
+    invalidate_soft();
   }
 
   // Hide tooltip when mouse leaves the panel
@@ -6705,13 +6769,15 @@ void ControlPanelCore::update_rating_state() {
     return;
   }
 
-  // Evaluate %rating% using title formatting (same as check_and_skip_low_rating)
+  // Evaluate %rating% using cached titleformat (compiled once, reused)
   try {
-    static_api_ptr_t<titleformat_compiler> compiler;
-    titleformat_object::ptr format;
-    if (compiler->compile(format, "%rating%")) {
+    if (!m_titleformat_rating.is_valid()) {
+      static_api_ptr_t<titleformat_compiler> compiler;
+      compiler->compile(m_titleformat_rating, "%rating%");
+    }
+    if (m_titleformat_rating.is_valid()) {
       pfc::string8 rating_str;
-      track->format_title(nullptr, rating_str, format, nullptr);
+      track->format_title(nullptr, rating_str, m_titleformat_rating, nullptr);
       if (!rating_str.is_empty()) {
         int rating = atoi(rating_str.c_str());
         m_rating_value = (rating >= 1 && rating <= 5) ? rating : 0;
@@ -6726,9 +6792,19 @@ void ControlPanelCore::update_rating_state() {
 
 void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
   bool was_playing = m_state.is_playing || m_state.is_paused;
+  bool was_paused = m_state.is_paused;
   m_state = state;
   bool is_playing_now = m_state.is_playing && !m_state.is_paused;
+  bool is_paused_now = m_state.is_paused;
   bool is_stopped = !m_state.is_playing && !m_state.is_paused;
+
+  // Track-to-track transition (on_playback_starting fires before on_playback_new_track):
+  // The playback state hasn't meaningfully changed (still playing), and on_track_changed()
+  // will handle all updates with the new track's data.  Skip all work here to avoid a
+  // wasted paint cycle with stale data and redundant vis stream / waveform setup.
+  if (was_playing && is_playing_now && !was_paused) {
+    return;
+  }
 
   // If playback stopped completely, reset to initial state
   if (was_playing && is_stopped) {
@@ -6822,6 +6898,16 @@ void ControlPanelCore::on_volume_changed(float volume_db) {
 }
 
 void ControlPanelCore::on_track_changed() {
+  // Sync local state from the manager.  on_playback_new_track() updates
+  // current_track and track info in the manager but intentionally skips
+  // notify_state_changed(), so the local m_state would still have the
+  // stale copy from on_playback_starting().  Without this sync,
+  // evaluate_title_formats() sees an invalid current_track on the first
+  // track after restart and produces empty title/artist strings.
+  if (PlaybackStateManager::is_available()) {
+    m_state = PlaybackStateManager::get().get_state();
+  }
+
   m_needs_full_repaint = true;
   m_bg_cache_valid = false;
 
@@ -6887,10 +6973,11 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
       if (SUCCEEDED(CreateStreamOnHGlobal(hMem, TRUE, &stream))) {
         m_artwork_bitmap.reset(Gdiplus::Bitmap::FromStream(stream));
         stream->Release();
-        
-        // Extract colors for dynamic background
-        extract_artwork_colors();
+
+        // Create thumbnail first (downscales full-res and releases it),
+        // then extract colors from the smaller thumbnail instead of full-res.
         create_artwork_thumbnail();
+        extract_artwork_colors();
 
         // Trigger background transition BEFORE invalidating cache
         // Only requires m_prev_background to exist (it contains the rendered old state)
@@ -6928,9 +7015,10 @@ void ControlPanelCore::set_artwork_from_hbitmap(HBITMAP bitmap) {
   m_artwork_bitmap.reset(Gdiplus::Bitmap::FromHBITMAP(bitmap, nullptr));
 
   if (m_artwork_bitmap && m_artwork_bitmap->GetLastStatus() == Gdiplus::Ok) {
-    // Extract colors for dynamic background
-    extract_artwork_colors();
+    // Create thumbnail first (downscales full-res and releases it),
+    // then extract colors from the smaller thumbnail instead of full-res.
     create_artwork_thumbnail();
+    extract_artwork_colors();
 
     // Trigger background transition BEFORE invalidating cache
     // Only requires m_prev_background to exist (it contains the rendered old state)
@@ -6970,6 +7058,16 @@ void ControlPanelCore::clear_artwork() {
 
 void ControlPanelCore::invalidate() {
   m_needs_full_repaint = true;
+  if (m_hwnd) {
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+  }
+}
+
+void ControlPanelCore::invalidate_soft() {
+  // Invalidate the window without setting m_needs_full_repaint, so the
+  // spectrum/waveform fast path remains active.  Use this for hover state
+  // changes during visualization animation — the fast path already redraws
+  // buttons, volume, and time display each frame.
   if (m_hwnd) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
   }
@@ -7047,7 +7145,8 @@ void ControlPanelCore::request_animation(const RECT* dirty) {
 
     // Kill any pending timer since we're painting now
     if (m_animation_timer_active) {
-      KillTimer(m_hwnd, ANIMATION_TIMER_ID);
+      DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, nullptr);
+      m_anim_tp_timer = nullptr;
       m_animation_timer_active = false;
     }
 
@@ -7055,12 +7154,15 @@ void ControlPanelCore::request_animation(const RECT* dirty) {
     InvalidateRect(m_hwnd, inv_rect, FALSE);
     m_animation_dirty_partial = false;
   } else if (!m_animation_timer_active) {
-    // Not enough time has passed - schedule a timer to fire when it's time
+    // Not enough time has passed — schedule a thread-pool one-shot that posts
+    // WM_NOWBAR_ANIMATE (normal priority) instead of WM_TIMER (lowest priority).
     UINT delay_ms = static_cast<UINT>(target_interval - elapsed_ms + 1);
     if (delay_ms < 1) delay_ms = 1;
     if (delay_ms > max_delay) delay_ms = max_delay;
 
-    SetTimer(m_hwnd, ANIMATION_TIMER_ID, delay_ms, nullptr);
+    CreateTimerQueueTimer(&m_anim_tp_timer, nullptr,
+        anim_tp_callback, reinterpret_cast<PVOID>(m_hwnd),
+        delay_ms, 0, WT_EXECUTEINTIMERTHREAD);
     m_animation_timer_active = true;
     m_animation_requested = true;
   }
