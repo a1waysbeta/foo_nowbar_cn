@@ -262,11 +262,6 @@ static cfg_int cfg_nowbar_spectrum_width(
     1  // Default: Normal (0=Thin, 1=Normal, 2=Wide)
 );
 
-static cfg_int cfg_nowbar_spectrum_shape(
-    GUID{0xABCDEF83, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x83}},
-    0  // Default: Pill (0=Pill, 1=Rectangle)
-);
-
 static cfg_int cfg_nowbar_spectrum_style(
     GUID{0xABCDEF8A, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8A}},
     1  // Default: Curve (0=Mono, 1=Curve, 2=Dominoes)
@@ -405,6 +400,22 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_time_font(
 static cfg_int cfg_nowbar_use_custom_fonts(
     GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8C}},
     0  // Default: use built-in fonts
+);
+
+// Font color configuration (-1 = use theme color)
+static cfg_int cfg_nowbar_track_font_color(
+    GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC0}},
+    -1  // Default: use theme color
+);
+
+static cfg_int cfg_nowbar_artist_font_color(
+    GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC1}},
+    -1  // Default: use theme color
+);
+
+static cfg_int cfg_nowbar_time_font_color(
+    GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC2}},
+    -1  // Default: use theme color
 );
 
 // Custom Button tab configuration (4 buttons)
@@ -1747,13 +1758,6 @@ int get_nowbar_spectrum_width() {
     return w;
 }
 
-int get_nowbar_spectrum_shape() {
-    int s = cfg_nowbar_spectrum_shape;
-    if (s < 0) s = 0;
-    if (s > 1) s = 1;
-    return s;
-}
-
 int get_nowbar_spectrum_style() {
     int s = cfg_nowbar_spectrum_style;
     if (s < 0) s = 0;
@@ -2682,11 +2686,47 @@ void set_nowbar_time_font(const LOGFONT& font) {
     cfg_nowbar_use_custom_fonts = 1;
 }
 
+void set_nowbar_track_font_color(COLORREF color) {
+    cfg_nowbar_track_font_color = static_cast<t_int32>(color);
+}
+
+void set_nowbar_artist_font_color(COLORREF color) {
+    cfg_nowbar_artist_font_color = static_cast<t_int32>(color);
+}
+
+void set_nowbar_time_font_color(COLORREF color) {
+    cfg_nowbar_time_font_color = static_cast<t_int32>(color);
+}
+
+bool get_nowbar_track_font_color(COLORREF& color) {
+    t_int32 val = cfg_nowbar_track_font_color;
+    if (val < 0) return false;
+    color = static_cast<COLORREF>(val);
+    return true;
+}
+
+bool get_nowbar_artist_font_color(COLORREF& color) {
+    t_int32 val = cfg_nowbar_artist_font_color;
+    if (val < 0) return false;
+    color = static_cast<COLORREF>(val);
+    return true;
+}
+
+bool get_nowbar_time_font_color(COLORREF& color) {
+    t_int32 val = cfg_nowbar_time_font_color;
+    if (val < 0) return false;
+    color = static_cast<COLORREF>(val);
+    return true;
+}
+
 void reset_nowbar_fonts() {
     cfg_nowbar_use_custom_fonts = 0;
     cfg_nowbar_artist_font = get_nowbar_default_font(true);
     cfg_nowbar_track_font = get_nowbar_default_font(false);
     cfg_nowbar_time_font = get_nowbar_default_time_font();
+    cfg_nowbar_track_font_color = -1;
+    cfg_nowbar_artist_font_color = -1;
+    cfg_nowbar_time_font_color = -1;
 }
 
 LOGFONT get_nowbar_default_font(bool is_artist) {
@@ -2820,8 +2860,6 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_RADIO), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_SHAPE_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_SHAPE_COMBO), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_LABEL), show_general);
@@ -3028,11 +3066,9 @@ static void update_vis_section_state(HWND hwnd) {
     // Spectrum controls: enabled only if Enable checked AND Spectrum selected
     BOOL spec_on = enabled && spectrum_sel;
     int style_sel = (int)SendMessage(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), CB_GETCURSEL, 0, 0);
-    BOOL spec_bars = spec_on && (style_sel != 1);  // Width/Shape not applicable in Curve mode
+    BOOL spec_bars = spec_on && (style_sel != 1);  // Width not applicable in Curve mode
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_WIDTH_LABEL), spec_bars);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), spec_bars);
-    EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_SHAPE_LABEL), spec_bars);
-    EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_SHAPE_COMBO), spec_bars);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_LABEL), spec_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), spec_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_HEIGHT_LABEL), spec_on);
@@ -3408,12 +3444,6 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide");
             SendMessage(hSpecWidth, CB_SETCURSEL, cfg_nowbar_spectrum_width, 0);
 
-            // Populate spectrum shape combo (Pill-shaped/Rectangle)
-            HWND hSpecShape = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_SHAPE_COMBO);
-            SendMessage(hSpecShape, CB_ADDSTRING, 0, (LPARAM)L"Pill-shaped");
-            SendMessage(hSpecShape, CB_ADDSTRING, 0, (LPARAM)L"Rectangle");
-            SendMessage(hSpecShape, CB_SETCURSEL, cfg_nowbar_spectrum_shape, 0);
-
             // Populate spectrum style combo (Mono/Stereo)
             HWND hSpecStyle = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO);
             SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Mono");
@@ -3616,7 +3646,6 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_MOOD_TAG_COMBO:
         case IDC_SKIP_RATING_THRESHOLD_COMBO:
         case IDC_VIS_SPECTRUM_WIDTH_COMBO:
-        case IDC_VIS_SPECTRUM_SHAPE_COMBO:
         case IDC_VIS_SPECTRUM_HEIGHT_COMBO:
         case IDC_VIS_WAVEFORM_WIDTH_COMBO:
             if (HIWORD(wp) == CBN_SELCHANGE) {
@@ -4563,7 +4592,6 @@ void nowbar_preferences::apply_settings() {
 
             // Save per-visualization settings
             cfg_nowbar_spectrum_width = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), CB_GETCURSEL, 0, 0);
-            cfg_nowbar_spectrum_shape = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_SHAPE_COMBO), CB_GETCURSEL, 0, 0);
             cfg_nowbar_spectrum_style = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), CB_GETCURSEL, 0, 0);
             cfg_nowbar_spectrum_height = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), CB_GETCURSEL, 0, 0);
             cfg_nowbar_spectrum_opacity = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SPECTRUM_OPACITY_SLIDER), TBM_GETPOS, 0, 0);
@@ -4701,7 +4729,6 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_visualization_mode = 0;  // Disabled (default)
             cfg_nowbar_vis_type = 1;  // Default: Spectrum
             cfg_nowbar_spectrum_width = 1;  // Default: Normal
-            cfg_nowbar_spectrum_shape = 0;  // Default: Pill
             cfg_nowbar_spectrum_style = 1;  // Default: Curve
             cfg_nowbar_spectrum_height = 2;  // Default: High
             cfg_nowbar_waveform_width = 1;  // Default: Normal
@@ -4719,7 +4746,6 @@ void nowbar_preferences::reset_settings() {
             CheckDlgButton(m_hwnd, IDC_VIS_60FPS_CHECK, BST_UNCHECKED);
             CheckRadioButton(m_hwnd, IDC_VIS_SPECTRUM_RADIO, IDC_VIS_WAVEFORM_RADIO, IDC_VIS_SPECTRUM_RADIO);
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), CB_SETCURSEL, 1, 0);  // Normal
-            SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_SHAPE_COMBO), CB_SETCURSEL, 0, 0);  // Pill
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), CB_SETCURSEL, 1, 0);  // Curve
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), CB_SETCURSEL, 2, 0);  // High
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), CB_SETCURSEL, 1, 0);  // Normal
@@ -4962,11 +4988,16 @@ void nowbar_preferences::select_track_font() {
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
     cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
+    COLORREF saved_color;
+    if (get_nowbar_track_font_color(saved_color))
+        cf.rgbColors = saved_color;
 
     if (ChooseFont(&cf)) {
         set_nowbar_track_font(lf);
+        set_nowbar_track_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
+        nowbar::ControlPanelCore::notify_all_settings_changed();
     }
 }
 
@@ -4978,11 +5009,16 @@ void nowbar_preferences::select_artist_font() {
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
     cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
+    COLORREF saved_color;
+    if (get_nowbar_artist_font_color(saved_color))
+        cf.rgbColors = saved_color;
 
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
+        set_nowbar_artist_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
+        nowbar::ControlPanelCore::notify_all_settings_changed();
     }
 }
 
@@ -4994,11 +5030,16 @@ void nowbar_preferences::select_time_font() {
     cf.hwndOwner = m_hwnd;
     cf.lpLogFont = &lf;
     cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
+    COLORREF saved_color;
+    if (get_nowbar_time_font_color(saved_color))
+        cf.rgbColors = saved_color;
 
     if (ChooseFont(&cf)) {
         set_nowbar_time_font(lf);
+        set_nowbar_time_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
+        nowbar::ControlPanelCore::notify_all_settings_changed();
     }
 }
 
