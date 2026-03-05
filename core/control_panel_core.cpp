@@ -2608,7 +2608,14 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   
   Gdiplus::Color textColor = use_light_foreground ? Gdiplus::Color(255, 255, 255, 255) : m_text_color;
   Gdiplus::Color textSecondary = use_light_foreground ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-  
+
+  // Apply custom font colors if set
+  COLORREF custom_color;
+  if (get_nowbar_track_font_color(custom_color))
+      textColor = Gdiplus::Color(255, GetRValue(custom_color), GetGValue(custom_color), GetBValue(custom_color));
+  if (get_nowbar_artist_font_color(custom_color))
+      textSecondary = Gdiplus::Color(255, GetRValue(custom_color), GetGValue(custom_color), GetBValue(custom_color));
+
   Gdiplus::SolidBrush titleBrush(textColor);
   Gdiplus::SolidBrush artistBrush(textSecondary);
 
@@ -3539,10 +3546,13 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
 
   // Determine if we're using artwork-based background that needs light text
   int bg_style = get_nowbar_background_style();
-  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) || 
+  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) ||
                               (bg_style == 2 && m_blurred_artwork);
-  Gdiplus::Color time_color = use_light_foreground 
+  Gdiplus::Color time_color = use_light_foreground
       ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+  COLORREF custom_time_color;
+  if (get_nowbar_time_font_color(custom_time_color))
+      time_color = Gdiplus::Color(255, GetRValue(custom_time_color), GetGValue(custom_time_color), GetBValue(custom_time_color));
   Gdiplus::SolidBrush timeBrush(time_color);
 
   std::wstring elapsed = format_time(m_state.playback_time);
@@ -4057,9 +4067,7 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   BYTE rr1 = 50, rg1 = 200, rb1 = 180;   // cool top
   BYTE rr2 = 50, rg2 = 255, rb2 = 200;   // cool bottom
 
-  int spec_shape = get_nowbar_spectrum_shape();
   float bar_w = (float)bar_w_i;
-  float radius = bar_w * 0.5f;
 
   // Disable anti-aliasing so bar edges don't bleed into the gaps
   Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
@@ -4067,7 +4075,6 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
   g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
 
-  Gdiplus::GraphicsPath path;
   float bottom_f = (float)m_rect_spectrum.bottom;
 
   // Lambda to draw one bar given position, value, color params, and channel side
@@ -4098,58 +4105,16 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
       if (stereo && is_right) hue = 300.0f - hue;  // Mirror frequency colors
       COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
-      if (spec_shape == 0) {
-        path.Reset();
-        if (height > radius * 2.0f) {
-          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-          path.AddLine(x, bottom_f, x, y + radius);
-        } else {
-          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
-        }
-        path.CloseFigure();
-        g.FillPath(&barBrush, &path);
-      } else {
-        g.FillRectangle(&barBrush, x, y, bar_w, height);
-      }
+      g.FillRectangle(&barBrush, x, y, bar_w, height);
     } else if (gradient_mode == 1 && !stereo) {
       Gdiplus::LinearGradientBrush barBrush(
           Gdiplus::PointF(x, y), Gdiplus::PointF(x, bottom_f),
           Gdiplus::Color(alpha, cr1, cg1, cb1),
           Gdiplus::Color(alpha, cr2_g, cg2_g, cb2_g));
-      if (spec_shape == 0) {
-        path.Reset();
-        if (height > radius * 2.0f) {
-          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-          path.AddLine(x, bottom_f, x, y + radius);
-        } else {
-          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
-        }
-        path.CloseFigure();
-        g.FillPath(&barBrush, &path);
-      } else {
-        g.FillRectangle(&barBrush, x, y, bar_w, height);
-      }
+      g.FillRectangle(&barBrush, x, y, bar_w, height);
     } else {
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, cr1, cg1, cb1));
-      if (spec_shape == 0) {
-        path.Reset();
-        if (height > radius * 2.0f) {
-          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-          path.AddLine(x, bottom_f, x, y + radius);
-        } else {
-          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
-        }
-        path.CloseFigure();
-        g.FillPath(&barBrush, &path);
-      } else {
-        g.FillRectangle(&barBrush, x, y, bar_w, height);
-      }
+      g.FillRectangle(&barBrush, x, y, bar_w, height);
     }
   };
 
@@ -4586,7 +4551,6 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   BYTE lr1 = 255, lg1 = 100, lb1 = 50;
   BYTE rr1 = 50, rg1 = 200, rb1 = 180;
 
-  int spec_shape = get_nowbar_spectrum_shape();
   int stride = area_w;  // pixels per row (DIBSECTION is tightly packed)
 
   // Lambda to render one bar into the overlay
@@ -4599,9 +4563,6 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
     if (bx + bw > area_w) bw = area_w - bx;
     if (bw < 1 || bx < 0) return;
     int by = area_h - bar_h;
-
-    int rad = (spec_shape == 0 && !is_dominoes) ? bw / 2 : 0;
-    float rad_f = (float)rad;
 
     // Dominoes segmentation: 4px segments with 2px gaps, aligned from bottom
     constexpr int domino_seg_h = 4;
@@ -4638,19 +4599,6 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
       int left = bx;
       int right = bx + bw;
-
-      if (rad > 0 && row < by + rad) {
-        float dy = (float)(by + rad) - (float)row - 0.5f;
-        if (dy > rad_f) continue;
-        float dx = sqrtf(rad_f * rad_f - dy * dy);
-        int center = bx + bw / 2;
-        int pl = center - (int)dx;
-        int pr_x = center + (int)dx;
-        if (pl < bx) pl = bx;
-        if (pr_x > bx + bw) pr_x = bx + bw;
-        left = pl;
-        right = pr_x;
-      }
 
       int row_r, row_g, row_b;
       if (gradient_mode == 2) {
@@ -4802,7 +4750,6 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   bool stereo = false;
 
   float bar_w = (float)bar_w_i;
-  float radius = bar_w * 0.5f;
 
   // Colors from preferences
   COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
@@ -4820,8 +4767,6 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   // Stereo default colors
   BYTE lr1 = 255, lg1 = 100, lb1 = 50;
   BYTE rr1 = 50, rg1 = 200, rb1 = 180;
-
-  int spec_shape = get_nowbar_spectrum_shape();
 
   Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
   Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
@@ -4882,18 +4827,6 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, GetRValue(freq_color), GetGValue(freq_color), GetBValue(freq_color)));
       if (is_dominoes) {
         fill_domino_segments(x, y, height, barBrush);
-      } else if (spec_shape == 0) {
-        path.Reset();
-        if (height > radius * 2.0f) {
-          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-          path.AddLine(x, bottom_f, x, y + radius);
-        } else {
-          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
-        }
-        path.CloseFigure();
-        g.FillPath(&barBrush, &path);
       } else {
         g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
@@ -4904,18 +4837,6 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
           Gdiplus::Color(alpha, r2, g2, b2));
       if (is_dominoes) {
         fill_domino_segments(x, y, height, barBrush);
-      } else if (spec_shape == 0) {
-        path.Reset();
-        if (height > radius * 2.0f) {
-          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-          path.AddLine(x, bottom_f, x, y + radius);
-        } else {
-          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
-        }
-        path.CloseFigure();
-        g.FillPath(&barBrush, &path);
       } else {
         g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
@@ -4923,18 +4844,6 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
       Gdiplus::SolidBrush barBrush(Gdiplus::Color(alpha, cr1, cg1, cb1));
       if (is_dominoes) {
         fill_domino_segments(x, y, height, barBrush);
-      } else if (spec_shape == 0) {
-        path.Reset();
-        if (height > radius * 2.0f) {
-          path.AddArc(x, y, bar_w, radius * 2.0f, 180.0f, 180.0f);
-          path.AddLine(x + bar_w, y + radius, x + bar_w, bottom_f);
-          path.AddLine(x + bar_w, bottom_f, x, bottom_f);
-          path.AddLine(x, bottom_f, x, y + radius);
-        } else {
-          path.AddRectangle(Gdiplus::RectF(x, y, bar_w, height));
-        }
-        path.CloseFigure();
-        g.FillPath(&barBrush, &path);
       } else {
         g.FillRectangle(&barBrush, x, y, bar_w, height);
       }
@@ -5187,6 +5096,9 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
                               (bg_style == 2 && m_blurred_artwork);
   Gdiplus::Color time_color = use_light_foreground
       ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+  COLORREF custom_time_color;
+  if (get_nowbar_time_font_color(custom_time_color))
+      time_color = Gdiplus::Color(255, GetRValue(custom_time_color), GetGValue(custom_time_color), GetBValue(custom_time_color));
   Gdiplus::SolidBrush timeBrush(time_color);
 
   Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
