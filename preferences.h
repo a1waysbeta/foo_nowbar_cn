@@ -42,7 +42,6 @@ bool get_nowbar_spectrum_visible();  // true=Enabled, false=Disabled
 int get_nowbar_visualization_mode();  // 0=Disabled, 1=Spectrum, 2=Waveform
 COLORREF get_nowbar_spectrum_color();
 int get_nowbar_spectrum_width();     // 0=Thin, 1=Normal, 2=Wide
-int get_nowbar_spectrum_shape();     // 0=Pill, 1=Rectangle
 int get_nowbar_spectrum_style();     // 0=Mono, 1=Curve, 2=Dominoes
 int get_nowbar_spectrum_height();    // 0=Low, 1=Normal, 2=High
 int get_nowbar_spectrum_opacity();       // 0-100
@@ -146,6 +145,12 @@ void set_nowbar_time_font(const LOGFONT& font);
 void reset_nowbar_fonts();
 LOGFONT get_nowbar_default_font(bool is_artist);
 LOGFONT get_nowbar_default_time_font();
+void set_nowbar_track_font_color(COLORREF color);
+void set_nowbar_artist_font_color(COLORREF color);
+void set_nowbar_time_font_color(COLORREF color);
+bool get_nowbar_track_font_color(COLORREF& color);
+bool get_nowbar_artist_font_color(COLORREF& color);
+bool get_nowbar_time_font_color(COLORREF& color);
 
 // Preferences page instance - the actual dialog
 class nowbar_preferences : public preferences_page_instance {
