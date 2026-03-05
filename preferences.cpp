@@ -348,6 +348,11 @@ static cfg_string cfg_nowbar_line2_format(
     "%artist%"  // Default: artist only
 );
 
+static cfg_string cfg_nowbar_line3_format(
+    GUID{0xABCDEF32, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC2}},
+    ""  // Default: empty (disabled)
+);
+
 // Font configuration
 static cfg_struct_t<LOGFONT> cfg_nowbar_artist_font(
     GUID{0xABCDEF02, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8A}},
@@ -371,6 +376,22 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_track_font(
         LOGFONT lf = {};
         lf.lfHeight = -21;  // ~15.4pt at 96 DPI (40% larger than 11pt)
         lf.lfWeight = FW_BOLD;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        return lf;
+    }()
+);
+
+static cfg_struct_t<LOGFONT> cfg_nowbar_line3_font(
+    GUID{0xABCDEF0F, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x97}},
+    []() {
+        LOGFONT lf = {};
+        lf.lfHeight = -17;  // Same as artist font default
+        lf.lfWeight = FW_NORMAL;
         lf.lfCharSet = DEFAULT_CHARSET;
         lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
@@ -410,6 +431,11 @@ static cfg_int cfg_nowbar_track_font_color(
 
 static cfg_int cfg_nowbar_artist_font_color(
     GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC1}},
+    -1  // Default: use theme color
+);
+
+static cfg_int cfg_nowbar_line3_font_color(
+    GUID{0xABCDEF04, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC3}},
     -1  // Default: use theme color
 );
 
@@ -1650,6 +1676,10 @@ bool get_nowbar_rating_visible() {
     return cfg_nowbar_rating_visible != 0;
 }
 
+int get_nowbar_rating_mode() {
+    return cfg_nowbar_rating_visible;  // 0=Hidden, 1=Show, 2=Line 3
+}
+
 int get_nowbar_mood_tag_mode() {
     return cfg_nowbar_mood_tag_mode;
 }
@@ -2030,6 +2060,10 @@ pfc::string8 get_nowbar_line1_format() {
 
 pfc::string8 get_nowbar_line2_format() {
     return cfg_nowbar_line2_format.get();
+}
+
+pfc::string8 get_nowbar_line3_format() {
+    return cfg_nowbar_line3_format.get();
 }
 
 // Execute a foobar2000 main menu command by path (e.g., "Playback/Matrix Now Playing/Announce current track to Matrix")
@@ -2652,6 +2686,10 @@ LOGFONT get_nowbar_track_font() {
     return cfg_nowbar_track_font.get_value();
 }
 
+LOGFONT get_nowbar_line3_font() {
+    return cfg_nowbar_line3_font.get_value();
+}
+
 LOGFONT get_nowbar_time_font() {
     return cfg_nowbar_time_font.get_value();
 }
@@ -2660,6 +2698,7 @@ void set_nowbar_artist_font(const LOGFONT& font) {
     // When enabling custom fonts for the first time, preserve other fonts' current appearance
     if (cfg_nowbar_use_custom_fonts == 0) {
         cfg_nowbar_track_font = get_nowbar_default_font(false);
+        cfg_nowbar_line3_font = get_nowbar_default_font(true);
         cfg_nowbar_time_font = get_nowbar_default_time_font();
     }
     cfg_nowbar_artist_font = font;
@@ -2670,9 +2709,20 @@ void set_nowbar_track_font(const LOGFONT& font) {
     // When enabling custom fonts for the first time, preserve other fonts' current appearance
     if (cfg_nowbar_use_custom_fonts == 0) {
         cfg_nowbar_artist_font = get_nowbar_default_font(true);
+        cfg_nowbar_line3_font = get_nowbar_default_font(true);
         cfg_nowbar_time_font = get_nowbar_default_time_font();
     }
     cfg_nowbar_track_font = font;
+    cfg_nowbar_use_custom_fonts = 1;
+}
+
+void set_nowbar_line3_font(const LOGFONT& font) {
+    if (cfg_nowbar_use_custom_fonts == 0) {
+        cfg_nowbar_artist_font = get_nowbar_default_font(true);
+        cfg_nowbar_track_font = get_nowbar_default_font(false);
+        cfg_nowbar_time_font = get_nowbar_default_time_font();
+    }
+    cfg_nowbar_line3_font = font;
     cfg_nowbar_use_custom_fonts = 1;
 }
 
@@ -2681,6 +2731,7 @@ void set_nowbar_time_font(const LOGFONT& font) {
     if (cfg_nowbar_use_custom_fonts == 0) {
         cfg_nowbar_artist_font = get_nowbar_default_font(true);
         cfg_nowbar_track_font = get_nowbar_default_font(false);
+        cfg_nowbar_line3_font = get_nowbar_default_font(true);
     }
     cfg_nowbar_time_font = font;
     cfg_nowbar_use_custom_fonts = 1;
@@ -2692,6 +2743,10 @@ void set_nowbar_track_font_color(COLORREF color) {
 
 void set_nowbar_artist_font_color(COLORREF color) {
     cfg_nowbar_artist_font_color = static_cast<t_int32>(color);
+}
+
+void set_nowbar_line3_font_color(COLORREF color) {
+    cfg_nowbar_line3_font_color = static_cast<t_int32>(color);
 }
 
 void set_nowbar_time_font_color(COLORREF color) {
@@ -2712,6 +2767,13 @@ bool get_nowbar_artist_font_color(COLORREF& color) {
     return true;
 }
 
+bool get_nowbar_line3_font_color(COLORREF& color) {
+    t_int32 val = cfg_nowbar_line3_font_color;
+    if (val < 0) return false;
+    color = static_cast<COLORREF>(val);
+    return true;
+}
+
 bool get_nowbar_time_font_color(COLORREF& color) {
     t_int32 val = cfg_nowbar_time_font_color;
     if (val < 0) return false;
@@ -2723,9 +2785,11 @@ void reset_nowbar_fonts() {
     cfg_nowbar_use_custom_fonts = 0;
     cfg_nowbar_artist_font = get_nowbar_default_font(true);
     cfg_nowbar_track_font = get_nowbar_default_font(false);
+    cfg_nowbar_line3_font = get_nowbar_default_font(true);
     cfg_nowbar_time_font = get_nowbar_default_time_font();
     cfg_nowbar_track_font_color = -1;
     cfg_nowbar_artist_font_color = -1;
+    cfg_nowbar_line3_font_color = -1;
     cfg_nowbar_time_font_color = -1;
 }
 
@@ -2844,6 +2908,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_LINE1_FORMAT_EDIT), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_LINE2_FORMAT_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_LINE2_FORMAT_EDIT), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FORMAT_LABEL), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FORMAT_EDIT), show_general);
     // Mood Tag setting
     ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), show_general);
@@ -3009,6 +3075,9 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_LABEL), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_DISPLAY), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_SELECT), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FONT_LABEL), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FONT_DISPLAY), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FONT_SELECT), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_LABEL), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_DISPLAY), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_SELECT), show_fonts);
@@ -3239,6 +3308,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         // Initialize display format edit controls
         uSetDlgItemText(hwnd, IDC_LINE1_FORMAT_EDIT, cfg_nowbar_line1_format);
         uSetDlgItemText(hwnd, IDC_LINE2_FORMAT_EDIT, cfg_nowbar_line2_format);
+        uSetDlgItemText(hwnd, IDC_LINE3_FORMAT_EDIT, cfg_nowbar_line3_format);
         
         // Initialize theme mode combobox
         HWND hThemeCombo = GetDlgItem(hwnd, IDC_THEME_MODE_COMBO);
@@ -3335,11 +3405,17 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hRepeatIconCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
         SendMessage(hRepeatIconCombo, CB_SETCURSEL, cfg_nowbar_repeat_icon_visible ? 0 : 1, 0);
 
-        // Initialize rating stars visibility combobox
+        // Initialize rating stars visibility combobox (0=Hidden, 1=Show, 2=Line 3)
         HWND hRatingStarsCombo = GetDlgItem(hwnd, IDC_RATING_STARS_COMBO);
         SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
         SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
-        SendMessage(hRatingStarsCombo, CB_SETCURSEL, cfg_nowbar_rating_visible ? 0 : 1, 0);
+        SendMessage(hRatingStarsCombo, CB_ADDSTRING, 0, (LPARAM)L"Line 3");
+        {
+            int rating_sel = 1;  // Default: Hidden
+            if (cfg_nowbar_rating_visible == 1) rating_sel = 0;       // Show
+            else if (cfg_nowbar_rating_visible == 2) rating_sel = 2;  // Line 3
+            SendMessage(hRatingStarsCombo, CB_SETCURSEL, rating_sel, 0);
+        }
 
         // Initialize stop icon visibility combobox
         HWND hStopIconCombo = GetDlgItem(hwnd, IDC_STOP_ICON_COMBO);
@@ -3762,6 +3838,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         case IDC_LINE1_FORMAT_EDIT:
         case IDC_LINE2_FORMAT_EDIT:
+        case IDC_LINE3_FORMAT_EDIT:
             if (HIWORD(wp) == EN_CHANGE) {
                 p_this->on_changed();
             }
@@ -4289,6 +4366,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             }
             break;
 
+        case IDC_LINE3_FONT_SELECT:
+            if (HIWORD(wp) == BN_CLICKED) {
+                p_this->select_line3_font();
+            }
+            break;
+
         case IDC_TIME_FONT_SELECT:
             if (HIWORD(wp) == BN_CLICKED) {
                 p_this->select_time_font();
@@ -4478,7 +4561,17 @@ void nowbar_preferences::apply_settings() {
         cfg_nowbar_line1_format = format_str;
         uGetDlgItemText(m_hwnd, IDC_LINE2_FORMAT_EDIT, format_str);
         cfg_nowbar_line2_format = format_str;
-        
+        uGetDlgItemText(m_hwnd, IDC_LINE3_FORMAT_EDIT, format_str);
+        cfg_nowbar_line3_format = format_str;
+
+        // If Line 3 text is non-empty and Rating Stars is set to "Line 3", reset rating to Hidden
+        if (format_str.get_length() > 0 && cfg_nowbar_rating_visible == 2) {
+            cfg_nowbar_rating_visible = 0;
+            // Update the Rating Stars combo if it's visible (Icons tab)
+            HWND hRatingCombo = GetDlgItem(m_hwnd, IDC_RATING_STARS_COMBO);
+            if (hRatingCombo) SendMessage(hRatingCombo, CB_SETCURSEL, 1, 0);  // 1 = Hidden
+        }
+
         // Save theme mode
         cfg_nowbar_theme_mode = (int)SendMessage(GetDlgItem(m_hwnd, IDC_THEME_MODE_COMBO), CB_GETCURSEL, 0, 0);
         
@@ -4527,9 +4620,18 @@ void nowbar_preferences::apply_settings() {
         int repeatIconSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_REPEAT_ICON_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_repeat_icon_visible = (repeatIconSel == 0) ? 1 : 0;
 
-        // Save rating stars visibility
+        // Save rating stars visibility (combo: 0=Show, 1=Hidden, 2=Line 3 -> config: 1=Show, 0=Hidden, 2=Line 3)
         int ratingStarsSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_RATING_STARS_COMBO), CB_GETCURSEL, 0, 0);
-        cfg_nowbar_rating_visible = (ratingStarsSel == 0) ? 1 : 0;
+        if (ratingStarsSel == 0) cfg_nowbar_rating_visible = 1;       // Show
+        else if (ratingStarsSel == 2) {
+            cfg_nowbar_rating_visible = 2;  // Line 3
+            // If Line 3 text is set, clear it — rating stars take over that space
+            if (cfg_nowbar_line3_format.get().get_length() > 0) {
+                cfg_nowbar_line3_format = "";
+                uSetDlgItemText(m_hwnd, IDC_LINE3_FORMAT_EDIT, "");
+            }
+        }
+        else cfg_nowbar_rating_visible = 0;                           // Hidden
 
         // Save stop icon visibility (0=Show, 1=Hidden in combobox -> config 1=Show, 0=Hidden)
         int stopIconSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_STOP_ICON_COMBO), CB_GETCURSEL, 0, 0);
@@ -4723,6 +4825,7 @@ void nowbar_preferences::reset_settings() {
             // Reset General tab settings (Display Format, Auto-hide C-buttons, Mood Tag, Skip Low Rating)
             cfg_nowbar_line1_format = "%title%";  // Default format
             cfg_nowbar_line2_format = "%artist%";  // Default format
+            cfg_nowbar_line3_format = "";  // Default: disabled
             cfg_nowbar_mood_tag_mode = 0;  // FEEDBACK (default)
             cfg_nowbar_skip_low_rating_enabled = 0;  // Disabled (default)
             cfg_nowbar_skip_low_rating_threshold = 1;  // 1 (default)
@@ -4737,6 +4840,7 @@ void nowbar_preferences::reset_settings() {
             // Update General tab UI
             uSetDlgItemText(m_hwnd, IDC_LINE1_FORMAT_EDIT, "%title%");
             uSetDlgItemText(m_hwnd, IDC_LINE2_FORMAT_EDIT, "%artist%");
+            uSetDlgItemText(m_hwnd, IDC_LINE3_FORMAT_EDIT, "");
             SendMessage(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), CB_SETCURSEL, 0, 0);  // Default: FEEDBACK
             SendMessage(GetDlgItem(m_hwnd, IDC_SKIP_LOW_RATING_COMBO), CB_SETCURSEL, 0, 0);  // Default: Disabled
             SendMessage(GetDlgItem(m_hwnd, IDC_SKIP_RATING_THRESHOLD_COMBO), CB_SETCURSEL, 0, 0);  // Default: 1
@@ -4970,6 +5074,15 @@ void nowbar_preferences::update_font_displays() {
         uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, "Microsoft YaHei, 13pt, Regular (Default)");
     }
 
+    // Line 3 font
+    if (get_nowbar_use_custom_fonts()) {
+        LOGFONT lf = get_nowbar_line3_font();
+        pfc::string8 desc = format_font_name(lf);
+        uSetDlgItemText(m_hwnd, IDC_LINE3_FONT_DISPLAY, desc);
+    } else {
+        uSetDlgItemText(m_hwnd, IDC_LINE3_FONT_DISPLAY, "Microsoft YaHei, 13pt, Regular (Default)");
+    }
+
     // Time font
     if (get_nowbar_use_custom_fonts()) {
         LOGFONT lf = get_nowbar_time_font();
@@ -5016,6 +5129,27 @@ void nowbar_preferences::select_artist_font() {
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
         set_nowbar_artist_font_color(cf.rgbColors);
+        update_font_displays();
+        on_changed();
+        nowbar::ControlPanelCore::notify_all_settings_changed();
+    }
+}
+
+void nowbar_preferences::select_line3_font() {
+    LOGFONT lf = get_nowbar_use_custom_fonts() ? get_nowbar_line3_font() : get_nowbar_default_font(true);
+
+    CHOOSEFONT cf = {};
+    cf.lStructSize = sizeof(cf);
+    cf.hwndOwner = m_hwnd;
+    cf.lpLogFont = &lf;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_NOVERTFONTS | CF_SCALABLEONLY;
+    COLORREF saved_color;
+    if (get_nowbar_line3_font_color(saved_color))
+        cf.rgbColors = saved_color;
+
+    if (ChooseFont(&cf)) {
+        set_nowbar_line3_font(lf);
+        set_nowbar_line3_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
         nowbar::ControlPanelCore::notify_all_settings_changed();
