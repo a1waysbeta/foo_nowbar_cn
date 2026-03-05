@@ -4153,8 +4153,9 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
     }
   };
 
-  // Lambda to draw peak indicator
+  // Lambda to draw peak indicator (not used in Dominoes mode)
   auto draw_peak = [&](float x, float peak_val, float bar_val, int bar_idx, int half_count, bool is_right) {
+    if (spec_style == 2) return;  // No peaks in Dominoes mode
     if (peak_val <= bar_val) return;
     float peak_y = bottom_f - peak_val * (float)area_h;
     BYTE pr, pg, pb;
@@ -4677,8 +4678,8 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
       }
     }
 
-    // Peak indicator (2px line above bar)
-    if (bar_idx < (int)peaks_vec.size() && bar_idx < (int)bars_vec.size() &&
+    // Peak indicator (2px line above bar) — skip in Dominoes mode
+    if (!is_dominoes && bar_idx < (int)peaks_vec.size() && bar_idx < (int)bars_vec.size() &&
         peaks_vec[bar_idx] > bars_vec[bar_idx]) {
       int peak_y = area_h - (int)(peaks_vec[bar_idx] * area_h);
       int peak_r = base_r, peak_g = base_g, peak_b = base_b;
@@ -4941,6 +4942,7 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   };
 
   auto draw_gdiplus_peak = [&](float x, float peak_val, float bar_val, int bar_idx, int half_count, bool is_right) {
+    if (is_dominoes) return;  // No peaks in Dominoes mode
     if (peak_val <= bar_val) return;
     float peak_y = bottom_f - peak_val * (float)area_h;
     BYTE pr, pg, pb;
