@@ -728,6 +728,11 @@ void ControlPanelCore::update_fonts() {
                           ? get_nowbar_artist_font()
                           : get_nowbar_default_font(true);
 
+  // Line 3 font (defaults to same as artist)
+  LOGFONT lf_line3 = get_nowbar_use_custom_fonts()
+                         ? get_nowbar_line3_font()
+                         : get_nowbar_default_font(true);
+
   // Time font
   LOGFONT lf_time = get_nowbar_use_custom_fonts()
                         ? get_nowbar_time_font()
@@ -737,6 +742,7 @@ void ControlPanelCore::update_fonts() {
   HDC hdc = GetDC(m_hwnd);
   Gdiplus::Font *titleFont = new Gdiplus::Font(hdc, &lf_track);
   Gdiplus::Font *artistFont = new Gdiplus::Font(hdc, &lf_artist);
+  Gdiplus::Font *line3Font = new Gdiplus::Font(hdc, &lf_line3);
   Gdiplus::Font *timeFont = new Gdiplus::Font(hdc, &lf_time);
 
   // Validate fonts — GDI+ silently fails on bitmap/raster fonts.
@@ -751,6 +757,11 @@ void ControlPanelCore::update_fonts() {
     lf_artist = get_nowbar_default_font(true);
     artistFont = new Gdiplus::Font(hdc, &lf_artist);
   }
+  if (line3Font->GetLastStatus() != Gdiplus::Ok) {
+    delete line3Font;
+    lf_line3 = get_nowbar_default_font(true);
+    line3Font = new Gdiplus::Font(hdc, &lf_line3);
+  }
   if (timeFont->GetLastStatus() != Gdiplus::Ok) {
     delete timeFont;
     lf_time = get_nowbar_default_time_font();
@@ -761,12 +772,14 @@ void ControlPanelCore::update_fonts() {
 
   m_font_title.reset(titleFont);
   m_font_artist.reset(artistFont);
+  m_font_line3.reset(line3Font);
   m_font_time.reset(timeFont);
 
   // Measure actual font pixel heights for layout
   float dpi = 96.0f * m_dpi_scale;
   m_title_font_height = static_cast<int>(m_font_title->GetHeight(dpi) + 0.99f);
   m_artist_font_height = static_cast<int>(m_font_artist->GetHeight(dpi) + 0.99f);
+  m_line3_font_height = static_cast<int>(m_font_line3->GetHeight(dpi) + 0.99f);
 
   invalidate();
 }
@@ -1249,7 +1262,8 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   }
 
   // Rating stars - positioned to the left of heart (or shuffle if heart hidden)
-  if (get_nowbar_rating_visible()) {
+  // In "Line 3" mode (rating_mode==2), stars are drawn inside track info instead
+  if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2) {
     int star_size = static_cast<int>(button_size * 0.55f);
     int star_gap = static_cast<int>(2 * m_dpi_scale);
     int total_rating_width = star_size * 5 + star_gap * 4;
@@ -1509,7 +1523,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // in Normal/Waveform modes. In Spectrum mode, the timer is in the top-right corner.
   int reference_left;
   int timer_space;
-  if (get_nowbar_rating_visible() && m_rect_rating.right > m_rect_rating.left) {
+  if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2 && m_rect_rating.right > m_rect_rating.left) {
     reference_left = m_rect_rating.left;
     timer_space = static_cast<int>(spacing);
   } else if (get_nowbar_mood_icon_visible()) {
@@ -1530,11 +1544,32 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int artist_h = m_artist_font_height > 0
       ? m_artist_font_height
       : static_cast<int>(m_metrics.text_height);
+  int line3_font_h = m_line3_font_height > 0
+      ? m_line3_font_height
+      : static_cast<int>(m_metrics.text_height);
   int text_gap = static_cast<int>(4 * m_dpi_scale);
-  int info_height = title_h + artist_h + text_gap; // Actual font sizes + gap
+  bool line3_active = (get_nowbar_line3_format().get_length() > 0);
+  bool rating_on_line3 = (get_nowbar_rating_mode() == 2) && !line3_active;
+  int line3_h = line3_active ? (line3_font_h + text_gap) : 0;
+  int rating_line_h = rating_on_line3 ? (artist_h + text_gap) : 0;
+  int info_height = title_h + artist_h + text_gap + line3_h + rating_line_h;
   int info_y =
       y_center - info_height / 2; // Centered on panel, not offset with controls
   m_rect_track_info = {info_x, info_y, info_right, info_y + info_height};
+
+  // In Line 3 mode, position rating stars within the track info area
+  if (rating_on_line3) {
+    int star_size = static_cast<int>(artist_h * 0.85f);
+    int star_gap = static_cast<int>(2 * m_dpi_scale);
+    int total_rating_width = star_size * 5 + star_gap * 4;
+    int rating_y = info_y + title_h + text_gap + artist_h + line3_h + text_gap;
+    int star_y_center = rating_y + (artist_h - star_size) / 2 - text_gap;
+    m_rect_rating = {info_x, star_y_center, info_x + total_rating_width, star_y_center + star_size};
+    for (int i = 0; i < 5; i++) {
+      int sx = info_x + i * (star_size + star_gap);
+      m_rect_stars[i] = {sx, star_y_center, sx + star_size, star_y_center + star_size};
+    }
+  }
 
   // Calculate full-scale button positions for seekbar/spectrum extent
   int full_button_size = static_cast<int>(m_metrics.button_size);
@@ -2655,6 +2690,7 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   // Use formatted strings from title formatting
   std::wstring line1 = utf8_to_wide(m_formatted_line1.c_str());
   std::wstring line2 = utf8_to_wide(m_formatted_line2.c_str());
+  std::wstring line3 = utf8_to_wide(m_formatted_line3.c_str());
 
   g.DrawString(line1.c_str(), -1, m_font_title.get(), titleRect, &sf,
                &titleBrush);
@@ -2662,7 +2698,60 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
     g.DrawString(line2.c_str(), -1, m_font_artist.get(), artistRect, &sf,
                  &artistBrush);
   }
-  
+
+  if (!line3.empty()) {
+    int line3_font_h = m_line3_font_height > 0
+        ? m_line3_font_height
+        : static_cast<int>(m_metrics.text_height);
+
+    // Apply custom Line 3 font color if set, otherwise use artist/secondary color
+    Gdiplus::SolidBrush* line3BrushPtr = &artistBrush;
+    COLORREF line3_custom_color;
+    Gdiplus::SolidBrush line3CustomBrush(Gdiplus::Color(0, 0, 0, 0));
+    if (get_nowbar_line3_font_color(line3_custom_color)) {
+        line3CustomBrush.SetColor(Gdiplus::Color(255, GetRValue(line3_custom_color), GetGValue(line3_custom_color), GetBValue(line3_custom_color)));
+        line3BrushPtr = &line3CustomBrush;
+    }
+
+    Gdiplus::RectF line3Rect(
+        (float)m_rect_track_info.left,
+        artistRect.Y + (float)artist_h + (float)text_gap,
+        artist_w,
+        (float)line3_font_h);
+    g.DrawString(line3.c_str(), -1, m_font_line3.get(), line3Rect, &sf,
+                 line3BrushPtr);
+  }
+
+  // Rating stars on Line 3 mode — draw within track info area (only when a track is loaded)
+  // Line 3 text takes priority over rating stars
+  if (get_nowbar_rating_mode() == 2 && get_nowbar_line3_format().get_length() == 0 && (m_state.is_playing || m_state.is_paused)) {
+    Gdiplus::Color ratingAccentColor(255, 255, 193, 7);  // Material Design Amber
+
+    // Determine secondary color for unrated stars (same logic as draw_playback_buttons)
+    int bg_style_local = get_nowbar_background_style();
+    bool use_light_fg = (bg_style_local == 1 && m_artwork_colors_valid) ||
+                        (bg_style_local == 2 && m_blurred_artwork);
+    Gdiplus::Color star_secondary = use_light_fg
+        ? Gdiplus::Color(255, 200, 200, 200)
+        : m_text_secondary_color;
+
+    for (int i = 0; i < 5; i++) {
+      int star_num = i + 1;
+      RECT star_rect = m_rect_stars[i];
+      if (star_rect.right <= star_rect.left) continue;
+
+      Gdiplus::Color star_color;
+      if (m_rating_hover_star > 0) {
+        star_color = (star_num <= m_rating_hover_star) ? ratingAccentColor : star_secondary;
+      } else if (m_rating_value > 0) {
+        star_color = (star_num <= m_rating_value) ? ratingAccentColor : star_secondary;
+      } else {
+        star_color = star_secondary;
+      }
+      draw_star_filled_icon(g, star_rect, star_color);
+    }
+  }
+
   // Reset clipping region after drawing text
   g.ResetClip();
 }
@@ -2724,8 +2813,8 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     draw_heart_icon(g, heartIconRect, heartColor);
   }
 
-  // Rating stars - 5 clickable stars
-  if (get_nowbar_rating_visible()) {
+  // Rating stars - 5 clickable stars (not drawn here in Line 3 mode)
+  if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2) {
     // Gold color for rated/hovered stars
     Gdiplus::Color ratingAccentColor(255, 255, 193, 7);  // Material Design Amber
 
@@ -5495,18 +5584,19 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     }
     if (new_hover_star != m_rating_hover_star) {
       m_rating_hover_star = new_hover_star;
-      if (m_spectrum_animating) {
-        invalidate_soft();
-      } else {
+      // Line 3 mode: stars are in track info area (not redrawn by fast path)
+      if (get_nowbar_rating_mode() == 2 || !m_spectrum_animating) {
         invalidate();
+      } else {
+        invalidate_soft();
       }
     }
   } else if (m_rating_hover_star != 0) {
     m_rating_hover_star = 0;
-    if (m_spectrum_animating || m_waveform_animating) {
-      invalidate_soft();
-    } else {
+    if (get_nowbar_rating_mode() == 2 || !(m_spectrum_animating || m_waveform_animating)) {
       invalidate();
+    } else {
+      invalidate_soft();
     }
   }
 
@@ -7985,13 +8075,17 @@ void ControlPanelCore::update_title_formats() {
   auto compiler = titleformat_compiler::get();
   pfc::string8 line1_fmt = get_nowbar_line1_format();
   pfc::string8 line2_fmt = get_nowbar_line2_format();
+  pfc::string8 line3_fmt = get_nowbar_line3_format();
 
   m_titleformat_line1.release();
   m_titleformat_line2.release();
+  m_titleformat_line3.release();
 
   // Compile format strings (compile_safe_ex returns false on error but populates with fallback)
   compiler->compile_safe_ex(m_titleformat_line1, line1_fmt.c_str());
   compiler->compile_safe_ex(m_titleformat_line2, line2_fmt.c_str());
+  if (line3_fmt.get_length() > 0)
+    compiler->compile_safe_ex(m_titleformat_line3, line3_fmt.c_str());
 
   // Re-evaluate with current track
   evaluate_title_formats();
@@ -8001,6 +8095,7 @@ void ControlPanelCore::evaluate_title_formats() {
   if (!m_state.current_track.is_valid()) {
     m_formatted_line1 = m_state.track_title;
     m_formatted_line2 = m_state.track_artist;
+    m_formatted_line3 = "";
     return;
   }
 
@@ -8034,6 +8129,19 @@ void ControlPanelCore::evaluate_title_formats() {
     }
   } else {
     m_formatted_line2 = m_state.track_artist;
+  }
+
+  if (m_titleformat_line3.is_valid()) {
+    if (use_playback) {
+      pc->playback_format_title(nullptr, m_formatted_line3,
+                                m_titleformat_line3, nullptr,
+                                playback_control::display_level_all);
+    } else {
+      m_state.current_track->format_title(nullptr, m_formatted_line3,
+                                          m_titleformat_line3, nullptr);
+    }
+  } else {
+    m_formatted_line3 = "";
   }
 }
 
