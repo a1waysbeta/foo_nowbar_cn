@@ -18,7 +18,8 @@ int get_nowbar_seekbar_position();  // -100 to +100 pixel offset
 bool get_nowbar_mood_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_shuffle_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_repeat_icon_visible();  // true=Show, false=Hidden
-bool get_nowbar_rating_visible();  // true=Show, false=Hidden
+bool get_nowbar_rating_visible();  // true=Show or Line 3, false=Hidden
+int get_nowbar_rating_mode();  // 0=Hidden, 1=Show, 2=Line 3
 int get_nowbar_mood_tag_mode();  // 0=FEEDBACK, 1=2003_LOVED, 2=LFM_LOVED, 3=SMP_LOVED, 4=MOOD
 bool get_nowbar_stop_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_stop_after_current_icon_visible();  // true=Show, false=Hidden
@@ -96,6 +97,7 @@ void reload_custom_button_config();  // Reload config file from disk
 // Display format configuration functions
 pfc::string8 get_nowbar_line1_format();
 pfc::string8 get_nowbar_line2_format();
+pfc::string8 get_nowbar_line3_format();
 
 // Config directory helpers
 pfc::string8 get_config_dir_path();
@@ -138,18 +140,22 @@ COLORREF get_nowbar_initial_bg_color();
 bool get_nowbar_use_custom_fonts();
 LOGFONT get_nowbar_artist_font();
 LOGFONT get_nowbar_track_font();
+LOGFONT get_nowbar_line3_font();
 LOGFONT get_nowbar_time_font();
 void set_nowbar_artist_font(const LOGFONT& font);
 void set_nowbar_track_font(const LOGFONT& font);
+void set_nowbar_line3_font(const LOGFONT& font);
 void set_nowbar_time_font(const LOGFONT& font);
 void reset_nowbar_fonts();
 LOGFONT get_nowbar_default_font(bool is_artist);
 LOGFONT get_nowbar_default_time_font();
 void set_nowbar_track_font_color(COLORREF color);
 void set_nowbar_artist_font_color(COLORREF color);
+void set_nowbar_line3_font_color(COLORREF color);
 void set_nowbar_time_font_color(COLORREF color);
 bool get_nowbar_track_font_color(COLORREF& color);
 bool get_nowbar_artist_font_color(COLORREF& color);
+bool get_nowbar_line3_font_color(COLORREF& color);
 bool get_nowbar_time_font_color(COLORREF& color);
 
 // Preferences page instance - the actual dialog
@@ -180,6 +186,7 @@ private:
     void update_font_displays();
     void select_artist_font();
     void select_track_font();
+    void select_line3_font();
     void select_time_font();
     pfc::string8 format_font_name(const LOGFONT& lf);
     
