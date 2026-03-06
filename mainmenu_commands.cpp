@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "preferences.h"
 #include <shellapi.h>
+#include <shlobj.h>
 
 // GUIDs for the Now Bar mainmenu group and commands
 // {D6A5E8F0-1234-5678-ABCD-000000000001} - Now Bar menu group
@@ -170,19 +171,12 @@ static void execute_cbutton_action(int button_index) {
                 pfc::string8 display_path;
                 filesystem::g_get_display_path(file_path, display_path);
 
-                // Extract the directory by finding the last backslash or forward slash
-                pfc::string8 dir_path(display_path);
-                t_size last_sep = dir_path.find_last('\\');
-                if (last_sep == pfc::infinite_size) {
-                    last_sep = dir_path.find_last('/');
-                }
-                if (last_sep != pfc::infinite_size) {
-                    dir_path.truncate(last_sep);
-                }
-
-                if (!dir_path.is_empty()) {
-                    pfc::stringcvt::string_wide_from_utf8 wideDir(dir_path);
-                    ShellExecuteW(nullptr, L"open", wideDir, nullptr, nullptr, SW_SHOWNORMAL);
+                // Open folder and select the file (opens in new tab on Windows 11)
+                pfc::stringcvt::string_wide_from_utf8 widePath(display_path);
+                PIDLIST_ABSOLUTE pidl = nullptr;
+                if (SUCCEEDED(SHParseDisplayName(widePath, nullptr, &pidl, 0, nullptr))) {
+                    SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+                    CoTaskMemFree(pidl);
                 }
             }
         }
