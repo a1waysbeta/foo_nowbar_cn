@@ -5069,8 +5069,8 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
 
     // Draw waveform bars with reveal cutoff
     int wave_w_setting = get_nowbar_waveform_width();
-    float bar_w_f = (wave_w_setting == 0) ? 0.5f : (wave_w_setting == 2) ? 2.0f : 1.0f;
-    float gap = 1.0f;
+    float bar_w_f = (wave_w_setting == 0) ? 0.5f : (wave_w_setting == 2) ? 1.0f : 1.0f;
+    float gap = 2.0f;
     float bar_total_w = bar_w_f + gap;
     int display_count = (int)((float)w / bar_total_w);
     if (display_count < 1) display_count = 1;
