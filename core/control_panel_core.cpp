@@ -8,6 +8,7 @@
 #include <mutex>
 #include <fstream>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <string>
 #include <vector>
 #pragma comment(lib, "comdlg32.lib")
@@ -1548,13 +1549,14 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       ? m_line3_font_height
       : static_cast<int>(m_metrics.text_height);
   int text_gap = static_cast<int>(4 * m_dpi_scale);
-  bool line3_active = (get_nowbar_line3_format().get_length() > 0);
-  bool rating_on_line3 = (get_nowbar_rating_mode() == 2) && !line3_active;
+  bool rating_on_line3 = (get_nowbar_rating_mode() == 2);
+  bool line3_active = !rating_on_line3 && (get_nowbar_line3_format().get_length() > 0);
   int line3_h = line3_active ? (line3_font_h + text_gap) : 0;
   int rating_line_h = rating_on_line3 ? (artist_h + text_gap) : 0;
   int info_height = title_h + artist_h + text_gap + line3_h + rating_line_h;
+  int info_nudge = static_cast<int>(2 * m_dpi_scale);
   int info_y =
-      y_center - info_height / 2; // Centered on panel, not offset with controls
+      y_center - info_height / 2 + info_nudge; // Centered on panel, nudged down slightly
   m_rect_track_info = {info_x, info_y, info_right, info_y + info_height};
 
   // In Line 3 mode, position rating stars within the track info area
@@ -1563,7 +1565,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     int star_gap = static_cast<int>(2 * m_dpi_scale);
     int total_rating_width = star_size * 5 + star_gap * 4;
     int rating_y = info_y + title_h + text_gap + artist_h + line3_h + text_gap;
-    int star_y_center = rating_y + (artist_h - star_size) / 2 - text_gap;
+    int star_y_center = rating_y + (artist_h - star_size) / 2;
     m_rect_rating = {info_x, star_y_center, info_x + total_rating_width, star_y_center + star_size};
     for (int i = 0; i < 5; i++) {
       int sx = info_x + i * (star_size + star_gap);
@@ -2699,7 +2701,8 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
                  &artistBrush);
   }
 
-  if (!line3.empty()) {
+  bool rating_on_line3_draw = (get_nowbar_rating_mode() == 2);
+  if (!line3.empty() && !rating_on_line3_draw) {
     int line3_font_h = m_line3_font_height > 0
         ? m_line3_font_height
         : static_cast<int>(m_metrics.text_height);
@@ -2723,8 +2726,7 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   }
 
   // Rating stars on Line 3 mode — draw within track info area (only when a track is loaded)
-  // Line 3 text takes priority over rating stars
-  if (get_nowbar_rating_mode() == 2 && get_nowbar_line3_format().get_length() == 0 && (m_state.is_playing || m_state.is_paused)) {
+  if (get_nowbar_rating_mode() == 2 && (m_state.is_playing || m_state.is_paused)) {
     Gdiplus::Color ratingAccentColor(255, 255, 193, 7);  // Material Design Amber
 
     // Determine secondary color for unrated stars (same logic as draw_playback_buttons)
@@ -6023,19 +6025,12 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
             pfc::string8 display_path;
             filesystem::g_get_display_path(file_path, display_path);
 
-            // Extract the directory by finding the last backslash or forward slash
-            pfc::string8 dir_path(display_path);
-            t_size last_sep = dir_path.find_last('\\');
-            if (last_sep == pfc::infinite_size) {
-              last_sep = dir_path.find_last('/');
-            }
-            if (last_sep != pfc::infinite_size) {
-              dir_path.truncate(last_sep);
-            }
-
-            if (!dir_path.is_empty()) {
-              pfc::stringcvt::string_wide_from_utf8 wideDir(dir_path);
-              ShellExecuteW(nullptr, L"open", wideDir, nullptr, nullptr, SW_SHOWNORMAL);
+            // Open folder and select the file (opens in new tab on Windows 11)
+            pfc::stringcvt::string_wide_from_utf8 widePath(display_path);
+            PIDLIST_ABSOLUTE pidl = nullptr;
+            if (SUCCEEDED(SHParseDisplayName(widePath, nullptr, &pidl, 0, nullptr))) {
+              SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+              CoTaskMemFree(pidl);
             }
           }
         }
