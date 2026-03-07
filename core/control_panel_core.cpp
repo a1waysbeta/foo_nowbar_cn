@@ -4724,7 +4724,7 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
           ((uint32_t)((peak_r * alpha) / 255) << 16) |
           ((uint32_t)((peak_g * alpha) / 255) << 8) |
           ((uint32_t)((peak_b * alpha) / 255));
-      for (int py = peak_y; py < peak_y + 2 && py < area_h; py++) {
+      for (int py = peak_y; py < peak_y + 1 && py < area_h; py++) {
         if (py < 0) continue;
         uint32_t* pixel = m_spectrum_overlay_bits + py * stride + bx;
         for (int col = 0; col < bw; col++) {
@@ -4957,7 +4957,7 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
       pr = r1; pg = g1; pb = b1;
     }
     Gdiplus::SolidBrush peakBrush(Gdiplus::Color(alpha, pr, pg, pb));
-    g.FillRectangle(&peakBrush, x, peak_y, bar_w, 2.0f);
+    g.FillRectangle(&peakBrush, x, peak_y, bar_w, 1.0f);
   };
 
   if (stereo) {
