@@ -2724,18 +2724,6 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
 
   bool rating_on_line3_draw = (get_nowbar_rating_mode() == 2);
   if (!line3.empty() && !rating_on_line3_draw && m_line3_visible) {
-    // Gradually truncate line 3 as panel narrows (~17 chars at minimum width).
-    // Only needed in Scaling mode where the seekbar pushes into the text area.
-    int min_w = get_min_size().cx;
-    if (get_nowbar_seekbar_length() == 1 && min_w > 0 && m_panel_width > 0) {
-      float w_ratio = static_cast<float>(m_panel_width) / static_cast<float>(min_w);
-      int char_limit = static_cast<int>(17.0f + 32.0f * (w_ratio - 1.0f));
-      if (char_limit < 17) char_limit = 17;
-      if (line3.length() > static_cast<size_t>(char_limit)) {
-        line3 = line3.substr(0, char_limit > 1 ? char_limit - 1 : 0) + L"\u2026";
-      }
-    }
-
     int line3_font_h = m_line3_font_height > 0
         ? m_line3_font_height
         : static_cast<int>(m_metrics.text_height);
