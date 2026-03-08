@@ -226,7 +226,9 @@ private:
     // Button rendering
     void draw_button(Gdiplus::Graphics& g, const RECT& rect, const wchar_t* icon, bool hovered, bool active);
     void draw_circular_button(Gdiplus::Graphics& g, const RECT& rect, const wchar_t* icon, bool hovered, bool pressed);
-    
+    void draw_3d_button_pad(Gdiplus::Graphics& g, const RECT& rect,
+                            float press_progress, float hover_opacity);
+
     // Custom icon drawing from SVG paths
     void draw_shuffle_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);
     void draw_repeat_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color, bool repeat_one);
@@ -366,7 +368,15 @@ private:
     std::chrono::steady_clock::time_point m_cbutton_fade_start_time;
     bool m_cbutton_fade_active = false;  // Animation in progress
     static constexpr float CBUTTON_FADE_DURATION_MS = 300.0f;  // Fade duration in milliseconds
-    
+
+    // 3D button press animation state (per custom button)
+    float m_cbutton_press_progress[6] = {};  // 0.0 = resting, 1.0 = fully pressed
+    bool m_cbutton_pressed[6] = {};          // Currently held down
+    std::chrono::steady_clock::time_point m_cbutton_press_time[6];
+    std::chrono::steady_clock::time_point m_cbutton_release_time[6];
+    static constexpr float CBUTTON_PRESS_DURATION_MS = 90.0f;   // Press ease-in
+    static constexpr float CBUTTON_RELEASE_DURATION_MS = 140.0f; // Release spring-back
+
     // Spectrum visualizer
     static constexpr int SPECTRUM_FFT_SIZE = 4096;
     static constexpr float SPECTRUM_FADE_DURATION_MS = 300.0f;
