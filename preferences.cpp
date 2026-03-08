@@ -279,7 +279,7 @@ static cfg_int cfg_nowbar_spectrum_opacity(
 
 static cfg_int cfg_nowbar_spectrum_gradient_mode(
     GUID{0xABCDEF88, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x88}},
-    0  // Default: Solid (0=Solid, 1=Gradient, 2=Frequency)
+    0  // Default: Adaptive (0=Adaptive, 1=Solid, 2=Gradient, 3=Frequency)
 );
 
 static cfg_int cfg_nowbar_spectrum_color2(
@@ -1821,7 +1821,7 @@ int get_nowbar_spectrum_opacity() {
 int get_nowbar_spectrum_gradient_mode() {
     int m = cfg_nowbar_spectrum_gradient_mode;
     if (m < 0) m = 0;
-    if (m > 2) m = 2;
+    if (m > 3) m = 3;
     return m;
 }
 
@@ -3175,12 +3175,12 @@ static void update_color_buttons_state(HWND hwnd) {
         IsDlgButtonChecked(hwnd, IDC_CUSTOM_HOVER_COLOR_CHECK) == BST_CHECKED);
     BOOL spectrum_custom = (IsDlgButtonChecked(hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK) == BST_CHECKED);
     int color_mode = (int)SendMessage(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), CB_GETCURSEL, 0, 0);
-    EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), spectrum_custom && color_mode != 2);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), spectrum_custom && color_mode != 0 && color_mode != 3);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_LABEL), spectrum_custom);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_SLIDER), spectrum_custom);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_VALUE), spectrum_custom);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), spectrum_custom);
-    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR2_BTN), spectrum_custom && color_mode == 1);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR2_BTN), spectrum_custom && color_mode == 2);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_COLOR_BTN),
         IsDlgButtonChecked(hwnd, IDC_CUSTOM_WAVEFORM_COLOR_CHECK) == BST_CHECKED);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN),
@@ -3587,6 +3587,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             // Initialize color mode combo
             {
                 HWND hColorMode = GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO);
+                SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Adaptive");
                 SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Solid");
                 SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Gradient");
                 SendMessage(hColorMode, CB_ADDSTRING, 0, (LPARAM)L"Frequency");
