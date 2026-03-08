@@ -643,7 +643,7 @@ static cfg_string cfg_cbutton_current_profile(
 
 static cfg_int cfg_nowbar_3d_buttons(
     GUID{0xABCDEFA1, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xA1}},
-    0  // Default: Disabled (flat style)
+    1  // Default: Enabled (3D style)
 );
 
 //=============================================================================
@@ -4924,7 +4924,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_background_style = 0;  // Solid
             cfg_nowbar_bar_style = 0;  // Pill-shaped
             cfg_nowbar_smooth_animations = 0;  // Disabled (default for performance)
-            cfg_nowbar_3d_buttons = 0;  // Default: Disabled
+            cfg_nowbar_3d_buttons = 1;  // Default: Enabled
             cfg_nowbar_online_artwork = 0;  // Default: Disabled
 
             // Update Appearance tab UI
