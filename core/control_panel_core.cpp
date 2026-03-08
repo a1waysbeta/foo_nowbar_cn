@@ -659,6 +659,12 @@ void ControlPanelCore::on_settings_changed() {
     m_cbutton_states[i] = {};
   }
 
+  // Reset 3D button press state
+  for (int i = 0; i < 6; i++) {
+    m_cbutton_press_progress[i] = 0.0f;
+    m_cbutton_pressed[i] = false;
+  }
+
   // Repaint to reflect any visual changes
   invalidate();
 }
@@ -1935,6 +1941,13 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   RECT cache_union;
   UnionRect(&cache_union, &cache_rect, &m_rect_time);
   cache_rect = cache_union;
+  // Include track info so ClearType text is always drawn on a clean background.
+  // Without this, paint_spectrum_only() redraws text on top of the previous
+  // frame's text, causing sub-pixel anti-aliasing to accumulate and degrade.
+  if (m_rect_track_info.right > m_rect_track_info.left) {
+    UnionRect(&cache_union, &cache_rect, &m_rect_track_info);
+    cache_rect = cache_union;
+  }
   InflateRect(&cache_rect, 2, 2);
   // Clamp to panel bounds
   if (cache_rect.left < panel_rect.left) cache_rect.left = panel_rect.left;
@@ -1977,6 +1990,11 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     clip.Union(Gdiplus::Rect(m_rect_time.left - 2, m_rect_time.top - 2,
         m_rect_time.right - m_rect_time.left + 4,
         m_rect_time.bottom - m_rect_time.top + 4));
+    if (m_rect_track_info.right > m_rect_track_info.left) {
+      clip.Union(Gdiplus::Rect(m_rect_track_info.left - 2, m_rect_track_info.top - 2,
+          m_rect_track_info.right - m_rect_track_info.left + 4,
+          m_rect_track_info.bottom - m_rect_track_info.top + 4));
+    }
     if (m_rect_volume.right > m_rect_volume.left) {
       // Volume icon hover circle: centered on icon, diameter = button height.
       int icon_sz = static_cast<int>(23 * m_dpi_scale * m_size_scale);
@@ -3163,7 +3181,8 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   auto draw_cbutton = [&](int index, const RECT& rect, HitRegion region) {
     if (!get_nowbar_cbutton_enabled(index)) return;
     if (rect.right <= rect.left || rect.bottom <= rect.top) return;  // Skip empty rects
-    
+    bool use_3d = get_nowbar_3d_buttons_enabled();
+
     bool hovered = (m_hover_region == region);
     int cw = rect.right - rect.left;
     int ch = rect.bottom - rect.top;
@@ -3187,8 +3206,43 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       }
     }
     
-    if (hovered && show_hover && m_cbutton_opacity > 0.5f) {
-      // Use get_hover_opacity for consistent animated hover effect like other buttons
+    // 3D button press animation
+    float press_progress = m_cbutton_press_progress[index];
+    if (use_3d) {
+      auto now = std::chrono::steady_clock::now();
+      if (m_cbutton_pressed[index]) {
+        // Pressing: ease-in to 1.0
+        float elapsed = std::chrono::duration<float, std::milli>(
+            now - m_cbutton_press_time[index]).count();
+        float t = std::min(elapsed / CBUTTON_PRESS_DURATION_MS, 1.0f);
+        press_progress = t * t;  // ease-in (quadratic)
+      } else if (std::abs(m_cbutton_press_progress[index]) > 0.001f ||
+                 std::chrono::duration<float, std::milli>(
+                     now - m_cbutton_release_time[index]).count() < CBUTTON_RELEASE_DURATION_MS * 1.5f) {
+        // Releasing: spring back with overshoot
+        float elapsed = std::chrono::duration<float, std::milli>(
+            now - m_cbutton_release_time[index]).count();
+        float t = std::min(elapsed / CBUTTON_RELEASE_DURATION_MS, 1.5f);
+        float k = 6.0f;
+        // Damped spring with overshoot: goes from 1.0 -> 0.0 with brief dip below zero
+        press_progress = std::exp(-t * k) * std::cos(t * k * 1.5f);
+        if (std::abs(press_progress) < 0.001f && t >= 1.0f) press_progress = 0.0f;
+      } else {
+        press_progress = 0.0f;
+      }
+      m_cbutton_press_progress[index] = press_progress;
+
+      if (m_cbutton_pressed[index] || std::abs(press_progress) > 0.001f) {
+        m_cbutton_animating = true;
+      }
+
+      // Draw 3D pad
+      float hover_op = get_hover_opacity(region);
+      draw_3d_button_pad(g, rect, press_progress, hover_op);
+    }
+
+    if (!use_3d && hovered && show_hover && m_cbutton_opacity > 0.5f) {
+      // Original flat hover circle code
       float hover_opacity = get_hover_opacity(region);
       if (hover_opacity > 0.01f) {
         // Slightly larger hover circle (5% expansion) to match perceived size of curved icons
@@ -3203,7 +3257,15 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     float cbutton_scale = hovered ? HOVER_SCALE_FACTOR : 1.0f;
     int inset = static_cast<int>(cw * (1.0f - 0.70f * cbutton_scale) / 2.0f);
     RECT iconRect = {rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset};
-    
+
+    // Apply sink offset to icon when 3D is active
+    if (use_3d && std::abs(press_progress) > 0.001f) {
+      int max_sink = static_cast<int>(2.0f * m_dpi_scale);
+      int sink = static_cast<int>(press_progress * max_sink);
+      iconRect.top += sink;
+      iconRect.bottom += sink;
+    }
+
     // Check if a glyph character is set for this button
     pfc::string8 glyph_utf8 = resolve_unicode_notation(get_nowbar_cbutton_icon_path(index));
     if (!glyph_utf8.is_empty()) {
@@ -3430,6 +3492,122 @@ void ControlPanelCore::draw_circular_button(Gdiplus::Graphics &g,
 
   Gdiplus::RectF btnRect((float)rect.left, (float)rect.top, (float)w, (float)h);
   g.DrawString(icon, -1, &iconFont, btnRect, &sf, &iconBrush);
+}
+
+void ControlPanelCore::draw_3d_button_pad(Gdiplus::Graphics& g, const RECT& rect,
+                                          float press_progress, float hover_opacity) {
+    int w = rect.right - rect.left;
+    int h = rect.bottom - rect.top;
+    if (w <= 0 || h <= 0) return;
+    if (m_cbutton_opacity < 0.01f) return;
+
+    // Pad dimensions: 90% of button rect, centered
+    int pad_margin = w * 5 / 100;
+    int pad_x = rect.left + pad_margin;
+    int pad_y = rect.top + pad_margin;
+    int pad_w = w - pad_margin * 2;
+    int pad_h = h - pad_margin * 2;
+
+    // Corner radius scaled by DPI
+    int corner = static_cast<int>(4.0f * m_dpi_scale);
+    corner = std::min(corner, std::min(pad_w, pad_h) / 2);
+    int diameter = corner * 2;
+
+    // --- Compute base color from background ---
+    int bg_r, bg_g, bg_b;
+    int bg_style = get_nowbar_background_style();
+    bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
+
+    if (has_artwork_bg) {
+        int r = m_artwork_color_primary.GetR();
+        int gc = m_artwork_color_primary.GetG();
+        int b = m_artwork_color_primary.GetB();
+        BYTE ov = (bg_style == 1) ? (m_dark_mode ? 120 : 80)
+                                   : (m_dark_mode ? 140 : 180);
+        bg_r = r * (255 - ov) / 255;
+        bg_g = gc * (255 - ov) / 255;
+        bg_b = b * (255 - ov) / 255;
+    } else {
+        bg_r = m_bg_color.GetRed();
+        bg_g = m_bg_color.GetGreen();
+        bg_b = m_bg_color.GetBlue();
+    }
+
+    // Tonal shift: lighter in dark mode, darker in light mode
+    int shift = m_dark_mode ? 15 : -15;
+    int base_r = std::clamp(bg_r + shift, 0, 255);
+    int base_g = std::clamp(bg_g + shift, 0, 255);
+    int base_b = std::clamp(bg_b + shift, 0, 255);
+
+    // Hover brightening
+    int hover_shift = static_cast<int>(hover_opacity * 12.0f);
+    base_r = std::clamp(base_r + hover_shift, 0, 255);
+    base_g = std::clamp(base_g + hover_shift, 0, 255);
+    base_b = std::clamp(base_b + hover_shift, 0, 255);
+
+    // --- Gradient colors ---
+    int grad_offset = 10;
+    float invert = press_progress;
+
+    int top_delta = static_cast<int>(grad_offset * (1.0f - 2.0f * invert));
+    int bot_delta = -top_delta;
+
+    Gdiplus::Color top_color(
+        static_cast<BYTE>(m_cbutton_opacity * 255),
+        std::clamp(base_r + top_delta, 0, 255),
+        std::clamp(base_g + top_delta, 0, 255),
+        std::clamp(base_b + top_delta, 0, 255));
+    Gdiplus::Color bot_color(
+        static_cast<BYTE>(m_cbutton_opacity * 255),
+        std::clamp(base_r + bot_delta, 0, 255),
+        std::clamp(base_g + bot_delta, 0, 255),
+        std::clamp(base_b + bot_delta, 0, 255));
+
+    // --- Vertical offset for press sink ---
+    int max_sink = static_cast<int>(2.0f * m_dpi_scale);
+    int sink_offset = static_cast<int>(press_progress * max_sink);
+    pad_y += sink_offset;
+
+    // --- Build rounded rect path ---
+    Gdiplus::GraphicsPath pad_path;
+    pad_path.AddArc(pad_x, pad_y, diameter, diameter, 180, 90);
+    pad_path.AddArc(pad_x + pad_w - diameter, pad_y, diameter, diameter, 270, 90);
+    pad_path.AddArc(pad_x + pad_w - diameter, pad_y + pad_h - diameter, diameter, diameter, 0, 90);
+    pad_path.AddArc(pad_x, pad_y + pad_h - diameter, diameter, diameter, 90, 90);
+    pad_path.CloseFigure();
+
+    // --- Drop shadow ---
+    float shadow_scale = 1.0f - press_progress * 0.9f;
+    shadow_scale += hover_opacity * 0.15f;
+    shadow_scale = std::clamp(shadow_scale, 0.0f, 1.3f);
+
+    if (shadow_scale > 0.05f) {
+        int shadow_offset_y = static_cast<int>(2.0f * m_dpi_scale * shadow_scale);
+        int shadow_blur = static_cast<int>(3.0f * m_dpi_scale * shadow_scale);
+        BYTE shadow_alpha = static_cast<BYTE>(40.0f * m_cbutton_opacity * shadow_scale);
+
+        Gdiplus::GraphicsPath shadow_path;
+        int sx = pad_x - shadow_blur / 2;
+        int sy = pad_y + shadow_offset_y;
+        int sw = pad_w + shadow_blur;
+        int sh = pad_h + shadow_blur / 2;
+        int sd = std::min(diameter + shadow_blur / 2, std::min(sw, sh) / 2) * 2;
+        sd = std::min(sd, std::min(sw, sh));
+        shadow_path.AddArc(sx, sy, sd, sd, 180, 90);
+        shadow_path.AddArc(sx + sw - sd, sy, sd, sd, 270, 90);
+        shadow_path.AddArc(sx + sw - sd, sy + sh - sd, sd, sd, 0, 90);
+        shadow_path.AddArc(sx, sy + sh - sd, sd, sd, 90, 90);
+        shadow_path.CloseFigure();
+
+        Gdiplus::SolidBrush shadow_brush(Gdiplus::Color(shadow_alpha, 0, 0, 0));
+        g.FillPath(&shadow_brush, &shadow_path);
+    }
+
+    // --- Fill pad with gradient ---
+    Gdiplus::RectF grad_rect((float)pad_x, (float)pad_y, (float)pad_w, (float)pad_h);
+    Gdiplus::LinearGradientBrush grad_brush(grad_rect, top_color, bot_color,
+                                             Gdiplus::LinearGradientModeVertical);
+    g.FillPath(&grad_brush, &pad_path);
 }
 
 void ControlPanelCore::draw_seekbar(Gdiplus::Graphics &g) {
@@ -5773,6 +5951,27 @@ void ControlPanelCore::on_mouse_leave() {
 void ControlPanelCore::on_lbutton_down(int x, int y) {
   m_pressed_region = hit_test(x, y);
 
+  // 3D button press animation
+  if (get_nowbar_3d_buttons_enabled()) {
+    int btn_idx = -1;
+    switch (m_pressed_region) {
+      case HitRegion::CButton1: btn_idx = 0; break;
+      case HitRegion::CButton2: btn_idx = 1; break;
+      case HitRegion::CButton3: btn_idx = 2; break;
+      case HitRegion::CButton4: btn_idx = 3; break;
+      case HitRegion::CButton5: btn_idx = 4; break;
+      case HitRegion::CButton6: btn_idx = 5; break;
+      default: break;
+    }
+    if (btn_idx >= 0) {
+      m_cbutton_pressed[btn_idx] = true;
+      m_cbutton_press_time[btn_idx] = std::chrono::steady_clock::now();
+      m_cbutton_animating = true;
+      request_animation();
+      invalidate();
+    }
+  }
+
   if (m_pressed_region == HitRegion::SeekBar) {
     m_seeking = true;
     on_mouse_move(x, y);
@@ -5792,6 +5991,19 @@ void ControlPanelCore::on_lbutton_down(int x, int y) {
 
 void ControlPanelCore::on_lbutton_up(int x, int y) {
   HitRegion release_region = hit_test(x, y);
+
+  // 3D button release animation
+  if (get_nowbar_3d_buttons_enabled()) {
+    for (int i = 0; i < 6; i++) {
+      if (m_cbutton_pressed[i]) {
+        m_cbutton_pressed[i] = false;
+        m_cbutton_release_time[i] = std::chrono::steady_clock::now();
+        m_cbutton_animating = true;
+        request_animation();
+      }
+    }
+    invalidate();
+  }
 
   if (m_seeking) {
     m_seeking = false;
