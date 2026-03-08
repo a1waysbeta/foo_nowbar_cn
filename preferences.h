@@ -46,7 +46,7 @@ int get_nowbar_spectrum_width();     // 0=Thin, 1=Normal, 2=Wide
 int get_nowbar_spectrum_style();     // 0=Mono, 1=Curve, 2=Dominoes
 int get_nowbar_spectrum_height();    // 0=Low, 1=Normal, 2=High
 int get_nowbar_spectrum_opacity();       // 0-100
-int get_nowbar_spectrum_gradient_mode(); // 0=Solid, 1=Gradient, 2=Frequency
+int get_nowbar_spectrum_gradient_mode(); // 0=Adaptive, 1=Solid, 2=Gradient, 3=Frequency
 COLORREF get_nowbar_spectrum_color2();   // Gradient bottom color
 bool get_nowbar_vis_60fps();
 COLORREF get_nowbar_waveform_color();
