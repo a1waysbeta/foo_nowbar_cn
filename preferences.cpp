@@ -365,7 +365,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_artist_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -381,7 +381,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_track_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -397,7 +397,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_line3_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -413,7 +413,7 @@ static cfg_struct_t<LOGFONT> cfg_nowbar_time_font(
         lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+        wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
         return lf;
     }()
 );
@@ -639,6 +639,11 @@ static cfg_string cfg_cbutton_profiles(
 static cfg_string cfg_cbutton_current_profile(
     GUID{0xABCDEF71, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF7}},
     "Default"  // Default profile name
+);
+
+static cfg_int cfg_nowbar_3d_buttons(
+    GUID{0xABCDEFA1, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xA1}},
+    0  // Default: Disabled (flat style)
 );
 
 //=============================================================================
@@ -1720,6 +1725,10 @@ int get_nowbar_play_icon_style() {
 
 bool get_nowbar_cbutton_autohide() {
     return cfg_nowbar_cbutton_autohide != 0;
+}
+
+bool get_nowbar_3d_buttons_enabled() {
+    return cfg_nowbar_3d_buttons != 0;
 }
 
 bool get_nowbar_volume_icon_visible() {
@@ -2810,7 +2819,7 @@ LOGFONT get_nowbar_default_font(bool is_artist) {
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     lf.lfQuality = CLEARTYPE_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
 
     return lf;
 }
@@ -2829,7 +2838,7 @@ LOGFONT get_nowbar_default_time_font() {
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     lf.lfQuality = CLEARTYPE_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei");
+    wcscpy_s(lf.lfFaceName, L"Microsoft YaHei UI");
 
     return lf;
 }
@@ -2962,6 +2971,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_ONLINE_ARTWORK_CHECK), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_FOO_ARTWORK_LINK), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_LABEL), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), show_appearance);
 
     // Icons tab controls (Tab 2)
     BOOL show_icons = (tab == 2) ? SW_SHOW : SW_HIDE;
@@ -3066,7 +3077,7 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_LABEL), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_LABEL), show_cbutton);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_LABEL), show_cbutton);
-    
+
     // Fonts & Colors tab controls (Tab 4)
     BOOL show_fonts = (tab == 4) ? SW_SHOW : SW_HIDE;
     ShowWindow(GetDlgItem(m_hwnd, IDC_FONTS_GROUP), show_fonts);
@@ -3338,7 +3349,15 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hSmoothAnimCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
         SendMessage(hSmoothAnimCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
         SendMessage(hSmoothAnimCombo, CB_SETCURSEL, cfg_nowbar_smooth_animations ? 0 : 1, 0);
-        
+
+        // Initialize 3D Buttons combobox
+        {
+            HWND h3dButtonsCombo = GetDlgItem(hwnd, IDC_CBUTTON_3D_COMBO);
+            SendMessage(h3dButtonsCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
+            SendMessage(h3dButtonsCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
+            SendMessage(h3dButtonsCombo, CB_SETCURSEL, cfg_nowbar_3d_buttons ? 0 : 1, 0);
+        }
+
         // Initialize background style combobox
         HWND hBgStyleCombo = GetDlgItem(hwnd, IDC_BACKGROUND_STYLE_COMBO);
         SendMessage(hBgStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Solid");
@@ -3691,7 +3710,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         uSetDlgItemText(hwnd, IDC_CBUTTON4_LABEL, cfg_cbutton4_label);
         uSetDlgItemText(hwnd, IDC_CBUTTON5_LABEL, cfg_cbutton5_label);
         uSetDlgItemText(hwnd, IDC_CBUTTON6_LABEL, cfg_cbutton6_label);
-        
+
         // Update path control states based on action selection
         update_all_cbutton_path_states(hwnd);
         
@@ -3736,6 +3755,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_HOVER_CIRCLES_COMBO:
         case IDC_PLAY_ICON_STYLE_COMBO:
         case IDC_AUTOHIDE_CBUTTONS_COMBO:
+        case IDC_CBUTTON_3D_COMBO:
         case IDC_VOLUME_ICON_COMBO:
         case IDC_VOLUME_BAR_COMBO:
         case IDC_MOOD_TAG_COMBO:
@@ -4620,6 +4640,10 @@ void nowbar_preferences::apply_settings() {
         int smoothAnimSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_smooth_animations = (smoothAnimSel == 0) ? 1 : 0;
 
+        // Save 3D Buttons setting (0=Enabled, 1=Disabled in combobox -> config 1=Enabled, 0=Disabled)
+        int threeDButtonsSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), CB_GETCURSEL, 0, 0);
+        cfg_nowbar_3d_buttons = (threeDButtonsSel == 0) ? 1 : 0;
+
         // Save cover artwork visibility (0=Yes, 1=No in combobox -> config 1=Yes, 0=No)
         int coverArtworkSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_cover_artwork_visible = (coverArtworkSel == 0) ? 1 : 0;
@@ -4900,6 +4924,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_background_style = 0;  // Solid
             cfg_nowbar_bar_style = 0;  // Pill-shaped
             cfg_nowbar_smooth_animations = 0;  // Disabled (default for performance)
+            cfg_nowbar_3d_buttons = 0;  // Default: Disabled
             cfg_nowbar_online_artwork = 0;  // Default: Disabled
 
             // Update Appearance tab UI
@@ -4918,6 +4943,7 @@ void nowbar_preferences::reset_settings() {
             SetDlgItemTextW(m_hwnd, IDC_SEEKBAR_POSITION_VALUE, L"0");
             SendMessage(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: Disabled (index 1)
             CheckDlgButton(m_hwnd, IDC_ONLINE_ARTWORK_CHECK, BST_UNCHECKED);
+            SendMessage(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), CB_SETCURSEL, 0, 0);  // Default: Enabled
             update_cover_margin_state(m_hwnd);  // Re-enable Cover Margin (Cover Artwork is Yes)
         } else if (m_current_tab == 2) {
             // Reset Icons tab settings
@@ -5099,7 +5125,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_TRACK_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_TRACK_FONT_DISPLAY, "Microsoft YaHei, 15pt, Bold (Default)");
+        uSetDlgItemText(m_hwnd, IDC_TRACK_FONT_DISPLAY, "Microsoft YaHei UI, 15pt, Bold (Default)");
     }
     
     // Artist font
@@ -5108,7 +5134,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, "Microsoft YaHei, 13pt, Regular (Default)");
+        uSetDlgItemText(m_hwnd, IDC_ARTIST_FONT_DISPLAY, "Microsoft YaHei UI, 13pt, Regular (Default)");
     }
 
     // Line 3 font
@@ -5117,7 +5143,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_LINE3_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_LINE3_FONT_DISPLAY, "Microsoft YaHei, 13pt, Regular (Default)");
+        uSetDlgItemText(m_hwnd, IDC_LINE3_FONT_DISPLAY, "Microsoft YaHei UI, 13pt, Regular (Default)");
     }
 
     // Time font
@@ -5126,7 +5152,7 @@ void nowbar_preferences::update_font_displays() {
         pfc::string8 desc = format_font_name(lf);
         uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, desc);
     } else {
-        uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, "Microsoft YaHei, 9pt, Regular (Default)");
+        uSetDlgItemText(m_hwnd, IDC_TIME_FONT_DISPLAY, "Microsoft YaHei UI, 9pt, Regular (Default)");
     }
 }
 
@@ -5142,9 +5168,11 @@ void nowbar_preferences::select_track_font() {
     if (get_nowbar_track_font_color(saved_color))
         cf.rgbColors = saved_color;
 
+    COLORREF color_before = cf.rgbColors;
     if (ChooseFont(&cf)) {
         set_nowbar_track_font(lf);
-        set_nowbar_track_font_color(cf.rgbColors);
+        if (cf.rgbColors != color_before)
+            set_nowbar_track_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
         nowbar::ControlPanelCore::notify_all_settings_changed();
@@ -5163,9 +5191,11 @@ void nowbar_preferences::select_artist_font() {
     if (get_nowbar_artist_font_color(saved_color))
         cf.rgbColors = saved_color;
 
+    COLORREF color_before = cf.rgbColors;
     if (ChooseFont(&cf)) {
         set_nowbar_artist_font(lf);
-        set_nowbar_artist_font_color(cf.rgbColors);
+        if (cf.rgbColors != color_before)
+            set_nowbar_artist_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
         nowbar::ControlPanelCore::notify_all_settings_changed();
@@ -5184,9 +5214,11 @@ void nowbar_preferences::select_line3_font() {
     if (get_nowbar_line3_font_color(saved_color))
         cf.rgbColors = saved_color;
 
+    COLORREF color_before = cf.rgbColors;
     if (ChooseFont(&cf)) {
         set_nowbar_line3_font(lf);
-        set_nowbar_line3_font_color(cf.rgbColors);
+        if (cf.rgbColors != color_before)
+            set_nowbar_line3_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
         nowbar::ControlPanelCore::notify_all_settings_changed();
@@ -5205,9 +5237,11 @@ void nowbar_preferences::select_time_font() {
     if (get_nowbar_time_font_color(saved_color))
         cf.rgbColors = saved_color;
 
+    COLORREF color_before = cf.rgbColors;
     if (ChooseFont(&cf)) {
         set_nowbar_time_font(lf);
-        set_nowbar_time_font_color(cf.rgbColors);
+        if (cf.rgbColors != color_before)
+            set_nowbar_time_font_color(cf.rgbColors);
         update_font_displays();
         on_changed();
         nowbar::ControlPanelCore::notify_all_settings_changed();
