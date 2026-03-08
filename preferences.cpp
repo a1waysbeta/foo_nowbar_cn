@@ -3176,9 +3176,9 @@ static void update_color_buttons_state(HWND hwnd) {
     BOOL spectrum_custom = (IsDlgButtonChecked(hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK) == BST_CHECKED);
     int color_mode = (int)SendMessage(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), CB_GETCURSEL, 0, 0);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), spectrum_custom && color_mode != 0 && color_mode != 3);
-    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_LABEL), spectrum_custom);
-    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_SLIDER), spectrum_custom);
-    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_VALUE), spectrum_custom);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_LABEL), TRUE);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_SLIDER), TRUE);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_VALUE), TRUE);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), spectrum_custom);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR2_BTN), spectrum_custom && color_mode == 2);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_COLOR_BTN),
