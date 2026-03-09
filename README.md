@@ -1,3 +1,9 @@
+<p align="right">
+  <a href="README-zh-CN.md">简体中文</a> | <b>English</b>
+</p>
+
+---
+
 # foo_nowbar
 
 A foobar2000 component that provides a "Now Playing" control panel for both Default UI and Columns UI.
@@ -8,7 +14,7 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 
 ### Core Features
 - **Dual UI Support**: Works seamlessly with both Default UI (DUI) and Columns UI (CUI)
-- **Album Artwork Display**: Shows album art edge-to-edge (optional margin)
+- **Album Artwork Display**: Shows album art with square/rounded corners and optional margin
 - **Online Artwork**: Fetches artwork from online sources via [foo_artwork](https://github.com/jame25/foo_artwork) when local/embedded artwork is unavailable
 - **Track Information**: Displays track info with customizable Title Formatting (default: title and artist)
 - **DPI Aware**: Properly scales on high-DPI displays with adaptive sizing
@@ -38,18 +44,19 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
   - Can be hidden via preferences
 - **MiniPlayer Launch**: Quick access button to launch the MiniPlayer
   - Requires [foo_traycontrols](https://github.com/jame25/foo_traycontrols)
-  - Blue when active, can be hidden via preferences
+  - Accent color when active, hidden by default
 - **Super Button**: Quick access menu with autoplaylist queries and playback options
   - Autoplaylist queries: Never played, Recently played, Unrated, Rated 3-5/4/5, Loved tracks, Recently added, Same artist/title as selected
   - **Infinite Playback**: Toggle to automatically add similar tracks when the playlist ends (genre-based matching from media library)
   - **Playback Preview**: Submenu to auto-skip after a portion of each track (Off / 35% / 50% / 60 seconds)
   - **Settings**: Quick link to open Now Bar preferences
 - **Up to 12 Custom Buttons**: Fully configurable action buttons
-  - **Buttons 1-6**: Visible on panel, configurable via Preferences or config file
-  - **Buttons 7-12**: Hidden, keyboard shortcuts only (config file only)
+  - **Buttons 1-6**: Visible on panel, configurable via Preferences
+  - **Buttons 7-12**: Hidden, keyboard shortcuts only, configurable via config file
   - Open URL, Run executable, Open folder, or Execute foobar2000 menu commands (main menu or context menu)
+  - **3D Button Style**: Adds a raised, pad-like appearance with gradient and shadow; buttons animate when pressed for tactile feedback (enabled by default)
   - **State feedback**: Foobar2k Action buttons show accent color when the command is checked/active (e.g., toggle commands)
-  - Custom PNG/ICO/SVG icon support per button (SVG requires [foo_svg_services](https://www.foobar2000.org/components/view/foo_svg_services))
+  - Custom Unicode symbol per button (enter character directly or use U+XXXX notation)
   - Custom tooltip label per button
   - Adaptive layout: 2-row (buttons 1-3, 4-6) at larger heights, single row at smaller heights
   - Auto-hide during playback (optional, with smooth 300ms fade animation)
@@ -59,7 +66,7 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 
 ### Visualization Modes
 - **Spectrum Visualizer**: Full-width spectrum analyzer behind playback buttons
-  - Configurable bar width (Thin / Normal / Wide) and shape (Pill / Rectangle)
+  - Configurable bar width (Thin / Normal / Wide), height (Low: 20% / Normal: 33% / High: 50% of panel height), and style (Bars / Curve / Dominoes)
   - Thin progress bar at top edge replaces the seekbar; enlarges on hover for seeking
   - Time display repositioned to top-right corner
   - 30 FPS default, optional 60 FPS mode
@@ -79,27 +86,31 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
   - **Artwork Colors**: Dynamic gradient extracted from album art's dominant colors
   - **Blurred Artwork**: Album art blurred as ambient background
 - **Seek/Volume Bar Style**: Pill-shaped or rectangular
-- **Play Icon Style**: Normal (accent circle, dark icon) or Inverted (accent circle, white icon)
+- **Seekbar Visibility**: Show or completely hide the seekbar/waveform/spectrum
+- **Seekbar Length Mode**:
+  - **Fixed** (default): Seekbar spans from heart/shuffle button to super/repeat button, length remains constant
+  - **Scaling**: Dynamically extends the seekbar as panel width increases, filling 70% of the available gap on each side
+- **Volume Control Visibility**: Show or completely hide the volume icon and volume slider
+- **Play Icon Style**: Style 1 (Normal: accent circle with dark icon / Inverted: accent circle with white icon) / Style 2 (Rectangular outline, no accent circle) / Style 3 (Solid rectangle, no accent circle)
 - **Hover Circles**: Optional hover effect on buttons
 - **Hover Enlarge Effect**: Playback controls enlarge 15% on hover
-- **Alternate Icons**: Alternative play/pause/stop icon style (outline vs filled)
-- **Custom Fonts**: Select custom fonts for track title, artist, and time display
+- **Custom Fonts**: Select custom fonts for the three info lines on the left and time display, with full formatting support (colors, underline, etc.)
 - **10 Custom Colors**: Button accent, play/pause accent, progress accent, volume accent, hover color, spectrum color, waveform played/unplayed colors, progress track color, volume track color (each independently toggleable between custom and theme-derived)
 - **Smooth Animations**: Toggle for animated transitions (disabled by default for performance)
   - When enabled: custom button auto-hide fade, background crossfade
   - When disabled: instant transitions for better performance
-- **Glass Effect**: Windows 11 acrylic backdrop blur behind the panel (semi-transparent background)
 - **Cover Artwork**: Toggle artwork visibility; optional margin around artwork
 - **Online Artwork**: Fetch artwork from online sources when local art is unavailable (requires [foo_artwork](https://github.com/jame25/foo_artwork))
 
 ### Playback Features
-- **Skip Low Rating**: Automatically skip tracks with low ratings during playback (configurable threshold 1-3 stars; requires foo_playcount)
-- **Infinite Playback**: Automatically add genre-matched tracks from the media library when the playlist ends
+- **Skip Low Rating**: Automatically skip tracks with low ratings during playback (configurable threshold 1-3 stars; requires foo_playcount). After 10 consecutive skips, the feature temporarily pauses to allow the next track to play, preventing infinite loops
+- **Infinite Playback**: Automatically add genre-matched tracks from the media library when the playlist ends (15 tracks at a time)
 - **Playback Preview**: Auto-skip after a portion of each track for quick browsing (Off / 35% / 50% / 60 seconds)
 
 ## Installation
 
-1. Run foo_nowbar*.fb2k-component or extract `foo_nowbar.dll` (using 7zip) to your portable foobar2000 `components` folder
+1. For installed version of foobar2000 with file associations: Double-click the `foo_nowbar*.fb2k-component` file to install.
+   For portable version: Open foobar2000, go to Preferences → Components, click Install..., select the `foo_nowbar*.fb2k-component` file, and click OK.
 2. Restart foobar2000
 3. Add the panel:
    - **Default UI**: View → Layout → Add panel → "Now Bar Control Panel"
@@ -107,7 +118,7 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 
 ## Preferences
 
-Access preferences via: File → Preferences → Display → Now Bar
+Access preferences via: File → Preferences → Tools → Now Bar OR Super Icon → Settings
 
 ### General Tab
 
@@ -115,13 +126,16 @@ Access preferences via: File → Preferences → Display → Now Bar
 |---------|---------|-------------|
 | Line 1 Format | Title Formatting | First line of track info (default: `%title%`) |
 | Line 2 Format | Title Formatting | Second line of track info (default: `%artist%`) |
+| Line 3 Format | Title Formatting | Default: blank; can display title format or rating stars |
+| Rating Stars | Show (panel center) / Hidden / Line 3 (replaces third line title format) | Toggle rating stars visibility |
 | Mood Tag | FEEDBACK / 2003_LOVED / LFM_LOVED / SMP_LOVED / MOOD | Which tag the heart button reads/writes |
 | Skip Low Rating | Disabled / Enabled | Auto-skip low-rated tracks during playback |
 | Rating Threshold | 1 / 2 / 3 | Skip tracks rated at or below this threshold |
 | Visualization | Disabled / Spectrum / Waveform | Visualization mode selector |
 | 60 FPS | Checkbox | Run spectrum at 60fps instead of 30fps |
-| Spectrum Width | Thin / Normal / Wide | Spectrum bar count |
-| Spectrum Shape | Pill-shaped / Rectangle | Spectrum bar shape |
+| Spectrum Width | Thin / Normal / Wide | Spectrum bar width |
+| Spectrum Height | Low / Normal / High | Spectrum display height |
+| Spectrum Style | Bars / Curve / Dominoes | Spectrum visual style |
 | Waveform Width | Thin / Normal / Wide | Waveform bar density |
 
 ### Appearance Tab
@@ -131,10 +145,14 @@ Access preferences via: File → Preferences → Display → Now Bar
 | Theme Mode | Auto / Dark / Light / Custom | Controls panel color scheme |
 | Cover Artwork | Yes / No | Show or hide album artwork |
 | Cover Margin | Yes / No | Add margin around artwork |
+| Cover Style | Square / Rounded | Toggle album cover corner style |
 | Background Style | Solid / Artwork Colors / Blurred Artwork | Panel background appearance |
 | Bar Style | Pill-shaped / Rectangular | Seek and volume bar shape |
-| Glass Effect (Win11) | Disabled / Enabled | Windows 11 acrylic backdrop blur effect |
+| Seekbar | On / Off | Show or hide the seekbar |
+| Seekbar Length | Fixed / Scaling | Toggle seekbar length mode |
+| Seekbar Position | Slider | Adjust seekbar horizontal position |
 | Smooth Animations | Enabled / Disabled | Smooth animated transitions |
+| 3D Buttons | Enabled / Disabled | Toggle 3D style for custom buttons |
 | Online Artwork | Checkbox | Fetch online artwork (requires foo_artwork) |
 
 ### Icons Tab
@@ -142,14 +160,18 @@ Access preferences via: File → Preferences → Display → Now Bar
 | Setting | Options | Description |
 |---------|---------|-------------|
 | Mood Icon | Show / Hidden | Toggle heart button visibility |
+| Shuffle Icon | Show / Hidden | Toggle shuffle button visibility |
+| Repeat Icon | Show / Hidden | Toggle repeat button visibility |
 | Stop Button | Show / Hidden | Toggle stop button visibility |
 | Stop After Current | Show / Hidden | Toggle stop-after-current button visibility |
 | Super Button | Show / Hidden | Toggle Super menu button visibility |
 | MiniPlayer Icon | Show / Hidden | Toggle MiniPlayer button visibility |
 | Hover Circles | Show / Hide | Show circular hover effect on buttons |
-| Alternate Icons | Enabled / Disabled | Use outline-style play/pause/stop icons |
+| Alternate Icons | Style 1 / 2 / 3 | Toggle play/pause icon style |
 | Play Icon Style | Normal / Inverted | Normal: accent bg + dark icon; Inverted: accent bg + white icon |
 | Auto-hide C-buttons | Yes / No | Custom buttons fade out during active playback |
+| Volume Icon | Show / Hide | Toggle volume icon visibility |
+| Volume Bar | Show / Hide | Toggle volume bar visibility |
 
 ### Custom Button Tab
 
@@ -166,15 +188,14 @@ Configure up to 6 visible custom buttons (7-12 via config file only):
 - **Open Folder**: Opens the directory containing the currently selected track
 
 Each button also supports:
-- **Custom Icon (PNG/ICO/SVG)**: Optional custom icon image path (SVG requires [foo_svg_services](https://www.foobar2000.org/components/view/foo_svg_services))
+- **Custom Icon**: Unicode symbol support — enter characters directly or use U+XXXX notation. For example, select `Segoe UI` font and paste `🎶` directly, or select `Segoe Fluent Icons` font and enter `U+E8D6`
 - **Tooltip Label**: Custom text shown on hover (defaults to "Button #N")
 - Automatic fallback to numbered square icons when custom icon is missing
 
 ### Fonts & Colors Tab
 
 #### Fonts
-- **Track Title**: Font for the track name (Line 1)
-- **Artist**: Font for the artist/second line (Line 2)
+- **Left Line 1-3**: Font for the left info area (supports colors, underline, etc.)
 - **Time Display**: Font for elapsed/remaining time
 
 #### Colors
@@ -185,12 +206,12 @@ Each color has a checkbox: unchecked uses theme colors from DUI/CUI, checked use
 | Button Accent | DUI Highlight / CUI highlight | Active state for Shuffle, Repeat, etc. |
 | Play/Pause Accent | DUI Highlight / CUI highlight | Play button background circle |
 | Progress Accent | DUI Highlight / CUI highlight | Progress bar fill |
-| Volume Accent | DUI Highlight / CUI highlight | Volume bar fill |
+| Progress Track | Theme-derived | Progress bar unfilled portion |
 | Hover Color | DUI Selection / CUI selection | Button hover circle |
-| Spectrum Color | DUI Highlight / CUI highlight | Spectrum visualizer bars |
+| Spectrum Color | Adaptive (follows theme highlight) / Solid (customizable) / Gradient (customizable) / Frequency (built-in) | Spectrum visualizer bars |
 | Waveform Color | DUI Highlight / CUI highlight | Waveform played portion |
 | Waveform Unplayed | DUI Text / CUI text | Waveform unplayed portion |
-| Progress Track | Theme-derived | Progress bar unfilled portion |
+| Volume Accent | DUI Highlight / CUI highlight | Volume bar fill |
 | Volume Track | Theme-derived | Volume bar unfilled portion |
 
 ### Keyboard Shortcuts
