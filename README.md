@@ -53,10 +53,10 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 - **Up to 12 Custom Buttons**: Fully configurable action buttons
   - **Buttons 1-6**: Visible on panel, configurable via Preferences
   - **Buttons 7-12**: Hidden, keyboard shortcuts only, configurable via config file
-  - Open URL, Run executable, Open folder, or Execute foobar2000 menu commands (main menu or context menu)
+  - Open URL, [Run executable](#highlight-word1), Open folder, or Execute foobar2000 menu commands ([main menu or context menu](#highlight-word2))
   - **3D Button Style**: Adds a raised, pad-like appearance with gradient and shadow; buttons animate when pressed for tactile feedback (enabled by default)
   - **State feedback**: Foobar2k Action buttons show accent color when the command is checked/active (e.g., toggle commands)
-  - Custom Unicode symbol per button (enter character directly or use U+XXXX notation)
+  - Custom Unicode symbol per button ([enter character directly or use U+XXXX notation](#highlight-word3))
   - Custom tooltip label per button
   - Adaptive layout: 2-row (buttons 1-3, 4-6) at larger heights, single row at smaller heights
   - Auto-hide during playback (optional, with smooth 300ms fade animation)
@@ -109,8 +109,8 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 
 ## Installation
 
-1. For installed version of foobar2000 with file associations: Double-click the `foo_nowbar*.fb2k-component` file to install.
-   For portable version: Open foobar2000, go to Preferences → Components, click Install..., select the `foo_nowbar*.fb2k-component` file, and click OK.
+1. For **installed version of foobar2000 with file associations**: Double-click the `foo_nowbar*.fb2k-component` file to install.<br>
+   For **portable version**: Open foobar2000, go to Preferences → Components, click Install..., select the `foo_nowbar*.fb2k-component` file, and click OK.
 2. Restart foobar2000
 3. Add the panel:
    - **Default UI**: View → Layout → Add panel → "Now Bar Control Panel"
@@ -124,8 +124,8 @@ Access preferences via: File → Preferences → Tools → Now Bar OR Super Icon
 
 | Setting | Options | Description |
 |---------|---------|-------------|
-| Line 1 Format | Title Formatting | First line of track info (default: `%title%`) |
-| Line 2 Format | Title Formatting | Second line of track info (default: `%artist%`) |
+| Line 1 Format | Title Formatting | Default: `%title%` |
+| Line 2 Format | Title Formatting | Default: `%artist%` |
 | Line 3 Format | Title Formatting | Default: blank; can display title format or rating stars |
 | Rating Stars | Show (panel center) / Hidden / Line 3 (replaces third line title format) | Toggle rating stars visibility |
 | Mood Tag | FEEDBACK / 2003_LOVED / LFM_LOVED / SMP_LOVED / MOOD | Which tag the heart button reads/writes |
@@ -183,12 +183,12 @@ Access preferences via: File → Preferences → Tools → Now Bar OR Super Icon
 Configure up to 6 visible custom buttons (7-12 via config file only):
 - **None**: Button disabled
 - **Open URL**: Opens a URL in the default browser (supports Title Formatting, uses selected track)
-- **Run Executable**: Launches an external program (supports Title Formatting, uses selected track)
-- **Foobar2k Action**: Executes a foobar2000 menu command (e.g., `Playback/Stop` or context menu `File Operations/Move to/MP3`); shows accent color when the command is active
+- <a name="highlight-word1"></a>**Run Executable**: Launches an external program (supports Title Formatting, uses selected track)
+- <a name="highlight-word2"></a>**Foobar2k Action**: Executes a foobar2000 menu command (e.g., `Playback/Stop` or context menu `File Operations/Move to/MP3`); shows accent color when the command is active
 - **Open Folder**: Opens the directory containing the currently selected track
 
 Each button also supports:
-- **Custom Icon**: Unicode symbol support — enter characters directly or use U+XXXX notation. For example, select `Segoe UI` font and paste `🎶` directly, or select `Segoe Fluent Icons` font and enter `U+E8D6`
+- <a name="highlight-word3"></a>**Custom Icon**: Unicode symbol support — enter characters directly or use U+XXXX notation. For example, select `Segoe UI` font and paste `🎶` directly, or select `Segoe Fluent Icons` font and enter `U+E8D6`
 - **Tooltip Label**: Custom text shown on hover (defaults to "Button #N")
 - Automatic fallback to numbered square icons when custom icon is missing
 
