@@ -109,8 +109,16 @@
 
 ## 安装方法
 
-1. **安装版 foobar2000 且关联了文件格式**：双击 `foo_nowbar*.fb2k-component` 文件安装；<br>
-   **便携版 foobar2000**：通过 foobar2000 参数选项 - 组件页面，点击安装按钮，选择 `foo_nowbar*.fb2k-component` 文件，点击确定。
+1. **安装版 foobar2000**（已关联文件格式）：双击 `foo_nowbar*.fb2k-component` 文件安装；<br>
+   **便携版 foobar2000**：通过 foobar2000 参数选项 - 组件页面，点击安装按钮，选择 `foo_nowbar*.fb2k-component` 文件，点击确定。<br>
+   Releases 页面附件介绍：<br>
+   `foo_nowbar*.fb2k-component` ：英文版<br>
+   `foo_nowbar-zh-CN*.fb2k-component` ：中文版
+1. **安装版 foobar2000**（已关联文件格式）：双击 `foo_nowbar*.fb2k-component` 文件安装<br>
+   **便携版 foobar2000**：参数选项 → 组件 → 点击“安装” → 选择 `foo_nowbar*.fb2k-component` 文件 → 确定<br>
+   **Releases 页面附件说明：**<br>
+   - `foo_nowbar*.fb2k-component`：英文版<br>
+   - `foo_nowbar-zh-CN*.fb2k-component`：中文版
 2. 重启 foobar2000。
 3. 添加面板：
    - **默认界面 (DUI)**：视图 → 布局 → 启用布局编辑模式 → 添加面板 → "播放控制面板"。
