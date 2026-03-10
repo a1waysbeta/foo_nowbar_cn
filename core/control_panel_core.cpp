@@ -5253,8 +5253,11 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     // Draw waveform bars with reveal cutoff
     int wave_w_setting = get_nowbar_waveform_width();
     float bar_w_f = (wave_w_setting == 0) ? 0.5f : (wave_w_setting == 2) ? 2.0f : 1.0f;
-    float gap = 1.0f;
-    float bar_total_w = bar_w_f + gap;
+    float gap = (wave_w_setting == 2) ? 1.0f : 1.0f;  // 只在宽模式下间隙为1px
+float bar_total_w = bar_w_f + gap;
+
+    // float gap = 1.0f;
+    // float bar_total_w = bar_w_f + gap;
     int display_count = (int)((float)w / bar_total_w);
     if (display_count < 1) display_count = 1;
     int num_segments = (int)peaks.size();
@@ -5280,7 +5283,8 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
       float bar_h = peak * (float)h;
       if (bar_h < min_bar_h) bar_h = min_bar_h;
 
-      float bx = m_rect_waveform.left + i * bar_total_w + gap * 0.5f;
+float bx = m_rect_waveform.left + i * bar_total_w + gap * 0.0f;  // 间隙为0时起始位置无需偏移
+      // float bx = m_rect_waveform.left + i * bar_total_w + gap * 0.5f;
       float by = m_rect_waveform.bottom - bar_h;
 
       // Determine if this segment is played or unplayed
