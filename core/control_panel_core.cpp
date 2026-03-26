@@ -5799,6 +5799,7 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
                             new_region == HitRegion::ShuffleButton ||
                             new_region == HitRegion::RepeatButton ||
                             new_region == HitRegion::StopButton ||
+                            new_region == HitRegion::StopAfterCurrentButton ||
                             new_region == HitRegion::SuperButton ||
                             new_region == HitRegion::HeartButton ||
                             new_region == HitRegion::RatingArea);
