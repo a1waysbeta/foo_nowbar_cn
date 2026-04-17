@@ -91,12 +91,14 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
     // Minimum height: 0.55 inches, scaled by DPI
     // At 96 DPI: 0.55 * 96 = 53 pixels
     info.m_min_height = static_cast<t_uint32>(0.55 * dpi);
-    
-    // Maximum height: 1.12 inches, scaled by DPI (~38% total reduction from 1.8)
-    // At 96 DPI: 1.12 * 96 = 108 pixels
-    // Keeps panel compact and horizontal-focused
-    info.m_max_height = static_cast<t_uint32>(1.12 * dpi);
-    
+
+    // No max_height: reporting a tight cap (~107px) to the DUI host pins the
+    // main window when nowbar is the sole content element (e.g. replaces the
+    // Default Playlist), leaving the window stuck narrow and short. Compact
+    // appearance at tall sizes is handled by the renderer, not by forcing the
+    // host layout.
+
+
     // Fixed minimum width that accommodates all elements at any height
     // Including Super button, spectrum visualizer after Repeat.
     // When volume, miniplayer, and all custom buttons are hidden, allow a
