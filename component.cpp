@@ -46,10 +46,11 @@ namespace {
             nowbar::ControlPanelCore::shutdown();
             nowbar::PlaybackStateManager::shutdown();
 
-            if (g_gdiplusToken) {
-                Gdiplus::GdiplusShutdown(g_gdiplusToken);
-                g_gdiplusToken = 0;
-            }
+            // GdiplusShutdown is intentionally NOT called here. DUI element
+            // destructors run after initquit::on_quit returns, and they own
+            // std::unique_ptr<Gdiplus::Bitmap/Font/SolidBrush> members. Shutting
+            // GDI+ down here would cause their destructors to dereference
+            // disposed GDI+ state. Windows reclaims GDI+ on process exit.
         }
     };
 
