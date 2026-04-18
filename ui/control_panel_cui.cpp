@@ -242,6 +242,13 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             m_core->on_mouse_wheel(GET_WHEEL_DELTA_WPARAM(wp));
         }
         return 0;
+
+    // Swallow right-click so the Columns UI host does not show its panel
+    // configuration menu. Default UI does not surface one; this matches.
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_CONTEXTMENU:
+        return 0;
         
     case WM_SETTINGCHANGE:
         // System settings changed - trigger theme update
