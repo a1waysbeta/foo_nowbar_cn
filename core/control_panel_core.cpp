@@ -1124,10 +1124,19 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int play_button_size =
       static_cast<int>(m_metrics.play_button_size * m_size_scale);
   int spacing = static_cast<int>(m_metrics.spacing * m_size_scale);
-  bool volume_visible = get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible();
-  int volume_width = volume_visible
-      ? static_cast<int>(m_metrics.volume_width * m_size_scale)
-      : 0;
+  bool volume_bar_vis = get_nowbar_volume_bar_visible();
+  bool volume_icon_vis = get_nowbar_volume_icon_visible();
+  bool volume_visible = volume_icon_vis || volume_bar_vis;
+  int volume_width;
+  if (volume_bar_vis) {
+    volume_width = static_cast<int>(m_metrics.volume_width * m_size_scale);
+  } else if (volume_icon_vis) {
+    // Icon-only: shrink the reserved area to just the icon so it ends at
+    // the right edge instead of leaving empty space where the bar used to be
+    volume_width = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+  } else {
+    volume_width = 0;
+  }
 
   // Volume and MiniPlayer (right side)
   int right_inset =
@@ -2016,7 +2025,10 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
       int icon_sz = static_cast<int>(23 * m_dpi_scale * m_size_scale);
       int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
       int vol_h = m_rect_volume.bottom - m_rect_volume.top;
-      int icon_center_x = m_rect_volume.left - icon_gap + icon_sz / 2;
+      int icon_base_x = get_nowbar_volume_bar_visible()
+          ? (m_rect_volume.left - icon_gap)
+          : m_rect_volume.left;
+      int icon_center_x = icon_base_x + icon_sz / 2;
       int vol_left = icon_center_x - vol_h / 2;
       clip.Union(Gdiplus::Rect(vol_left - 2, m_rect_volume.top - 2,
           m_rect_volume.right - vol_left + 4, vol_h + 4));
@@ -2191,12 +2203,13 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     vol_clip.MakeEmpty();
     if (m_rect_volume.right > m_rect_volume.left) {
       // Volume icon hover circle: centered on icon, diameter = button height.
-      // icon_center_x = m_rect_volume.left - icon_gap + icon_size/2
-      // circle extends icon_center_x ± vol_h/2
       int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
       int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
       int vol_h = m_rect_volume.bottom - m_rect_volume.top;
-      int icon_center_x = m_rect_volume.left - icon_gap + icon_size / 2;
+      int icon_base_x = get_nowbar_volume_bar_visible()
+          ? (m_rect_volume.left - icon_gap)
+          : m_rect_volume.left;
+      int icon_center_x = icon_base_x + icon_size / 2;
       int vol_left = icon_center_x - vol_h / 2;
       vol_clip.Union(Gdiplus::Rect(vol_left, m_rect_volume.top,
           m_rect_volume.right - vol_left, vol_h));
@@ -3853,21 +3866,38 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   // Use GenericTypographic to eliminate variable internal padding that
   // MeasureString adds by default — this ensures measurement matches rendering
   // and prevents timer position shifting when the font changes.
+  // Use StringAlignmentNear for line alignment and position the rect top
+  // manually using font ascent/descent. StringAlignmentCenter would center
+  // the em box, but fonts with asymmetric ascent/descent (e.g. Segoe UI)
+  // render digit glyphs visually low relative to the geometric rect center.
   Gdiplus::StringFormat sfLeft(Gdiplus::StringFormat::GenericTypographic());
   sfLeft.SetAlignment(Gdiplus::StringAlignmentNear);
-  sfLeft.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  sfLeft.SetLineAlignment(Gdiplus::StringAlignmentNear);
   sfLeft.SetFormatFlags(sfLeft.GetFormatFlags() | Gdiplus::StringFormatFlagsNoClip);
 
   Gdiplus::StringFormat sfRight(Gdiplus::StringFormat::GenericTypographic());
   sfRight.SetAlignment(Gdiplus::StringAlignmentFar);
-  sfRight.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  sfRight.SetLineAlignment(Gdiplus::StringAlignmentNear);
   sfRight.SetFormatFlags(sfRight.GetFormatFlags() | Gdiplus::StringFormatFlagsNoClip);
 
   Gdiplus::StringFormat sfMeasure(Gdiplus::StringFormat::GenericTypographic());
 
-  // Position time at the ends of the seekbar (vertically centered with seekbar)
+  // Position time at the ends of the seekbar (vertically centered with seekbar).
+  // Compute the rect top using font ascent/descent so the glyph center aligns
+  // with seekbar_center_y, independent of font ascent/descent asymmetry.
   int seekbar_center_y = (m_rect_seekbar.top + m_rect_seekbar.bottom) / 2;
-  int time_height = static_cast<int>(m_metrics.text_height * m_size_scale);
+  Gdiplus::FontFamily time_family;
+  m_font_time->GetFamily(&time_family);
+  int time_style = m_font_time->GetStyle();
+  UINT16 em_height = time_family.GetEmHeight(time_style);
+  UINT16 cell_ascent = time_family.GetCellAscent(time_style);
+  UINT16 cell_descent = time_family.GetCellDescent(time_style);
+  float font_size = m_font_time->GetSize();
+  float ascent_px = em_height ? font_size * cell_ascent / em_height : 0.0f;
+  float descent_px = em_height ? font_size * cell_descent / em_height : 0.0f;
+  float line_px = ascent_px + descent_px;
+  float time_top = (float)seekbar_center_y - line_px / 2.0f;
+  float time_height = line_px;
 
   // Measure actual text width needed for longest possible time strings
   // Use "9:59:59" as reference for elapsed time and "-9:59:59" for remaining time
@@ -3900,9 +3930,8 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
     timer_left = min_timer_left;
   }
   
-  Gdiplus::RectF leftTimeRect(timer_left,
-                              (float)(seekbar_center_y - time_height / 2),
-                              timer_right - timer_left, (float)time_height);
+  Gdiplus::RectF leftTimeRect(timer_left, time_top,
+                              timer_right - timer_left, time_height);
   g.DrawString(elapsed.c_str(), -1, m_font_time.get(), leftTimeRect, &sfRight,
                &timeBrush);
 
@@ -3910,8 +3939,7 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   // Use same gap as left side to avoid seek handle overlap
   Gdiplus::RectF rightTimeRect(
       (float)(m_rect_seekbar.right + timer_gap),
-      (float)(seekbar_center_y - time_height / 2), time_offset,
-      (float)time_height);
+      time_top, time_offset, time_height);
   g.DrawString(remaining_str.c_str(), -1, m_font_time.get(), rightTimeRect, &sfLeft,
                &timeBrush);
 }
@@ -5446,13 +5474,20 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     // Draw custom volume icon (scaled with panel height) - always grayed
     int icon_y = m_rect_volume.top + (h - icon_size) / 2;
 
+    // When the bar is visible the icon sits to the LEFT of m_rect_volume
+    // (the bar fills the rect). When the bar is hidden the rect was shrunk
+    // to icon-only width, so the icon sits AT m_rect_volume.left.
+    int icon_base_x = get_nowbar_volume_bar_visible()
+        ? (m_rect_volume.left - icon_gap)
+        : m_rect_volume.left;
+
     // Hover circle on volume icon (same pattern as MiniPlayer button)
     bool icon_hovered = (m_hover_region == HitRegion::VolumeIcon);
     if (icon_hovered && get_nowbar_hover_circles_enabled()) {
       Gdiplus::SolidBrush hoverBrush(vol_hover_color);
       // Use full rect height for a proper circle, centered on icon
       int circle_size = h;
-      int icon_center_x = m_rect_volume.left - icon_gap + icon_size / 2;
+      int icon_center_x = icon_base_x + icon_size / 2;
       int icon_center_y = m_rect_volume.top + h / 2;
       g.FillEllipse(&hoverBrush, icon_center_x - circle_size / 2,
                     icon_center_y - circle_size / 2, circle_size, circle_size);
@@ -5461,7 +5496,7 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     // Enlarge icon when hovered (same 15% pattern as other buttons)
     float vol_icon_scale = icon_hovered ? HOVER_SCALE_FACTOR : 1.0f;
     int scaled_icon_size = static_cast<int>(icon_size * vol_icon_scale);
-    int icon_x = m_rect_volume.left - icon_gap + (icon_size - scaled_icon_size) / 2;
+    int icon_x = icon_base_x + (icon_size - scaled_icon_size) / 2;
     int scaled_icon_y = icon_y + (icon_size - scaled_icon_size) / 2;
     draw_volume_icon(g, icon_x, scaled_icon_y, scaled_icon_size,
                      volume_icon_color, vol_level);
@@ -5686,11 +5721,18 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
     int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
     int icon_width =
         static_cast<int>(23 * m_dpi_scale * m_size_scale); // Match volume icon
-    RECT expanded_volume = {m_rect_volume.left - icon_gap, m_rect_volume.top,
-                            m_rect_volume.right, m_rect_volume.bottom};
+    // When the bar is visible the icon sits to the left of m_rect_volume,
+    // so expand the hit rect left by icon_gap. When only the icon is
+    // visible, m_rect_volume already bounds the icon exactly.
+    RECT expanded_volume = get_nowbar_volume_bar_visible()
+        ? RECT{m_rect_volume.left - icon_gap, m_rect_volume.top,
+               m_rect_volume.right, m_rect_volume.bottom}
+        : m_rect_volume;
     if (pt_in_rect(expanded_volume, x, y)) {
       // Check if click is on icon area or slider bar
-      if (get_nowbar_volume_icon_visible() && x < m_rect_volume.left + icon_width - icon_gap) {
+      if (get_nowbar_volume_icon_visible() &&
+          (!get_nowbar_volume_bar_visible() ||
+           x < m_rect_volume.left + icon_width - icon_gap)) {
         return HitRegion::VolumeIcon;
       }
       if (get_nowbar_volume_bar_visible()) {
