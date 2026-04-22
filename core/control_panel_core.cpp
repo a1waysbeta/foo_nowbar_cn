@@ -3896,7 +3896,18 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   float ascent_px = em_height ? font_size * cell_ascent / em_height : 0.0f;
   float descent_px = em_height ? font_size * cell_descent / em_height : 0.0f;
   float line_px = ascent_px + descent_px;
-  float time_top = (float)seekbar_center_y - line_px / 2.0f;
+  // Measure the actual visible glyph bounds so the digit center aligns with
+  // the seekbar center regardless of font metrics. Centering on em ascent or
+  // (ascent+descent) biases the glyph downward by (ascent - cap_height)/2 or
+  // descent/2 respectively; both scale with font size and become visible
+  // beyond size 9. Path measurement gives the true ink rect.
+  Gdiplus::StringFormat sfPathMeasure(Gdiplus::StringFormat::GenericTypographic());
+  Gdiplus::GraphicsPath measure_path;
+  measure_path.AddString(L"9:59:59", -1, &time_family, time_style, font_size,
+                         Gdiplus::PointF(0.0f, 0.0f), &sfPathMeasure);
+  Gdiplus::RectF glyph_bounds;
+  measure_path.GetBounds(&glyph_bounds);
+  float time_top = (float)seekbar_center_y - glyph_bounds.Y - glyph_bounds.Height / 2.0f;
   float time_height = line_px;
 
   // Measure actual text width needed for longest possible time strings
@@ -5593,6 +5604,8 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
 void ControlPanelCore::draw_volume_tooltip(Gdiplus::Graphics &g) {
   if (!m_volume_wheel_active)
     return;
+  if (!get_nowbar_volume_bar_visible())
+    return;
 
   // Recompute bar geometry (same as draw_volume)
   int w = m_rect_volume.right - m_rect_volume.left;
@@ -7144,17 +7157,24 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
 void ControlPanelCore::on_playback_time_changed(double time) {
   if (!m_seeking) {
     m_state.playback_time = time;
-    
+
     // Update target progress (used directly by seekbar, no interpolation)
     if (m_state.track_length > 0) {
       m_target_progress = time / m_state.track_length;
     } else {
       m_target_progress = 0.0;
     }
-    
+
     // Always use direct invalidate for playback time updates
     // Progress bar does not use smooth animation for performance reasons
     invalidate_progress();
+
+    // Re-evaluate line formats only if they reference %playback_time*%,
+    // and invalidate the track info region so the new value is painted.
+    if (m_lines_have_dynamic_time) {
+      evaluate_title_formats();
+      if (m_hwnd) InvalidateRect(m_hwnd, &m_rect_track_info, FALSE);
+    }
   }
 }
 
@@ -8357,6 +8377,17 @@ void ControlPanelCore::update_title_formats() {
   compiler->compile_safe_ex(m_titleformat_line2, line2_fmt.c_str());
   if (line3_fmt.get_length() > 0)
     compiler->compile_safe_ex(m_titleformat_line3, line3_fmt.c_str());
+
+  // Detect %playback_time*% so on_playback_time_changed knows whether to
+  // re-evaluate every tick. Substring match catches %playback_time%,
+  // %playback_time_seconds%, %playback_time_ms%, %playback_time_remaining%,
+  // and %playback_time_remaining_seconds%.
+  auto has_dynamic_time = [](const char* s) {
+    return s && strstr(s, "%playback_time") != nullptr;
+  };
+  m_lines_have_dynamic_time = has_dynamic_time(line1_fmt.c_str()) ||
+                              has_dynamic_time(line2_fmt.c_str()) ||
+                              has_dynamic_time(line3_fmt.c_str());
 
   // Re-evaluate with current track
   evaluate_title_formats();
