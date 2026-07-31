@@ -189,13 +189,14 @@ static inline float slider_to_db(float slider_pos) {
     return static_cast<float>(volume);
 }
 
-// Playlist focus callback - updates rating display when focused track changes
+// Playlist focus and order callback - updates rating display and playback order buttons
 class ControlPanelCore::PlaylistFocusCallback : public playlist_callback_impl_base {
 public:
   PlaylistFocusCallback(ControlPanelCore* owner)
       : playlist_callback_impl_base(
             playlist_callback::flag_on_item_focus_change |
-            playlist_callback::flag_on_playlist_activate)
+            playlist_callback::flag_on_playlist_activate |
+            playlist_callback::flag_on_playback_order_changed)
       , m_owner(owner) {}
 
   void on_item_focus_change(t_size, t_size, t_size) override {
@@ -205,6 +206,11 @@ public:
 
   void on_playlist_activate(t_size, t_size) override {
     m_owner->update_rating_state();
+    m_owner->invalidate();
+  }
+
+  void on_playback_order_changed(t_size new_order) override {
+    m_owner->m_state.playback_order = new_order;
     m_owner->invalidate();
   }
 
