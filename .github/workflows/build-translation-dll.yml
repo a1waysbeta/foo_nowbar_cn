@@ -87,13 +87,27 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v3
 
+    # ===== 关键修复：安装 ATL 组件 =====
+    - name: Install ATL for Visual Studio 2022
+      shell: cmd
+      run: |
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\vs_installer.exe" modify ^
+          --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" ^
+          --add Microsoft.VisualStudio.Component.VC.ATL ^
+          --quiet --norestart
+
     # Debug: Verify structure matches project expectations
     - name: Debug Directory Structure
       run: |
         echo "Listing columns_ui structure..."
         dir foo_nowbar\lib\columns_ui
+        echo ""
+        echo "Checking pfc..."
         dir foo_nowbar\lib\columns_ui\pfc
+        echo ""
+        echo "Checking foobar2000 SDK..."
         dir foo_nowbar\lib\columns_ui\foobar2000\SDK
+        echo ""
         echo "Checking libPPUI..."
         dir foo_nowbar\lib\columns_ui\libPPUI
       shell: cmd
