@@ -59,7 +59,7 @@ jobs:
         repository: reupen/pfc-modified
         path: foo_nowbar/lib/columns_ui/pfc
 
-    # 1.6 libPPUI (Helper) - 从 foo_traycontrols_cn 获取 libPPUI
+    # 1.6 libPPUI (Helper) - 从 foo_traycontrols_cn 获取 libPPUI（包含预编译的 .lib）
     - name: Checkout libPPUI from foo_traycontrols_cn
       uses: actions/checkout@v6
       with:
@@ -87,15 +87,6 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v3
 
-    # ===== 关键修复：安装 ATL 组件 =====
-    - name: Install ATL for Visual Studio 2022
-      shell: cmd
-      run: |
-        "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify ^
-          --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" ^
-          --add Microsoft.VisualStudio.Component.VC.ATL ^
-          --quiet --norestart
-
     # Debug: Verify structure matches project expectations
     - name: Debug Directory Structure
       run: |
@@ -110,6 +101,9 @@ jobs:
         echo ""
         echo "Checking libPPUI..."
         dir foo_nowbar\lib\columns_ui\libPPUI
+        echo ""
+        echo "Checking pre-built libPPUI.lib..."
+        dir foo_nowbar\lib\columns_ui\libPPUI\x64\Release\libPPUI.lib
       shell: cmd
 
     - name: Fix Platform Toolset for GitHub Actions
@@ -155,16 +149,7 @@ jobs:
           /p:Platform=${{ matrix.msbuild_platform }} ^
           /p:OutDir=${{ matrix.outdir_platform }}\columns_ui_sdk\
 
-    # 3.4 Build libPPUI
-    - name: Build libPPUI (${{ matrix.platform }})
-      shell: cmd
-      run: |
-        msbuild foo_nowbar\lib\columns_ui\libPPUI\libPPUI.vcxproj ^
-          /p:Configuration=Release ^
-          /p:Platform=${{ matrix.msbuild_platform }}
-
-    # 3.5 Build Shared (Try to find project, or assume built by SDK hooks)
-    # Note: If this fails, we may need to build 'foobar2000_component_client' instead.
+    # 3.4 Build Shared
     - name: Build Shared (${{ matrix.platform }})
       shell: cmd
       run: |
@@ -174,11 +159,14 @@ jobs:
             /p:Platform=${{ matrix.msbuild_platform }}
         ) else (
            echo "shared.vcxproj not found, assuming shared.lib is built manually or by other projects."
-           # Attempt to build component_client as a fallback to generate shared objs if needed
            if exist foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj (
              msbuild foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=${{ matrix.msbuild_platform }}
              )
         )
+
+    # 注意：libPPUI 不单独构建，使用预编译的 libPPUI.lib
+    # 预编译库位置：lib/columns_ui/libPPUI/x64/Release/libPPUI.lib (对于 x64)
+    # 注意：目前只有 x64 的预编译库，x86 可能需要额外处理
 
     # -------------------------------------------------------------------------
     # 4. Build Your Component
