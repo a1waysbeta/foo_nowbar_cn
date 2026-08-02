@@ -59,19 +59,19 @@ jobs:
         repository: reupen/pfc-modified
         path: foo_nowbar/lib/columns_ui/pfc
 
-    # 1.6 libPPUI (Helper)
-    - name: Checkout libPPUI
+    # 1.6 libPPUI (Helper) - 从 foo_traycontrols_cn 获取 libPPUI
+    - name: Checkout libPPUI from foo_traycontrols_cn
       uses: actions/checkout@v6
       with:
-        repository: marc2k3/foobar2000-sdk
-        path: temp_libppui
-        sparse-checkout: libPPUI
+        repository: a1waysbeta/foo_traycontrols_cn
+        path: temp_traycontrols
+        sparse-checkout: lib/foobar2000_SDK/libPPUI
         sparse-checkout-cone-mode: false
 
     - name: Move libPPUI
       run: |
-        move temp_libppui\libPPUI foo_nowbar\lib\columns_ui\libPPUI
-        rmdir /s /q temp_libppui
+        move temp_traycontrols\lib\foobar2000_SDK\libPPUI foo_nowbar\lib\columns_ui\libPPUI
+        rmdir /s /q temp_traycontrols
       shell: cmd
 
     # 1.7 SVG Services (Header only API)
@@ -94,6 +94,8 @@ jobs:
         dir foo_nowbar\lib\columns_ui
         dir foo_nowbar\lib\columns_ui\pfc
         dir foo_nowbar\lib\columns_ui\foobar2000\SDK
+        echo "Checking libPPUI..."
+        dir foo_nowbar\lib\columns_ui\libPPUI
       shell: cmd
 
     - name: Fix Platform Toolset for GitHub Actions
@@ -139,7 +141,15 @@ jobs:
           /p:Platform=${{ matrix.msbuild_platform }} ^
           /p:OutDir=${{ matrix.outdir_platform }}\columns_ui_sdk\
 
-    # 3.4 Build Shared (Try to find project, or assume built by SDK hooks)
+    # 3.4 Build libPPUI
+    - name: Build libPPUI (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild foo_nowbar\lib\columns_ui\libPPUI\libPPUI.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }}
+
+    # 3.5 Build Shared (Try to find project, or assume built by SDK hooks)
     # Note: If this fails, we may need to build 'foobar2000_component_client' instead.
     - name: Build Shared (${{ matrix.platform }})
       shell: cmd
