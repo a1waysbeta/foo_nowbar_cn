@@ -8,7 +8,7 @@ jobs:
 # 1. Build x86 + x64 (matrix)
 # =============================================================================
   build-multi-platform:
-    runs-on: windows-latest
+    runs-on: windows-2022  # 改为 windows-2022
     strategy:
       matrix:
         platform: [x86, x64]
@@ -189,7 +189,7 @@ jobs:
 # 2. Package → ONE fb2k-component
 # =============================================================================
   package:
-    runs-on: windows-latest
+    runs-on: windows-2022  # 也改为 windows-2022
     needs: build-multi-platform
     name: Package fb2k-component
 
