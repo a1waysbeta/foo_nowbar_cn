@@ -302,6 +302,11 @@ static cfg_int cfg_nowbar_waveform_width(
     1  // Default: Normal (0=Thin, 1=Normal, 2=Wide)
 );
 
+static cfg_int cfg_nowbar_waveform_style(
+    GUID{0xABCDEF8C, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8C}},
+    0  // Default: Waveform 1 (0=Waveform 1 / Bottom bars, 1=Waveform 2 / Centered envelope)
+);
+
 static cfg_int cfg_nowbar_waveform_unplayed_color(
     GUID{0xABCDEF66, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xF6}},
     RGB(60, 60, 60)  // Default: dim gray (fully opaque)
@@ -1848,6 +1853,13 @@ int get_nowbar_waveform_width() {
     return w;
 }
 
+int get_nowbar_waveform_style() {
+    int s = cfg_nowbar_waveform_style;
+    if (s < 0) s = 0;
+    if (s > 1) s = 1;
+    return s;
+}
+
 int get_nowbar_skip_low_rating_threshold() {
     int threshold = cfg_nowbar_skip_low_rating_threshold;
     if (threshold < 1) threshold = 1;
@@ -2943,6 +2955,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_RADIO), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_STYLE_1), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_STYLE_2), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), show_general);
 
@@ -3157,6 +3171,8 @@ static void update_vis_section_state(HWND hwnd) {
 
     // Waveform controls: enabled only if Enable checked AND Waveform selected
     BOOL wave_on = enabled && waveform_sel;
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_STYLE_1), wave_on);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_STYLE_2), wave_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), wave_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), wave_on);
 }
@@ -3601,6 +3617,10 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide");
             SendMessage(hWaveWidth, CB_SETCURSEL, cfg_nowbar_waveform_width, 0);
 
+            // Initialize waveform style radio buttons (1 vs 2)
+            CheckRadioButton(hwnd, IDC_VIS_WAVEFORM_STYLE_1, IDC_VIS_WAVEFORM_STYLE_2,
+                (cfg_nowbar_waveform_style == 1) ? IDC_VIS_WAVEFORM_STYLE_2 : IDC_VIS_WAVEFORM_STYLE_1);
+
             update_vis_section_state(hwnd);
         }
 
@@ -3809,6 +3829,18 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_VIS_SPECTRUM_RADIO:
         case IDC_VIS_WAVEFORM_RADIO:
             if (HIWORD(wp) == BN_CLICKED) {
+                update_vis_section_state(hwnd);
+                p_this->on_changed();
+            }
+            break;
+
+        case IDC_VIS_WAVEFORM_STYLE_1:
+        case IDC_VIS_WAVEFORM_STYLE_2:
+            if (HIWORD(wp) == BN_CLICKED) {
+                CheckRadioButton(hwnd, IDC_VIS_WAVEFORM_STYLE_1, IDC_VIS_WAVEFORM_STYLE_2, LOWORD(wp));
+                if (IsDlgButtonChecked(hwnd, IDC_VIS_WAVEFORM_RADIO) != BST_CHECKED) {
+                    CheckRadioButton(hwnd, IDC_VIS_SPECTRUM_RADIO, IDC_VIS_WAVEFORM_RADIO, IDC_VIS_WAVEFORM_RADIO);
+                }
                 update_vis_section_state(hwnd);
                 p_this->on_changed();
             }
@@ -4758,6 +4790,7 @@ void nowbar_preferences::apply_settings() {
             cfg_nowbar_spectrum_opacity = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SPECTRUM_OPACITY_SLIDER), TBM_GETPOS, 0, 0);
             cfg_nowbar_spectrum_gradient_mode = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), CB_GETCURSEL, 0, 0);
             cfg_nowbar_waveform_width = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), CB_GETCURSEL, 0, 0);
+            cfg_nowbar_waveform_style = (IsDlgButtonChecked(m_hwnd, IDC_VIS_WAVEFORM_STYLE_2) == BST_CHECKED) ? 1 : 0;
             cfg_nowbar_vis_60fps = (IsDlgButtonChecked(m_hwnd, IDC_VIS_60FPS_CHECK) == BST_CHECKED) ? 1 : 0;
             // Color buttons are saved immediately via color picker, no need to save here
         }
@@ -4895,6 +4928,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_spectrum_style = 1;  // Default: Curve
             cfg_nowbar_spectrum_height = 2;  // Default: High
             cfg_nowbar_waveform_width = 1;  // Default: Normal
+            cfg_nowbar_waveform_style = 0;  // Default: Waveform 1
             cfg_nowbar_vis_60fps = 0;  // Default: Disabled
 
             // Update General tab UI
@@ -4911,6 +4945,7 @@ void nowbar_preferences::reset_settings() {
             CheckDlgButton(m_hwnd, IDC_VIS_ENABLE_CHECK, BST_UNCHECKED);
             CheckDlgButton(m_hwnd, IDC_VIS_60FPS_CHECK, BST_UNCHECKED);
             CheckRadioButton(m_hwnd, IDC_VIS_SPECTRUM_RADIO, IDC_VIS_WAVEFORM_RADIO, IDC_VIS_SPECTRUM_RADIO);
+            CheckRadioButton(m_hwnd, IDC_VIS_WAVEFORM_STYLE_1, IDC_VIS_WAVEFORM_STYLE_2, IDC_VIS_WAVEFORM_STYLE_1);
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), CB_SETCURSEL, 1, 0);  // Normal
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), CB_SETCURSEL, 1, 0);  // Curve
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), CB_SETCURSEL, 2, 0);  // High
