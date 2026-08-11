@@ -5312,44 +5312,100 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     bool still_animating = (m_waveform_reveal_pos < decode_target);
 
     // Draw waveform bars with reveal cutoff
+    int wave_style = get_nowbar_waveform_style();
     int wave_w_setting = get_nowbar_waveform_width();
-    float bar_w_f = (wave_w_setting == 0) ? 0.5f : (wave_w_setting == 2) ? 2.0f : 1.0f;
-    float gap = 1.0f;
+
+    float bar_w_f, gap;
+    if (wave_style == 1) {
+      // Style 2: Centered mirrored waveform envelope bar width & gap
+      bar_w_f = (wave_w_setting == 0) ? (1.0f * m_dpi_scale) :
+                (wave_w_setting == 2) ? (4.0f * m_dpi_scale) :
+                                        (2.0f * m_dpi_scale);
+      gap = (wave_w_setting == 0) ? (0.5f * m_dpi_scale) :
+            (wave_w_setting == 2) ? (1.5f * m_dpi_scale) :
+                                    (1.0f * m_dpi_scale);
+    } else {
+      // Style 1: SoundCloud bottom-aligned bars width & gap
+      bar_w_f = (wave_w_setting == 0) ? 0.5f :
+                (wave_w_setting == 2) ? 2.0f :
+                                        1.0f;
+      gap = 1.0f;
+    }
+
     float bar_total_w = bar_w_f + gap;
     int display_count = (int)((float)w / bar_total_w);
     if (display_count < 1) display_count = 1;
     int num_segments = (int)peaks.size();
     if (num_segments < 1) num_segments = 1;
-    float min_bar_h = 1.0f * m_dpi_scale;
 
     // Map reveal_pos (in segment space 0-400) to display bar index
     float reveal_bar_limit = (m_waveform_reveal_pos / (float)WAVEFORM_SEGMENTS) * display_count;
 
-    for (int i = 0; i < display_count; i++) {
-      // Skip bars beyond the reveal cursor
-      if ((float)i >= reveal_bar_limit) break;
+    if (wave_style == 1) {
+      // Style 2: Centered continuous mirrored waveform envelope
+      float center_y = m_rect_waveform.top + h * 0.5f;
+      float max_half_h = (float)h * 0.5f;
+      float min_half_h = 0.75f * m_dpi_scale;
 
-      // Resample from peaks using linear interpolation
-      float src = (float)i / display_count * num_segments;
-      int lo = (int)src;
-      int hi = lo + 1;
-      if (lo >= num_segments) lo = num_segments - 1;
-      if (hi >= num_segments) hi = num_segments - 1;
-      float frac = src - lo;
-      float peak = peaks[lo] * (1.0f - frac) + peaks[hi] * frac;
+      Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
+      Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
+      g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+      g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
 
-      float bar_h = peak * (float)h;
-      if (bar_h < min_bar_h) bar_h = min_bar_h;
+      for (int i = 0; i < display_count; i++) {
+        if ((float)i >= reveal_bar_limit) break;
 
-      float bx = m_rect_waveform.left + i * bar_total_w + gap * 0.5f;
-      float by = m_rect_waveform.bottom - bar_h;
+        float src = (float)i / display_count * num_segments;
+        int lo = (int)src;
+        int hi = lo + 1;
+        if (lo >= num_segments) lo = num_segments - 1;
+        if (hi >= num_segments) hi = num_segments - 1;
+        float frac = src - lo;
+        float peak = peaks[lo] * (1.0f - frac) + peaks[hi] * frac;
 
-      // Determine if this segment is played or unplayed
-      float seg_progress = (float)(i + 0.5f) / display_count;
-      bool played = (seg_progress <= (float)progress);
+        float half_h = peak * max_half_h;
+        if (half_h < min_half_h) half_h = min_half_h;
 
-      g.FillRectangle(played ? m_waveform_brush_accent.get() : m_waveform_brush_dim.get(),
-                      bx, by, bar_w_f, bar_h);
+        float bx = m_rect_waveform.left + i * bar_total_w;
+        float by = center_y - half_h;
+        float slice_h = half_h * 2.0f;
+
+        float seg_progress = (float)(i + 0.5f) / display_count;
+        bool played = (seg_progress <= (float)progress);
+
+        g.FillRectangle(played ? m_waveform_brush_accent.get() : m_waveform_brush_dim.get(),
+                        bx, by, bar_w_f, slice_h);
+      }
+
+      g.SetSmoothingMode(oldSmoothing);
+      g.SetPixelOffsetMode(oldPixelOffset);
+    } else {
+      // Style 1: SoundCloud bottom-aligned discrete bars with gaps
+      float min_bar_h = 1.0f * m_dpi_scale;
+
+      for (int i = 0; i < display_count; i++) {
+        if ((float)i >= reveal_bar_limit) break;
+
+        float src = (float)i / display_count * num_segments;
+        int lo = (int)src;
+        int hi = lo + 1;
+        if (lo >= num_segments) lo = num_segments - 1;
+        if (hi >= num_segments) hi = num_segments - 1;
+        float frac = src - lo;
+        float peak = peaks[lo] * (1.0f - frac) + peaks[hi] * frac;
+
+        float bar_h = peak * (float)h;
+        if (bar_h < min_bar_h) bar_h = min_bar_h;
+
+        float bx = m_rect_waveform.left + i * bar_total_w + gap * 0.5f;
+        float by = m_rect_waveform.bottom - bar_h;
+
+        float seg_progress = (float)(i + 0.5f) / display_count;
+        bool played = (seg_progress <= (float)progress);
+
+        g.FillRectangle(played ? m_waveform_brush_accent.get() : m_waveform_brush_dim.get(),
+                        bx, by, bar_w_f, bar_h);
+      }
     }
 
     // Keep animating if reveal hasn't caught up to decoded segments
