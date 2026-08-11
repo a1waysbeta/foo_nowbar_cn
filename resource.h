@@ -178,6 +178,8 @@
 #define IDC_VIS_60FPS_CHECK                   1420
 #define IDC_VIS_SPECTRUM_HEIGHT_LABEL         1421
 #define IDC_VIS_SPECTRUM_HEIGHT_COMBO         1422
+#define IDC_VIS_WAVEFORM_STYLE_1              1423
+#define IDC_VIS_WAVEFORM_STYLE_2              1424
 
 // Online Artwork checkbox (Appearance tab)
 #define IDC_ONLINE_ARTWORK_CHECK       1416
