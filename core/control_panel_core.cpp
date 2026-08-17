@@ -484,26 +484,110 @@ SIZE ControlPanelCore::get_min_size() const {
   // Minimum height: 0.55 inches, scaled by DPI
   // At 96 DPI: 0.55 * 96 = 53 pixels
   LONG min_height = static_cast<LONG>(0.55 * dpi);
-  
-  // Fixed minimum width that accommodates all elements at any height
-  // - Artwork: ~80px at minimum
-  // - Track info: ~200px
-  // - Heart button: ~40px
-  // - Core controls (shuffle, prev, play, next, repeat, super): ~300px
-  // - Seekbar/timer overlap area: ~120px
-  // - Custom buttons: ~150px
-  // - Volume bar: ~200px
-  // - MiniPlayer button: ~50px
-  // - Margins and spacing: ~125px
-  // Total: ~1232px to accommodate all elements including spectrum visualizer
-  bool has_any_cbutton = false;
-  for (int i = 0; i < 6; i++) {
-    if (get_nowbar_cbutton_enabled(i)) { has_any_cbutton = true; break; }
+
+  double dpi_scale = m_dpi_scale;
+  double min_scale = 0.60;
+
+  int button_size = static_cast<int>(28.0 * dpi_scale * min_scale);
+  int play_button_size = static_cast<int>(36.0 * dpi_scale * min_scale);
+  int spacing = static_cast<int>(16.0 * dpi_scale * min_scale);
+
+  int min_info_w = static_cast<int>(140.0 * dpi_scale);
+  int total_min_w = 0;
+
+  // Artwork
+  if (get_nowbar_cover_artwork_visible()) {
+    int art_h = static_cast<int>(min_height);
+    int art_margin = get_nowbar_cover_margin() ? static_cast<int>(8.0 * dpi_scale) : 0;
+    int art_size = art_h - art_margin * 2;
+    if (art_size > static_cast<int>(128.0 * dpi_scale)) art_size = static_cast<int>(128.0 * dpi_scale);
+    if (art_size < 32) art_size = 32;
+    total_min_w += art_margin + art_size + spacing;
+  } else {
+    total_min_w += spacing;
   }
-  bool volume_vis = get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible();
-  bool right_side_empty = !volume_vis && !get_nowbar_miniplayer_icon_visible() && !has_any_cbutton;
-  LONG base_width = right_side_empty ? 832 : 1232;
-  LONG min_width = static_cast<LONG>(base_width * m_dpi_scale);
+
+  // Track Info
+  total_min_w += min_info_w;
+
+  // Left timer space (in non-spectrum modes)
+  int vis_mode = get_nowbar_visualization_mode();
+  if (vis_mode != 1) {
+    total_min_w += static_cast<int>(50.0 * dpi_scale);
+  }
+
+  // Mood icon
+  if (get_nowbar_mood_icon_visible()) {
+    total_min_w += button_size + spacing;
+  }
+
+  // Rating stars (if visible and not line 3)
+  if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2) {
+    int star_size = static_cast<int>(button_size * 0.55f);
+    int star_gap = static_cast<int>(2.0 * dpi_scale);
+    total_min_w += (star_size * 5 + star_gap * 4) + spacing;
+  }
+
+  // Core playback buttons: prev, play, next (always visible) + optional buttons
+  bool shuffle_visible = get_nowbar_shuffle_icon_visible();
+  bool repeat_visible = get_nowbar_repeat_icon_visible();
+  bool stop_visible = get_nowbar_stop_icon_visible();
+  bool stop_after_current_visible = get_nowbar_stop_after_current_icon_visible();
+  bool super_visible = get_nowbar_super_icon_visible();
+  int core_buttons = 3;
+  if (shuffle_visible) core_buttons++;
+  if (repeat_visible) core_buttons++;
+  if (stop_visible) core_buttons++;
+  if (stop_after_current_visible) core_buttons++;
+  if (super_visible) core_buttons++;
+  int core_width = button_size * (core_buttons - 1) + play_button_size + spacing * (core_buttons - 1);
+  total_min_w += core_width;
+
+  // Remaining timer space (always included to guarantee room for remaining time display)
+  total_min_w += static_cast<int>(50.0 * dpi_scale);
+
+  // Right-side controls (custom buttons, volume, miniplayer)
+  bool btn_enabled[6] = {
+    get_nowbar_cbutton_enabled(0), get_nowbar_cbutton_enabled(1), get_nowbar_cbutton_enabled(2),
+    get_nowbar_cbutton_enabled(3), get_nowbar_cbutton_enabled(4), get_nowbar_cbutton_enabled(5)
+  };
+  int total_cbuttons = 0;
+  for (int i = 0; i < 6; i++) {
+    if (btn_enabled[i]) total_cbuttons++;
+  }
+  int right_group_w = 0;
+  bool has_prev_right = false;
+
+  if (total_cbuttons > 0) {
+    int cb_w = total_cbuttons * button_size + (total_cbuttons - 1) * spacing;
+    right_group_w += cb_w;
+    has_prev_right = true;
+  }
+  if (get_nowbar_volume_bar_visible()) {
+    if (has_prev_right) right_group_w += spacing;
+    right_group_w += static_cast<int>(192.0 * dpi_scale * min_scale);
+    has_prev_right = true;
+  } else if (get_nowbar_volume_icon_visible()) {
+    if (has_prev_right) right_group_w += spacing;
+    right_group_w += static_cast<int>(23.0 * dpi_scale * min_scale);
+    has_prev_right = true;
+  }
+  if (get_nowbar_miniplayer_icon_visible()) {
+    if (has_prev_right) right_group_w += spacing;
+    right_group_w += button_size;
+    has_prev_right = true;
+  }
+
+  if (right_group_w > 0) {
+    // Space #2 between Center Controls (including remaining timer) and Right Controls
+    total_min_w += spacing + right_group_w;
+  }
+
+  // Right margin / inset
+  int right_margin_pad = get_nowbar_cover_margin() ? static_cast<int>(8.0 * dpi_scale) : 0;
+  total_min_w += right_margin_pad + static_cast<int>(16.0 * dpi_scale);
+
+  LONG min_width = static_cast<LONG>(total_min_w * 0.82f);
   
   return {min_width, min_height};
 }
@@ -694,6 +778,10 @@ void ControlPanelCore::on_settings_changed() {
 
   // Repaint to reflect any visual changes
   invalidate();
+
+  if (m_settings_changed_cb) {
+    m_settings_changed_cb();
+  }
 }
 
 void ControlPanelCore::set_color_query_callback(ColorQueryCallback callback) {
@@ -1113,11 +1201,12 @@ void ControlPanelCore::update_layout(const RECT &rect) {
 
   // Calculate size scale factor based on panel height
   int reference_height =
-      static_cast<int>(130 * m_dpi_scale); // Reference height for full size
+      static_cast<int>(92 * m_dpi_scale); // Reference/maximum panel height for full size
   int min_height =
-      static_cast<int>(53 * m_dpi_scale); // Minimum panel height (0.55 inches)
-  float size_ratio = static_cast<float>(h - min_height) /
-                     static_cast<float>(reference_height - min_height);
+      static_cast<int>(53 * m_dpi_scale); // Minimum panel height (0.55 inches = 53px at 96 DPI)
+  float size_ratio = (reference_height > min_height)
+      ? static_cast<float>(h - min_height) / static_cast<float>(reference_height - min_height)
+      : 1.0f;
   if (size_ratio < 0)
     size_ratio = 0;
   if (size_ratio > 1)
@@ -1130,77 +1219,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int play_button_size =
       static_cast<int>(m_metrics.play_button_size * m_size_scale);
   int spacing = static_cast<int>(m_metrics.spacing * m_size_scale);
-  bool volume_bar_vis = get_nowbar_volume_bar_visible();
-  bool volume_icon_vis = get_nowbar_volume_icon_visible();
-  bool volume_visible = volume_icon_vis || volume_bar_vis;
-  int volume_width;
-  if (volume_bar_vis) {
-    volume_width = static_cast<int>(m_metrics.volume_width * m_size_scale);
-  } else if (volume_icon_vis) {
-    // Icon-only: shrink the reserved area to just the icon so it ends at
-    // the right edge instead of leaving empty space where the bar used to be
-    volume_width = static_cast<int>(23 * m_dpi_scale * m_size_scale);
-  } else {
-    volume_width = 0;
-  }
 
-  // Volume and MiniPlayer (right side)
-  int right_inset =
-      static_cast<int>(16 * m_dpi_scale); // Extra inset from right edge
-  int right_margin = rect.right - art_margin - right_inset;
-
-  // MiniPlayer button (only if visible) - position will be set later after btn_y is calculated
-  // For now, just determine the right edge for volume
-  int volume_right_edge;
-  if (get_nowbar_miniplayer_icon_visible()) {
-    volume_right_edge = right_margin - button_size - spacing;
-  } else {
-    m_rect_miniplayer = {}; // Clear rect when hidden
-    volume_right_edge = right_margin;
-  }
-
-  int vol_bar_height = static_cast<int>(
-      20 * m_dpi_scale * m_size_scale); // Volume bar vertical size (scaled)
-  int vol_x = volume_right_edge - volume_width;
-  // Volume bar position will be set later after vertical_offset is calculated
-
-  // Control buttons (center) - core controls are always in fixed positions
-  // Layout: [heart] shuffle prev play next repeat [custom]
-  // The core 5 buttons (shuffle, prev, play, next, repeat) are always centered
-  // Heart and custom buttons appear at the edges without shifting the core
-  // controls
-
-  // Calculate fixed width for core controls only ([shuffle], prev, play, next, [stop], [stop_after_current], [repeat])
-  // Optional buttons are same size as other buttons (not Play)
-  bool shuffle_visible = get_nowbar_shuffle_icon_visible();
-  bool repeat_visible = get_nowbar_repeat_icon_visible();
-  bool stop_visible = get_nowbar_stop_icon_visible();
-  bool stop_after_current_visible = get_nowbar_stop_after_current_icon_visible();
-  int core_buttons = 3; // prev, play, next (always visible)
-  if (shuffle_visible) core_buttons++;
-  if (repeat_visible) core_buttons++;
-  if (stop_visible) core_buttons++;
-  if (stop_after_current_visible) core_buttons++;
-  int core_width = button_size * (core_buttons - 1) + play_button_size +
-                   spacing * (core_buttons - 1);
-  int core_start_x = rect.left + (w - core_width) / 2;
-  
-  // Clamp control buttons to prevent overlap with artwork
-  int min_controls_x = get_nowbar_cover_artwork_visible()
-      ? m_rect_artwork.right + spacing
-      : rect.left + spacing;
-  core_start_x = std::max(core_start_x, min_controls_x);
-
-  // Calculate seekbar and time display heights first to determine available
-  // space
+  // Determine vertical offsets
+  int pre_vis_mode = get_nowbar_visualization_mode();
+  bool seekbar_visible = get_nowbar_seekbar_visible();
   int seek_gap = static_cast<int>(10 * m_dpi_scale * m_size_scale);
   int seekbar_height =
       static_cast<int>(m_metrics.seekbar_height * m_size_scale);
   int total_seekbar_area = seek_gap + seekbar_height;
 
-  // Mode 1 (Spectrum) or seekbar hidden: no seekbar below buttons, so no vertical offset needed
-  int pre_vis_mode = get_nowbar_visualization_mode();
-  bool seekbar_visible = get_nowbar_seekbar_visible();
   int vertical_offset;
   if (pre_vis_mode == 1 || !seekbar_visible) {
     vertical_offset = 0;  // Buttons centered without seekbar offset
@@ -1228,7 +1255,139 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // centered without the seekbar offset since they don't have seekbar below them
   int right_btn_y = y_center - button_size / 2;
 
-  // Position core controls at fixed positions
+  // Track info (between artwork and controls) - determine locked dimensions
+  int vis_mode = get_nowbar_visualization_mode();
+  int art_right = get_nowbar_cover_artwork_visible()
+      ? m_rect_artwork.right
+      : rect.left;
+  int info_x = art_right + spacing;
+
+  // Use actual font heights when available, fall back to metric default
+  int title_h = m_title_font_height > 0
+      ? m_title_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int artist_h = m_artist_font_height > 0
+      ? m_artist_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int line3_font_h = m_line3_font_height > 0
+      ? m_line3_font_height
+      : static_cast<int>(m_metrics.text_height);
+  int text_gap = static_cast<int>(4 * m_dpi_scale);
+  bool rating_on_line3 = (get_nowbar_rating_mode() == 2);
+  bool line3_active = !rating_on_line3 && (get_nowbar_line3_format().get_length() > 0);
+  // Hide line 3 when panel height is reduced by more than 10% from default
+  bool line3_height_ok = (h >= static_cast<int>(m_metrics.panel_height * 0.90f));
+  if (!line3_height_ok) {
+    line3_active = false;
+    rating_on_line3 = false;
+  }
+  m_line3_visible = line3_active || rating_on_line3;
+  if (!m_line3_visible && get_nowbar_rating_mode() == 2) {
+    // Clear stale rating rects when line 3 is suppressed by height
+    m_rect_rating = {};
+    for (int i = 0; i < 5; i++) m_rect_stars[i] = {};
+  }
+  int line3_h = line3_active ? (line3_font_h + text_gap) : 0;
+  int rating_line_h = rating_on_line3 ? (artist_h + text_gap) : 0;
+  int info_height = title_h + artist_h + text_gap + line3_h + rating_line_h;
+  int info_nudge = static_cast<int>(2 * m_dpi_scale);
+  int info_y = y_center - info_height / 2 + info_nudge;
+
+  // Control buttons (center) - positioned after Track Info area and left timer space
+  bool shuffle_visible = get_nowbar_shuffle_icon_visible();
+  bool repeat_visible = get_nowbar_repeat_icon_visible();
+  bool stop_visible = get_nowbar_stop_icon_visible();
+  bool stop_after_current_visible = get_nowbar_stop_after_current_icon_visible();
+  bool super_visible = get_nowbar_super_icon_visible();
+  int core_buttons = 3; // prev, play, next (always visible)
+  if (shuffle_visible) core_buttons++;
+  if (repeat_visible) core_buttons++;
+  if (stop_visible) core_buttons++;
+  if (stop_after_current_visible) core_buttons++;
+  if (super_visible) core_buttons++;
+
+  int left_timer_space = (pre_vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
+  int left_buttons_width = 0;
+  if (get_nowbar_mood_icon_visible()) {
+    left_buttons_width += button_size + spacing;
+  }
+  if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2) {
+    int star_size = static_cast<int>(button_size * 0.55f);
+    int star_gap = static_cast<int>(2 * m_dpi_scale);
+    left_buttons_width += (star_size * 5 + star_gap * 4) + spacing;
+  }
+
+  int core_width =
+      button_size * (core_buttons - 1) + play_button_size + spacing * (core_buttons - 1);
+
+  // Measure rendered text width of title, artist, and line 3
+  int measured_text_width = static_cast<int>(180 * m_dpi_scale);
+  if (m_hwnd) {
+    HDC hdc = GetDC(m_hwnd);
+    if (hdc) {
+      Gdiplus::Graphics g(hdc);
+      Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
+      sf.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsMeasureTrailingSpaces);
+
+      std::wstring line1 = utf8_to_wide(m_formatted_line1.c_str());
+      std::wstring line2 = utf8_to_wide(m_formatted_line2.c_str());
+      std::wstring line3 = utf8_to_wide(m_formatted_line3.c_str());
+
+      float max_w = 0.0f;
+      if (m_font_title && !line1.empty()) {
+        Gdiplus::RectF bounds;
+        g.MeasureString(line1.c_str(), -1, m_font_title.get(), Gdiplus::PointF(0, 0), &sf, &bounds);
+        if (bounds.Width > max_w) max_w = bounds.Width;
+      }
+      if (m_font_artist && !line2.empty()) {
+        Gdiplus::RectF bounds;
+        g.MeasureString(line2.c_str(), -1, m_font_artist.get(), Gdiplus::PointF(0, 0), &sf, &bounds);
+        if (bounds.Width > max_w) max_w = bounds.Width;
+      }
+      if (m_font_line3 && !line3.empty() && m_line3_visible) {
+        Gdiplus::RectF bounds;
+        g.MeasureString(line3.c_str(), -1, m_font_line3.get(), Gdiplus::PointF(0, 0), &sf, &bounds);
+        if (bounds.Width > max_w) max_w = bounds.Width;
+      }
+
+      if (max_w > 0.0f) {
+        int needed = static_cast<int>(std::ceil(max_w + 20 * m_dpi_scale));
+        measured_text_width = std::max(measured_text_width, needed);
+      }
+      ReleaseDC(m_hwnd, hdc);
+    }
+  }
+
+  // Minimum core start position so controls do not overlap track info text:
+  int min_info_w = std::min(measured_text_width, static_cast<int>(240 * m_dpi_scale));
+  int min_core_start_x = info_x + min_info_w + left_timer_space + left_buttons_width;
+
+  // Natural centered position:
+  int centered_core_start_x = rect.left + (w - core_width) / 2;
+
+  // Area #1 shrinks as panel width is reduced towards min_core_start_x:
+  int core_start_x = std::max(centered_core_start_x, min_core_start_x);
+
+  // Track Info bounding area fills from info_x up to the start of elapsed timer / left buttons:
+  int info_right = core_start_x - left_timer_space - left_buttons_width - spacing;
+  if (info_right < info_x) info_right = info_x;
+  m_rect_track_info = {info_x, info_y, info_right, info_y + info_height};
+
+  // In Line 3 mode, position rating stars within the track info area
+  if (rating_on_line3) {
+    int star_size = static_cast<int>(artist_h * 0.85f);
+    int star_gap = static_cast<int>(2 * m_dpi_scale);
+    int total_rating_width = star_size * 5 + star_gap * 4;
+    int rating_y = info_y + title_h + text_gap + artist_h + line3_h + text_gap;
+    int star_y_center = rating_y + (artist_h - star_size) / 2;
+    m_rect_rating = {info_x, star_y_center, info_x + total_rating_width, star_y_center + star_size};
+    for (int i = 0; i < 5; i++) {
+      int sx = info_x + i * (star_size + star_gap);
+      m_rect_stars[i] = {sx, star_y_center, sx + star_size, star_y_center + star_size};
+    }
+  }
+
+  // Position core controls
   int controls_x = core_start_x;
 
   if (shuffle_visible) {
@@ -1278,23 +1437,18 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   }
   
   // Super button - positioned after Repeat (cosmetic only)
-  if (get_nowbar_super_icon_visible()) {
+  if (super_visible) {
     m_rect_super = {controls_x, btn_y, controls_x + button_size,
                     btn_y + button_size};
+    controls_x += button_size + spacing;
   } else {
     m_rect_super = {};  // Clear rect when hidden
   }
 
   // Heart button - positioned to the left of the first core button (shuffle or prev)
-  // core_left_edge is the left edge of the leftmost core control button
   int core_left_edge = shuffle_visible ? m_rect_shuffle.left : m_rect_prev.left;
   if (get_nowbar_mood_icon_visible()) {
     int heart_x = core_left_edge - spacing - button_size;
-    // Prevent overlap with artwork - clamp left edge
-    int min_heart_x = get_nowbar_cover_artwork_visible()
-        ? m_rect_artwork.right + spacing
-        : rect.left + spacing;
-    heart_x = std::max(heart_x, min_heart_x);
     m_rect_heart = {heart_x, btn_y, heart_x + button_size, btn_y + button_size};
   } else {
     m_rect_heart = {}; // Clear rect when hidden
@@ -1315,100 +1469,34 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       rating_right = core_left_edge - spacing;
     }
     int rating_x = rating_right - total_rating_width;
-
-    // Clamp to artwork right edge
-    int min_rating_x = get_nowbar_cover_artwork_visible()
-        ? m_rect_artwork.right + spacing
-        : rect.left + spacing;
-    rating_x = std::max(rating_x, min_rating_x);
-
     m_rect_rating = {rating_x, btn_y, rating_x + total_rating_width, btn_y + button_size};
 
     // Compute individual star rects
     for (int i = 0; i < 5; i++) {
       int sx = rating_x + i * (star_size + star_gap);
-      // Vertically center star within the button_size row
       int star_y = btn_y + (button_size - star_size) / 2;
       m_rect_stars[i] = {sx, star_y, sx + star_size, star_y + star_size};
     }
-  } else {
+  } else if (!rating_on_line3) {
     m_rect_rating = {};
     for (int i = 0; i < 5; i++) m_rect_stars[i] = {};
   }
 
-  // Custom buttons #1-6 - arranged in two rows to the LEFT of volume bar
-  // Row 1: buttons 1, 2, 3 at btn_y
-  // Row 2: buttons 4, 5, 6 below row 1
-  // Clear all rects first
-  m_rect_cbutton1 = {};
-  m_rect_cbutton2 = {};
-  m_rect_cbutton3 = {};
-  m_rect_cbutton4 = {};
-  m_rect_cbutton5 = {};
-  m_rect_cbutton6 = {};
-  m_rect_custom = {};  // Legacy - clear it
-  
-  // Scale custom button size based on the largest glyph size across all enabled buttons.
-  // Default glyph size is 80%; if any button uses a larger size (e.g. 120%), all buttons
-  // get proportionally larger rects so hover circles accommodate the biggest glyph.
-  int max_glyph_pct = 80;
-  for (int i = 0; i < 6; i++) {
-    if (get_nowbar_cbutton_enabled(i)) {
-      int pct = get_nowbar_cbutton_glyph_size(i);
-      if (pct > max_glyph_pct) max_glyph_pct = pct;
-    }
-  }
-  int cbutton_size = (max_glyph_pct > 80)
-      ? static_cast<int>(button_size * max_glyph_pct / 80.0f)
-      : button_size;
-
-  // Calculate available space for custom buttons
-  // Use the rightmost visible core-area button as the left boundary
-  // Priority: Super > Repeat > last positioned core button (controls_x is already past it)
-  int core_right_edge = controls_x - spacing;  // controls_x advanced past the last positioned button
-  if (get_nowbar_super_icon_visible()) {
-    core_right_edge = m_rect_super.right;
-  } else if (repeat_visible) {
-    core_right_edge = m_rect_repeat.right;
-  }
-  int min_cbutton_left = core_right_edge + spacing;
-  int cbutton_right_edge = vol_x - spacing;
-
-  // In spectrum mode, the time display occupies the top-right corner.
-  // Only constrain custom buttons horizontally when they would actually
-  // overlap vertically with the time display.
-  if (get_nowbar_visualization_mode() == 1) {
-    int thin_h = static_cast<int>(3 * m_dpi_scale);
-    int time_height = static_cast<int>(m_metrics.text_height * m_size_scale);
-    int time_bottom = rect.top + thin_h + static_cast<int>(2 * m_dpi_scale) + time_height;
-
-    // Compute the top edge of the custom button block
-    int cbutton_top;
-    if (m_size_scale < 0.75f) {
-      // Single-row: centered on y_center
-      cbutton_top = y_center - cbutton_size / 2;
-    } else {
-      // 2-row worst case: both rows with 2px gap
-      int total_h = cbutton_size * 2 + 2;
-      cbutton_top = y_center - total_h / 2;
-    }
-
-    if (cbutton_top < time_bottom) {
-      int time_width = static_cast<int>(120 * m_dpi_scale);
-      int time_margin = static_cast<int>(8 * m_dpi_scale);
-      int time_left = rect.right - time_width - time_margin;
-      cbutton_right_edge = std::min(cbutton_right_edge, time_left - spacing);
-    }
+  // Right-side controls (Custom buttons, Volume, MiniPlayer)
+  // Calculate total dimensions of all enabled right-side elements
+  bool volume_bar_vis = get_nowbar_volume_bar_visible();
+  bool volume_icon_vis = get_nowbar_volume_icon_visible();
+  bool volume_visible = volume_icon_vis || volume_bar_vis;
+  int volume_width = 0;
+  if (volume_bar_vis) {
+    volume_width = static_cast<int>(m_metrics.volume_width * m_size_scale);
+  } else if (volume_icon_vis) {
+    volume_width = static_cast<int>(23 * m_dpi_scale * m_size_scale);
   }
 
-  int available_width = cbutton_right_edge - min_cbutton_left;
-  
-  // Determine layout mode based on panel height (size scale)
-  // At smaller heights (scale < 0.75): use single row for all 6 buttons
-  // At larger heights (scale >= 0.75): use 2-row layout (3 buttons per row)
-  bool use_single_row = (m_size_scale < 0.75f);
-  
-  // Count total enabled buttons
+  bool mp_visible = get_nowbar_miniplayer_icon_visible();
+  int mp_width = mp_visible ? button_size : 0;
+
   bool btn_enabled[6] = {
     get_nowbar_cbutton_enabled(0), get_nowbar_cbutton_enabled(1), get_nowbar_cbutton_enabled(2),
     get_nowbar_cbutton_enabled(3), get_nowbar_cbutton_enabled(4), get_nowbar_cbutton_enabled(5)
@@ -1417,220 +1505,142 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   for (int i = 0; i < 6; i++) {
     if (btn_enabled[i]) total_enabled++;
   }
-  
-  if (use_single_row) {
-    // Single row layout - all 6 buttons in one row, vertically centered
-    int buttons_to_show = 0;
-    for (int count = total_enabled; count > 0; count--) {
-      int width_needed = count * cbutton_size + (count - 1) * spacing;
-      if (width_needed <= available_width) {
-        buttons_to_show = count;
-        break;
-      }
+
+  int max_glyph_pct = 80;
+  for (int i = 0; i < 6; i++) {
+    if (btn_enabled[i]) {
+      int pct = get_nowbar_cbutton_glyph_size(i);
+      if (pct > max_glyph_pct) max_glyph_pct = pct;
     }
+  }
+  int cbutton_size = (max_glyph_pct > 80)
+      ? static_cast<int>(button_size * max_glyph_pct / 80.0f)
+      : button_size;
 
-    // Calculate total width and starting position (right-aligned)
-    int total_width = buttons_to_show > 0 ? buttons_to_show * cbutton_size + (buttons_to_show - 1) * spacing : 0;
-    int start_x = cbutton_right_edge - total_width;
-    int x = start_x;
-    int shown = 0;
+  bool use_single_row = (m_size_scale < 0.75f);
+  int row1_count = (btn_enabled[0] ? 1 : 0) + (btn_enabled[1] ? 1 : 0) + (btn_enabled[2] ? 1 : 0);
+  int row2_count = (btn_enabled[3] ? 1 : 0) + (btn_enabled[4] ? 1 : 0) + (btn_enabled[5] ? 1 : 0);
+  int cbuttons_width = 0;
+  if (total_enabled > 0) {
+    if (use_single_row) {
+      cbuttons_width = total_enabled * cbutton_size + (total_enabled - 1) * spacing;
+    } else {
+      int max_cols = std::max(row1_count, row2_count);
+      cbuttons_width = (max_cols > 0) ? (max_cols * cbutton_size + (max_cols - 1) * spacing) : 0;
+    }
+  }
 
-    // Position buttons in order (1-6) from left to right, vertically centered on y_center
-    int cbutton_y = y_center - cbutton_size / 2;
+  int right_group_width = 0;
+  bool has_prev_right = false;
+  if (cbuttons_width > 0) {
+    right_group_width += cbuttons_width;
+    has_prev_right = true;
+  }
+  if (volume_visible) {
+    if (has_prev_right) right_group_width += spacing;
+    right_group_width += volume_width;
+    has_prev_right = true;
+  }
+  if (mp_visible) {
+    if (has_prev_right) right_group_width += spacing;
+    right_group_width += mp_width;
+    has_prev_right = true;
+  }
+
+  int core_right_edge = controls_x - spacing;
+  int timer_reserve = static_cast<int>(70 * m_dpi_scale);
+  int center_group_right = core_right_edge + timer_reserve;
+  int min_right_group_left = center_group_right + spacing;
+
+  int right_inset = static_cast<int>(16 * m_dpi_scale);
+  int right_margin = rect.right - art_margin - right_inset;
+
+  int right_group_left;
+  if (right_group_width > 0) {
+    int natural_left = right_margin - right_group_width;
+    right_group_left = std::max(natural_left, min_right_group_left);
+  } else {
+    right_group_left = min_right_group_left;
+  }
+
+  // Position custom buttons #1-6
+  m_rect_cbutton1 = {};
+  m_rect_cbutton2 = {};
+  m_rect_cbutton3 = {};
+  m_rect_cbutton4 = {};
+  m_rect_cbutton5 = {};
+  m_rect_cbutton6 = {};
+  m_rect_custom = {};
+
+  int cur_right_x = right_group_left;
+  if (total_enabled > 0) {
+    int cb_start_x = cur_right_x;
     RECT* rects[6] = {&m_rect_cbutton1, &m_rect_cbutton2, &m_rect_cbutton3,
                       &m_rect_cbutton4, &m_rect_cbutton5, &m_rect_cbutton6};
-    for (int i = 0; i < 6 && shown < buttons_to_show; i++) {
-      if (btn_enabled[i]) {
-        *rects[i] = {x, cbutton_y, x + cbutton_size, cbutton_y + cbutton_size};
-        x += cbutton_size + spacing;
-        shown++;
+
+    if (use_single_row) {
+      int cbutton_y = y_center - cbutton_size / 2;
+      int cb_x = cb_start_x;
+      for (int i = 0; i < 6; i++) {
+        if (btn_enabled[i]) {
+          *rects[i] = {cb_x, cbutton_y, cb_x + cbutton_size, cbutton_y + cbutton_size};
+          cb_x += cbutton_size + spacing;
+        }
       }
-    }
-  } else {
-    // 2-row layout - buttons 1-3 in row 1, buttons 4-6 in row 2
-    bool row1_enabled[3] = {btn_enabled[0], btn_enabled[1], btn_enabled[2]};
-    bool row2_enabled[3] = {btn_enabled[3], btn_enabled[4], btn_enabled[5]};
-
-    int row1_count = (row1_enabled[0] ? 1 : 0) + (row1_enabled[1] ? 1 : 0) + (row1_enabled[2] ? 1 : 0);
-    int row2_count = (row2_enabled[0] ? 1 : 0) + (row2_enabled[1] ? 1 : 0) + (row2_enabled[2] ? 1 : 0);
-
-    // Calculate vertical positions based on how many rows are actually used
-    int row_spacing = 2;  // Small gap between rows
-    int row1_y, row2_y;
-
-    if (row2_count > 0) {
-      // Both rows have buttons - center both rows together
-      int total_height = cbutton_size * 2 + row_spacing;
-      row1_y = y_center - total_height / 2;
-      row2_y = row1_y + cbutton_size + row_spacing;
     } else {
-      // Only row 1 has buttons - center just row 1
-      row1_y = y_center - cbutton_size / 2;
-      row2_y = 0;  // Not used
-    }
+      int row_spacing = 2;
+      int row1_y, row2_y;
+      if (row2_count > 0) {
+        int total_h = cbutton_size * 2 + row_spacing;
+        row1_y = y_center - total_h / 2;
+        row2_y = row1_y + cbutton_size + row_spacing;
+      } else {
+        row1_y = y_center - cbutton_size / 2;
+        row2_y = 0;
+      }
 
-    // Calculate how many buttons fit in each row
-    int row1_to_show = 0;
-    for (int count = row1_count; count > 0; count--) {
-      int width_needed = count * cbutton_size + (count - 1) * spacing;
-      if (width_needed <= available_width) {
-        row1_to_show = count;
-        break;
+      int r1_x = cb_start_x;
+      for (int i = 0; i < 3; i++) {
+        if (btn_enabled[i]) {
+          *rects[i] = {r1_x, row1_y, r1_x + cbutton_size, row1_y + cbutton_size};
+          r1_x += cbutton_size + spacing;
+        }
+      }
+      int r2_x = cb_start_x;
+      for (int i = 3; i < 6; i++) {
+        if (btn_enabled[i]) {
+          *rects[i] = {r2_x, row2_y, r2_x + cbutton_size, row2_y + cbutton_size};
+          r2_x += cbutton_size + spacing;
+        }
       }
     }
-
-    int row2_to_show = 0;
-    for (int count = row2_count; count > 0; count--) {
-      int width_needed = count * cbutton_size + (count - 1) * spacing;
-      if (width_needed <= available_width) {
-        row2_to_show = count;
-        break;
-      }
-    }
-
-    // Calculate the maximum width needed (to align both rows to same left edge)
-    int row1_width = row1_to_show > 0 ? row1_to_show * cbutton_size + (row1_to_show - 1) * spacing : 0;
-    int row2_width = row2_to_show > 0 ? row2_to_show * cbutton_size + (row2_to_show - 1) * spacing : 0;
-    int max_width = std::max(row1_width, row2_width);
-    int start_x = cbutton_right_edge - max_width;
-
-    // Position Row 1 buttons (1, 2, 3)
-    int row1_x = start_x;
-    int shown1 = 0;
-
-    if (row1_enabled[0] && shown1 < row1_to_show) {
-      m_rect_cbutton1 = {row1_x, row1_y, row1_x + cbutton_size, row1_y + cbutton_size};
-      row1_x += cbutton_size + spacing;
-      shown1++;
-    }
-    if (row1_enabled[1] && shown1 < row1_to_show) {
-      m_rect_cbutton2 = {row1_x, row1_y, row1_x + cbutton_size, row1_y + cbutton_size};
-      row1_x += cbutton_size + spacing;
-      shown1++;
-    }
-    if (row1_enabled[2] && shown1 < row1_to_show) {
-      m_rect_cbutton3 = {row1_x, row1_y, row1_x + cbutton_size, row1_y + cbutton_size};
-      row1_x += cbutton_size + spacing;
-      shown1++;
-    }
-
-    // Position Row 2 buttons (4, 5, 6)
-    int row2_x = start_x;
-    int shown2 = 0;
-
-    if (row2_enabled[0] && shown2 < row2_to_show) {
-      m_rect_cbutton4 = {row2_x, row2_y, row2_x + cbutton_size, row2_y + cbutton_size};
-      row2_x += cbutton_size + spacing;
-      shown2++;
-    }
-    if (row2_enabled[1] && shown2 < row2_to_show) {
-      m_rect_cbutton5 = {row2_x, row2_y, row2_x + cbutton_size, row2_y + cbutton_size};
-      row2_x += cbutton_size + spacing;
-      shown2++;
-    }
-    if (row2_enabled[2] && shown2 < row2_to_show) {
-      m_rect_cbutton6 = {row2_x, row2_y, row2_x + cbutton_size, row2_y + cbutton_size};
-      row2_x += cbutton_size + spacing;
-      shown2++;
-    }
+    cur_right_x += cbuttons_width + spacing;
   }
 
-  // Set MiniPlayer button position - vertically centered (right-side element)
-  if (get_nowbar_miniplayer_icon_visible()) {
-    int mp_x = right_margin - button_size;
-    m_rect_miniplayer = {mp_x, right_btn_y, mp_x + button_size,
-                         right_btn_y + button_size};
-  }
-
-  // Set Volume bar position - vertically centered (right-side element)
-  // No need to clamp based on custom buttons since they're now to the left
+  // Position volume
   if (volume_visible) {
-    m_rect_volume = {vol_x, right_btn_y, volume_right_edge, right_btn_y + button_size};
+    int vol_x = cur_right_x;
+    int vol_right = vol_x + volume_width;
+    m_rect_volume = {vol_x, right_btn_y, vol_right, right_btn_y + button_size};
+    cur_right_x += volume_width + spacing;
   } else {
     m_rect_volume = {};
   }
 
-
-  // Track info (between artwork and controls) - truly vertically centered on
-  // panel
-  int vis_mode = get_nowbar_visualization_mode();
-  int info_x = get_nowbar_cover_artwork_visible()
-      ? m_rect_artwork.right + spacing
-      : rect.left + spacing;
-  // Use the leftmost left-side element (rating stars > heart > core buttons) as reference.
-  // Reserve timer_space for the elapsed time display that extends left from the seekbar
-  // in Normal/Waveform modes. In Spectrum mode, the timer is in the top-right corner.
-  int reference_left;
-  int timer_space;
-  if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2 && m_rect_rating.right > m_rect_rating.left) {
-    reference_left = m_rect_rating.left;
-    timer_space = static_cast<int>(spacing);
-  } else if (get_nowbar_mood_icon_visible()) {
-    reference_left = m_rect_heart.left;
-    // Reserve the full timer width so the track info is pushed far enough left
-    // for the elapsed time display. Without this, the safety clamp below pushes
-    // the seekbar past the heart icon (the seekbar should start at heart.left).
-    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
+  // Position MiniPlayer button
+  if (mp_visible) {
+    int mp_x = cur_right_x;
+    m_rect_miniplayer = {mp_x, right_btn_y, mp_x + button_size, right_btn_y + button_size};
+    cur_right_x += button_size + spacing;
   } else {
-    reference_left = core_left_edge;
-    timer_space = (vis_mode == 1) ? 0 : static_cast<int>(65 * m_dpi_scale);
-  }
-  int info_right = reference_left - timer_space;
-  // Use actual font heights when available, fall back to metric default
-  int title_h = m_title_font_height > 0
-      ? m_title_font_height
-      : static_cast<int>(m_metrics.text_height);
-  int artist_h = m_artist_font_height > 0
-      ? m_artist_font_height
-      : static_cast<int>(m_metrics.text_height);
-  int line3_font_h = m_line3_font_height > 0
-      ? m_line3_font_height
-      : static_cast<int>(m_metrics.text_height);
-  int text_gap = static_cast<int>(4 * m_dpi_scale);
-  bool rating_on_line3 = (get_nowbar_rating_mode() == 2);
-  bool line3_active = !rating_on_line3 && (get_nowbar_line3_format().get_length() > 0);
-  // Hide line 3 when panel height is reduced by more than 10% from default
-  bool line3_height_ok = (h >= static_cast<int>(m_metrics.panel_height * 0.90f));
-  if (!line3_height_ok) {
-    line3_active = false;
-    rating_on_line3 = false;
-  }
-  m_line3_visible = line3_active || rating_on_line3;
-  if (!m_line3_visible && get_nowbar_rating_mode() == 2) {
-    // Clear stale rating rects when line 3 is suppressed by height
-    m_rect_rating = {};
-    for (int i = 0; i < 5; i++) m_rect_stars[i] = {};
-  }
-  int line3_h = line3_active ? (line3_font_h + text_gap) : 0;
-  int rating_line_h = rating_on_line3 ? (artist_h + text_gap) : 0;
-  int info_height = title_h + artist_h + text_gap + line3_h + rating_line_h;
-  int info_nudge = static_cast<int>(2 * m_dpi_scale);
-  int info_y =
-      y_center - info_height / 2 + info_nudge; // Centered on panel, nudged down slightly
-  m_rect_track_info = {info_x, info_y, info_right, info_y + info_height};
-
-  // In Line 3 mode, position rating stars within the track info area
-  if (rating_on_line3) {
-    int star_size = static_cast<int>(artist_h * 0.85f);
-    int star_gap = static_cast<int>(2 * m_dpi_scale);
-    int total_rating_width = star_size * 5 + star_gap * 4;
-    int rating_y = info_y + title_h + text_gap + artist_h + line3_h + text_gap;
-    int star_y_center = rating_y + (artist_h - star_size) / 2;
-    m_rect_rating = {info_x, star_y_center, info_x + total_rating_width, star_y_center + star_size};
-    for (int i = 0; i < 5; i++) {
-      int sx = info_x + i * (star_size + star_gap);
-      m_rect_stars[i] = {sx, star_y_center, sx + star_size, star_y_center + star_size};
-    }
+    m_rect_miniplayer = {};
   }
 
   // Calculate full-scale button positions for seekbar/spectrum extent
   int full_button_size = static_cast<int>(m_metrics.button_size);
   int full_play_size = static_cast<int>(m_metrics.play_button_size);
   int full_spacing = static_cast<int>(m_metrics.spacing);
-  int full_core_width = full_button_size * (core_buttons - 1) + full_play_size +
-                        full_spacing * (core_buttons - 1);
-  int full_core_start_x = rect.left + (w - full_core_width) / 2;
-  full_core_start_x = std::max(full_core_start_x, min_controls_x);
+  int full_core_start_x = core_start_x;
 
   int full_core_left = full_core_start_x;
   int full_heart_left = full_core_left - full_spacing - full_button_size;
@@ -1666,30 +1676,19 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int seekbar_left = buttons_center - buttons_half;
   int seekbar_right = buttons_center + buttons_half;
 
-  // Find leftmost custom button edge (if any are enabled/positioned)
-  int cbuttons_left_edge = INT_MAX;
-  {
-    const RECT* cb_rects[6] = {&m_rect_cbutton1, &m_rect_cbutton2, &m_rect_cbutton3,
-                                &m_rect_cbutton4, &m_rect_cbutton5, &m_rect_cbutton6};
-    for (int i = 0; i < 6; i++) {
-      if (btn_enabled[i] && cb_rects[i]->right > cb_rects[i]->left) {
-        if (cb_rects[i]->left < cbuttons_left_edge)
-          cbuttons_left_edge = cb_rects[i]->left;
-      }
-    }
-  }
-  bool has_cbuttons = (cbuttons_left_edge != INT_MAX);
-
   // Adjust seekbar extent based on Seekbar Length preference
   int seekbar_length_mode = get_nowbar_seekbar_length();
+  int text_bound_x = info_x + measured_text_width;
+  if (get_nowbar_cover_artwork_visible() && m_rect_artwork.right > text_bound_x) {
+    text_bound_x = m_rect_artwork.right;
+  }
+
   if (seekbar_length_mode == 1) {
     // Scaling: extend seekbar to fill available space proportionally
     int sp = static_cast<int>(full_spacing);
-    int avail_left = get_nowbar_cover_artwork_visible() ? m_rect_artwork.right + sp : rect.left + sp;
-    // Right boundary: custom buttons > volume > panel edge
-    int avail_right = has_cbuttons ? cbuttons_left_edge - sp
-                    : volume_visible ? m_rect_volume.left - sp
-                    : rect.right - sp;
+    int avail_left = (vis_mode == 1) ? (text_bound_x + sp) : (text_bound_x + timer_reserve);
+    // Right boundary: right group start (custom buttons > volume > miniplayer) or panel right margin
+    int avail_right = (right_group_width > 0) ? (right_group_left - timer_reserve) : (rect.right - sp - timer_reserve);
     int left_gap = seekbar_left - avail_left;
     int right_gap = avail_right - seekbar_right;
     // Use the smaller gap for both sides so the seekbar extends
@@ -1697,39 +1696,18 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     // on one side).  This keeps the progress bar visually centred
     // around the Play/Pause button by default.
     int min_gap = (left_gap < right_gap) ? left_gap : right_gap;
-    int extend = (min_gap > 0) ? static_cast<int>(min_gap * 0.70) : 0;
-    if (left_gap > 0) seekbar_left -= extend;
-    if (right_gap > 0) seekbar_right += extend;
-
-    // Shorten the scaling seekbar by 10% on each side so the elapsed/remaining
-    // timer text does not overlap the progress bar at narrow panel widths.
-    int seekbar_w = seekbar_right - seekbar_left;
-    int inset = static_cast<int>(seekbar_w * 0.10);
-    seekbar_left += inset;
-    seekbar_right -= inset;
+    if (min_gap > 0) {
+      seekbar_left -= min_gap;
+      seekbar_right += min_gap;
+    }
   }
   // seekbar_length_mode == 0: Fixed (current Normal behavior, no change)
 
-  // Clamp track info right edge if Scaling pushed the seekbar leftward.
-  // In Spectrum mode the spectrum sits below the track info (not beside it)
-  // and the timer is in the top-right corner, so no clamp is needed.
-  int timer_reserve = static_cast<int>(65 * m_dpi_scale);
-  if (seekbar_length_mode == 1 && vis_mode != 1) {
-    int adjusted_info_right = seekbar_left - timer_reserve;
-    if (adjusted_info_right < m_rect_track_info.right)
-      m_rect_track_info.right = adjusted_info_right;
-  }
-
-  // Safety clamp: ensure seekbar leaves room for timer text on both sides.
-  // The elapsed timer draws between the track info right edge and the seekbar,
-  // and the remaining timer draws between the seekbar and the panel right edge.
+  // Safety clamp: ensure seekbar leaves room for timer text on the left side.
   if (vis_mode != 1) {
-    int min_seekbar_left = m_rect_track_info.right + timer_reserve;
+    int min_seekbar_left = text_bound_x + timer_reserve;
     if (seekbar_left < min_seekbar_left)
       seekbar_left = min_seekbar_left;
-    int max_seekbar_right = rect.right - right_inset - timer_reserve;
-    if (seekbar_right > max_seekbar_right)
-      seekbar_right = max_seekbar_right;
   }
 
   // Apply seekbar position offset (shifts entire seekbar+timers block)
@@ -1752,14 +1730,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       int spectrum_right = get_nowbar_super_icon_visible() ? m_rect_super.right : core_right_edge;
       if (seekbar_length_mode == 1) {
         int sp = static_cast<int>(full_spacing);
-        int avail_left = get_nowbar_cover_artwork_visible() ? m_rect_artwork.right + sp : rect.left + sp;
-        int avail_right = has_cbuttons ? cbuttons_left_edge - sp
-                        : volume_visible ? m_rect_volume.left - sp
-                        : rect.right - sp;
+        int avail_left = text_bound_x + sp;
+        int avail_right = (right_group_width > 0) ? (right_group_left - sp) : (rect.right - sp);
         int left_gap = spectrum_left - avail_left;
         int right_gap = avail_right - spectrum_right;
-        if (left_gap > 0) spectrum_left -= left_gap / 2;
-        if (right_gap > 0) spectrum_right += right_gap / 2;
+        int min_gap = (left_gap < right_gap) ? left_gap : right_gap;
+        if (min_gap > 0) {
+          spectrum_left -= min_gap;
+          spectrum_right += min_gap;
+        }
       }
       int panel_h = rect.bottom - rect.top;
       int spec_height_mode = get_nowbar_spectrum_height();
@@ -1784,14 +1763,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     if (seekbar_length_mode == 1) {
       // Scaling: extend spectrum to fill available space proportionally
       int sp = static_cast<int>(full_spacing);
-      int avail_left = get_nowbar_cover_artwork_visible() ? m_rect_artwork.right + sp : rect.left + sp;
-      int avail_right = has_cbuttons ? cbuttons_left_edge - sp
-                      : volume_visible ? m_rect_volume.left - sp
-                      : rect.right - sp;
+      int avail_left = text_bound_x + sp;
+      int avail_right = (right_group_width > 0) ? (right_group_left - sp) : (rect.right - sp);
       int left_gap = spectrum_left - avail_left;
       int right_gap = avail_right - spectrum_right;
-      if (left_gap > 0) spectrum_left -= left_gap / 2;
-      if (right_gap > 0) spectrum_right += right_gap / 2;
+      int min_gap = (left_gap < right_gap) ? left_gap : right_gap;
+      if (min_gap > 0) {
+        spectrum_left -= min_gap;
+        spectrum_right -= min_gap;
+      }
     }
     // Spectrum area extends from a configurable fraction down to the bottom.
     // Height setting: High=bottom 50%, Normal=bottom 33%, Low=bottom 20%.
@@ -2741,9 +2721,9 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
       text_w,
       (float)artist_h);
 
-  Gdiplus::StringFormat sf;
+  Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
   sf.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-  sf.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+  sf.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsMeasureTrailingSpaces);
 
   // Use formatted strings from title formatting
   std::wstring line1 = utf8_to_wide(m_formatted_line1.c_str());
