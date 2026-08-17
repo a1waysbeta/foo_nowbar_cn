@@ -10,7 +10,7 @@ HBITMAP create_argb_dib_section(HDC hdc, int w, int h);
 
 // Layout constants (will be scaled by DPI)
 struct LayoutMetrics {
-    int panel_height = 80;
+    int panel_height = 92;
     int artwork_size = 128;
     int artwork_margin = 8;
     int button_size = 38;
@@ -65,6 +65,7 @@ enum class HitRegion {
 
 // Callback for requesting artwork update from UI wrapper
 using ArtworkRequestCallback = std::function<void()>;
+using SettingsChangedCallback = std::function<void()>;
 
 // The core control panel implementation (shared between DUI and CUI)
 class ControlPanelCore : public IPlaybackStateCallback {
@@ -77,6 +78,7 @@ public:
     void set_dark_mode(bool dark);
     void update_dpi(float scale);
     void set_artwork_request_callback(ArtworkRequestCallback cb) { m_artwork_request_cb = cb; }
+    void set_settings_changed_callback(SettingsChangedCallback cb) { m_settings_changed_cb = cb; }
     
     // Static theme change notification
     static void register_instance(ControlPanelCore* instance);
@@ -586,6 +588,9 @@ private:
 
     // Artwork request callback
     ArtworkRequestCallback m_artwork_request_cb;
+    
+    // Settings changed callback
+    SettingsChangedCallback m_settings_changed_cb;
     
     // Color query callback (for DUI custom colors)
     ColorQueryCallback m_color_query_cb;
