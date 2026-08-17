@@ -88,32 +88,115 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
         }
     }
 
-    // Minimum height: 0.55 inches, scaled by DPI
-    // At 96 DPI: 0.55 * 96 = 53 pixels
+    // Minimum height: 0.55 inches, scaled by DPI (53 pixels at 96 DPI)
     info.m_min_height = static_cast<t_uint32>(0.55 * dpi);
 
-    // No max_height: reporting a tight cap (~107px) to the DUI host pins the
-    // main window when nowbar is the sole content element (e.g. replaces the
-    // Default Playlist), leaving the window stuck narrow and short. Compact
-    // appearance at tall sizes is handled by the renderer, not by forcing the
-    // host layout.
+    // Maximum height: 92 pixels at 96 DPI, scaled by DPI
+    info.m_max_height = static_cast<t_uint32>(92.0 * dpi / 96.0);
 
+    double dpi_scale = static_cast<double>(dpi) / 96.0;
+    double min_scale = 0.60;
 
-    // Fixed minimum width that accommodates all elements at any height
-    // Including Super button, spectrum visualizer after Repeat.
-    // When volume, miniplayer, and all custom buttons are hidden, allow a
-    // smaller minimum width since those right-side elements are absent.
-    double base_width = 1232.0;
-    {
-      bool has_any_cbutton = false;
-      for (int i = 0; i < 6; i++) {
-        if (get_nowbar_cbutton_enabled(i)) { has_any_cbutton = true; break; }
-      }
-      bool volume_vis = get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible();
-      if (!volume_vis && !get_nowbar_miniplayer_icon_visible() && !has_any_cbutton)
-        base_width = 832.0;
+    int button_size = static_cast<int>(28.0 * dpi_scale * min_scale);
+    int play_button_size = static_cast<int>(36.0 * dpi_scale * min_scale);
+    int spacing = static_cast<int>(16.0 * dpi_scale * min_scale);
+
+    int min_info_w = static_cast<int>(140.0 * dpi_scale);
+    int total_min_w = 0;
+
+    // Artwork
+    if (get_nowbar_cover_artwork_visible()) {
+        int art_h = static_cast<int>(info.m_min_height);
+        int art_margin = get_nowbar_cover_margin() ? static_cast<int>(8.0 * dpi_scale) : 0;
+        int art_size = art_h - art_margin * 2;
+        if (art_size > static_cast<int>(128.0 * dpi_scale)) art_size = static_cast<int>(128.0 * dpi_scale);
+        if (art_size < 32) art_size = 32;
+        total_min_w += art_margin + art_size + spacing;
+    } else {
+        total_min_w += spacing;
     }
-    info.m_min_width = static_cast<t_uint32>(base_width * dpi / 96.0);
+
+    // Track Info
+    total_min_w += min_info_w;
+
+    // Left timer space (in non-spectrum modes)
+    int vis_mode = get_nowbar_visualization_mode();
+    if (vis_mode != 1) {
+        total_min_w += static_cast<int>(50.0 * dpi_scale);
+    }
+
+    // Mood icon
+    if (get_nowbar_mood_icon_visible()) {
+        total_min_w += button_size + spacing;
+    }
+
+    // Rating stars (if visible and not line 3)
+    if (get_nowbar_rating_visible() && get_nowbar_rating_mode() != 2) {
+        int star_size = static_cast<int>(button_size * 0.55f);
+        int star_gap = static_cast<int>(2.0 * dpi_scale);
+        total_min_w += (star_size * 5 + star_gap * 4) + spacing;
+    }
+
+    // Core playback buttons: prev, play, next (always visible) + optional buttons
+    bool shuffle_visible = get_nowbar_shuffle_icon_visible();
+    bool repeat_visible = get_nowbar_repeat_icon_visible();
+    bool stop_visible = get_nowbar_stop_icon_visible();
+    bool stop_after_current_visible = get_nowbar_stop_after_current_icon_visible();
+    bool super_visible = get_nowbar_super_icon_visible();
+    int core_buttons = 3;
+    if (shuffle_visible) core_buttons++;
+    if (repeat_visible) core_buttons++;
+    if (stop_visible) core_buttons++;
+    if (stop_after_current_visible) core_buttons++;
+    if (super_visible) core_buttons++;
+    int core_width = button_size * (core_buttons - 1) + play_button_size + spacing * (core_buttons - 1);
+    total_min_w += core_width;
+
+    // Remaining timer space (always included to guarantee room for remaining time display)
+    total_min_w += static_cast<int>(50.0 * dpi_scale);
+
+    // Right-side controls (custom buttons, volume, miniplayer)
+    bool btn_enabled[6] = {
+        get_nowbar_cbutton_enabled(0), get_nowbar_cbutton_enabled(1), get_nowbar_cbutton_enabled(2),
+        get_nowbar_cbutton_enabled(3), get_nowbar_cbutton_enabled(4), get_nowbar_cbutton_enabled(5)
+    };
+    int total_cbuttons = 0;
+    for (int i = 0; i < 6; i++) {
+        if (btn_enabled[i]) total_cbuttons++;
+    }
+    int right_group_w = 0;
+    bool has_prev_right = false;
+
+    if (total_cbuttons > 0) {
+        int cb_w = total_cbuttons * button_size + (total_cbuttons - 1) * spacing;
+        right_group_w += cb_w;
+        has_prev_right = true;
+    }
+    if (get_nowbar_volume_bar_visible()) {
+        if (has_prev_right) right_group_w += spacing;
+        right_group_w += static_cast<int>(192.0 * dpi_scale * min_scale);
+        has_prev_right = true;
+    } else if (get_nowbar_volume_icon_visible()) {
+        if (has_prev_right) right_group_w += spacing;
+        right_group_w += static_cast<int>(23.0 * dpi_scale * min_scale);
+        has_prev_right = true;
+    }
+    if (get_nowbar_miniplayer_icon_visible()) {
+        if (has_prev_right) right_group_w += spacing;
+        right_group_w += button_size;
+        has_prev_right = true;
+    }
+
+    if (right_group_w > 0) {
+        // Space #2 between Center Controls (including remaining timer) and Right Controls
+        total_min_w += spacing + right_group_w;
+    }
+
+    // Right margin / inset
+    int right_margin_pad = get_nowbar_cover_margin() ? static_cast<int>(8.0 * dpi_scale) : 0;
+    total_min_w += right_margin_pad + static_cast<int>(16.0 * dpi_scale);
+
+    info.m_min_width = static_cast<t_uint32>(total_min_w * 0.82f);
     
     return info;
 }
@@ -226,6 +309,13 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             }
         });
         
+        // Set settings changed callback to notify DUI host of minimum width updates
+        m_core->set_settings_changed_callback([this]() {
+            if (m_callback.is_valid()) {
+                m_callback->on_min_max_info_change();
+            }
+        });
+        
         // Now initialize (which calls on_settings_changed with callbacks available)
         m_core->initialize(m_hwnd);
         
@@ -243,6 +333,9 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SIZE: {
         if (m_core) {
             InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        if (m_callback.is_valid()) {
+            m_callback->on_min_max_info_change();
         }
         return 0;
     }
