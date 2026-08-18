@@ -1703,13 +1703,6 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   }
   // seekbar_length_mode == 0: Fixed (current Normal behavior, no change)
 
-  // Safety clamp: ensure seekbar leaves room for timer text on the left side.
-  if (vis_mode != 1) {
-    int min_seekbar_left = text_bound_x + timer_reserve;
-    if (seekbar_left < min_seekbar_left)
-      seekbar_left = min_seekbar_left;
-  }
-
   // Apply seekbar position offset (shifts entire seekbar+timers block)
   int seekbar_offset = static_cast<int>(get_nowbar_seekbar_position() * m_dpi_scale);
   seekbar_left += seekbar_offset;
