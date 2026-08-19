@@ -223,6 +223,17 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
     } catch (...) {}
 }
 
+void PlaybackStateManager::on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) {
+    if (!m_state.is_playing && !m_state.is_paused) return;
+    if (!m_state.current_track.is_valid()) return;
+
+    if (metadb_handle_list_helper::bsearch_by_pointer(p_items_sorted, m_state.current_track) != pfc_infinite) {
+        update_track_info(m_state.current_track);
+        notify_track_changed();
+        notify_state_changed();
+    }
+}
+
 void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
     if (!p_track.is_valid()) return;
     
@@ -242,6 +253,28 @@ void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
         // Album
         const char* album = info.meta_get("ALBUM", 0);
         m_state.track_album = album ? album : "";
+    }
+
+    // Check %foo_artwork_title% and %foo_artwork_artist% for discovered stream metadata (e.g. ?azuracast_api / ?radioreg_api)
+    auto pc = playback_control::get();
+    if (pc->is_playing() || pc->is_paused()) {
+        static service_ptr_t<titleformat_object> tf_fa_title, tf_fa_artist;
+        if (!tf_fa_title.is_valid()) {
+            titleformat_compiler::get()->compile_safe(tf_fa_title, "%foo_artwork_title%");
+        }
+        if (!tf_fa_artist.is_valid()) {
+            titleformat_compiler::get()->compile_safe(tf_fa_artist, "%foo_artwork_artist%");
+        }
+        pfc::string8 fa_title, fa_artist;
+        pc->playback_format_title(nullptr, fa_title, tf_fa_title, nullptr, playback_control::display_level_all);
+        pc->playback_format_title(nullptr, fa_artist, tf_fa_artist, nullptr, playback_control::display_level_all);
+
+        if (!fa_title.is_empty() && fa_title != "?") {
+            m_state.track_title = fa_title;
+        }
+        if (!fa_artist.is_empty() && fa_artist != "?") {
+            m_state.track_artist = fa_artist;
+        }
     }
 }
 
