@@ -234,6 +234,35 @@ void ControlPanelDUI::update_artwork() {
             }
         } catch (...) {}
 
+        // Check if foo_artwork has a cached cover image file on disk
+        if (get_nowbar_online_artwork()) {
+            static service_ptr_t<titleformat_object> tf_cover;
+            if (!tf_cover.is_valid()) {
+                titleformat_compiler::get()->compile_safe(tf_cover, "%foo_artwork_cover%");
+            }
+            pfc::string8 cover_path;
+            pc->playback_format_title(nullptr, cover_path, tf_cover, nullptr, playback_control::display_level_all);
+            if (!cover_path.is_empty() && GetFileAttributesA(cover_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                HANDLE hFile = CreateFileA(cover_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hFile != INVALID_HANDLE_VALUE) {
+                    DWORD size = GetFileSize(hFile, NULL);
+                    if (size > 0 && size < 64 * 1024 * 1024) {
+                        std::vector<uint8_t> buffer(size);
+                        DWORD bytesRead = 0;
+                        if (ReadFile(hFile, buffer.data(), size, &bytesRead, NULL) && bytesRead == size) {
+                            album_art_data_ptr data = album_art_data_impl::g_create(buffer.data(), buffer.size());
+                            if (data.is_valid()) {
+                                m_core->set_artwork(data);
+                                CloseHandle(hFile);
+                                return;
+                            }
+                        }
+                    }
+                    CloseHandle(hFile);
+                }
+            }
+        }
+
         // No local artwork found - try stub image from foobar2000 display settings
         bool stub_set = false;
         try {
@@ -249,13 +278,15 @@ void ControlPanelDUI::update_artwork() {
         if (get_nowbar_online_artwork() && is_artwork_bridge_available()) {
             pfc::string8 artist, title;
             if (!m_tf_artist.is_valid())
-                titleformat_compiler::get()->compile_safe(m_tf_artist, "%artist%");
+                titleformat_compiler::get()->compile_safe(m_tf_artist, "$if2(%foo_artwork_artist%,%artist%)");
             if (!m_tf_title.is_valid())
-                titleformat_compiler::get()->compile_safe(m_tf_title, "%title%");
+                titleformat_compiler::get()->compile_safe(m_tf_title, "$if2(%foo_artwork_title%,%title%)");
             // Use playback_format_title for streams - it merges dynamic stream metadata
             pc->playback_format_title(nullptr, artist, m_tf_artist, nullptr, playback_control::display_level_all);
             pc->playback_format_title(nullptr, title, m_tf_title, nullptr, playback_control::display_level_all);
-            request_online_artwork(artist.c_str(), title.c_str());
+            if (!artist.is_empty() || !title.is_empty()) {
+                request_online_artwork(artist.c_str(), title.c_str());
+            }
             // Don't clear artwork - stub or previous art shows while waiting
             return;
         }
