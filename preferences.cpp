@@ -3826,9 +3826,16 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             break;
 
         case IDC_VIS_ENABLE_CHECK:
+            if (HIWORD(wp) == BN_CLICKED) {
+                update_vis_section_state(hwnd);
+                p_this->on_changed();
+            }
+            break;
+
         case IDC_VIS_SPECTRUM_RADIO:
         case IDC_VIS_WAVEFORM_RADIO:
             if (HIWORD(wp) == BN_CLICKED) {
+                CheckRadioButton(hwnd, IDC_VIS_SPECTRUM_RADIO, IDC_VIS_WAVEFORM_RADIO, LOWORD(wp));
                 update_vis_section_state(hwnd);
                 p_this->on_changed();
             }
