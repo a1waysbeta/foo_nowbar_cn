@@ -1678,7 +1678,9 @@ void ControlPanelCore::update_layout(const RECT &rect) {
 
   // Adjust seekbar extent based on Seekbar Length preference
   int seekbar_length_mode = get_nowbar_seekbar_length();
-  int text_bound_x = info_x + measured_text_width;
+  int text_bound_x = (m_rect_track_info.right > info_x)
+      ? std::min(info_x + measured_text_width, static_cast<int>(m_rect_track_info.right))
+      : (info_x + measured_text_width);
   if (get_nowbar_cover_artwork_visible() && m_rect_artwork.right > text_bound_x) {
     text_bound_x = m_rect_artwork.right;
   }
@@ -3907,21 +3909,8 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   float timer_right = (float)(m_rect_seekbar.left - timer_gap);
   float timer_left = timer_right - time_width;
   
-  // Constrain timer left edge to not overlap with track info text or artwork.
-  // Shift the constraint boundaries by the seekbar position offset so the
-  // elapsed timer moves as a block with the seekbar instead of staying anchored.
-  int timer_spacing = static_cast<int>(8 * m_dpi_scale);
-  int seekbar_pos_offset = static_cast<int>(get_nowbar_seekbar_position() * m_dpi_scale);
-  float min_timer_left = (float)(m_rect_track_info.right + timer_spacing + seekbar_pos_offset);
-  float min_timer_artwork = (float)(m_rect_artwork.right + timer_spacing + seekbar_pos_offset);
-  if (min_timer_artwork > min_timer_left)
-    min_timer_left = min_timer_artwork;
-  if (timer_left < min_timer_left) {
-    timer_left = min_timer_left;
-  }
-  
   Gdiplus::RectF leftTimeRect(timer_left, time_top,
-                              timer_right - timer_left, time_height);
+                              time_width, time_height);
   g.DrawString(elapsed.c_str(), -1, m_font_time.get(), leftTimeRect, &sfRight,
                &timeBrush);
 
@@ -8479,6 +8468,35 @@ void ControlPanelCore::evaluate_title_formats() {
     }
   } else {
     m_formatted_line3 = "";
+  }
+
+  // Fallback check for streams discovered via foo_artwork (e.g. ?azuracast_api / ?radioreg_api)
+  if (use_playback) {
+    static service_ptr_t<titleformat_object> tf_fa_title, tf_fa_artist;
+    if (!tf_fa_title.is_valid()) {
+      titleformat_compiler::get()->compile_safe(tf_fa_title, "%foo_artwork_title%");
+    }
+    if (!tf_fa_artist.is_valid()) {
+      titleformat_compiler::get()->compile_safe(tf_fa_artist, "%foo_artwork_artist%");
+    }
+    pfc::string8 fa_title, fa_artist;
+    pc->playback_format_title(nullptr, fa_title, tf_fa_title, nullptr, playback_control::display_level_all);
+    pc->playback_format_title(nullptr, fa_artist, tf_fa_artist, nullptr, playback_control::display_level_all);
+
+    if (!fa_title.is_empty() && fa_title != "?") {
+      pfc::string8 line1_cfg = get_nowbar_line1_format();
+      if (line1_cfg == "%title%" || m_formatted_line1.is_empty() ||
+          m_formatted_line1.find_first("http://") == 0 || m_formatted_line1.find_first("https://") == 0) {
+        m_formatted_line1 = fa_title;
+      }
+    }
+
+    if (!fa_artist.is_empty() && fa_artist != "?") {
+      pfc::string8 line2_cfg = get_nowbar_line2_format();
+      if (line2_cfg == "%artist%" || m_formatted_line2.is_empty()) {
+        m_formatted_line2 = fa_artist;
+      }
+    }
   }
 }
 
