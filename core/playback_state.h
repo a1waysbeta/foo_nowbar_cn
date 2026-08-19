@@ -38,7 +38,7 @@ public:
 };
 
 // Playback state manager - uses play_callback_impl_base which self-registers
-class PlaybackStateManager : private play_callback_impl_base {
+class PlaybackStateManager : private play_callback_impl_base, public metadb_io_callback_dynamic_impl_base {
 public:
     static PlaybackStateManager& get();
     static void shutdown();  // Must be called during on_quit() before services are gone
@@ -64,6 +64,9 @@ private:
     void on_playback_edited(metadb_handle_ptr p_track) noexcept override {}
     void on_playback_dynamic_info(const file_info& p_info) noexcept override {}
     void on_playback_dynamic_info_track(const file_info& p_info) noexcept override;
+
+    // metadb_io_callback_dynamic override
+    void on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) override;
     
     void update_track_info(metadb_handle_ptr p_track);
     void notify_state_changed();
