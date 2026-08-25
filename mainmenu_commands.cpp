@@ -26,6 +26,41 @@ static const GUID guid_cbutton_commands[] = {
     { 0xD6A5E8F1, 0x1234, 0x5678, { 0xAB, 0xCD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C } }
 };
 
+// Title formatting text filter for URL execution:
+// Encodes metadata values (& to %26, spaces to %20, and other unsafe URL characters)
+// while preserving static URL structure and query parameter delimiters.
+class url_titleformat_text_filter : public titleformat_text_filter {
+public:
+    void write(const GUID & p_inputType, pfc::string_receiver & p_out, const char * p_data, t_size p_dataLength) override {
+        p_dataLength = pfc::strlen_max(p_data, p_dataLength);
+        if (p_inputType == titleformat_inputtypes::meta) {
+            for (t_size i = 0; i < p_dataLength; ++i) {
+                unsigned char c = static_cast<unsigned char>(p_data[i]);
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                    c == '-' || c == '_' || c == '.' || c == '~') {
+                    p_out.add_byte(static_cast<char>(c));
+                } else if (c == ' ') {
+                    p_out.add_string("%20", 3);
+                } else {
+                    static const char hex_chars[] = "0123456789ABCDEF";
+                    p_out.add_byte('%');
+                    p_out.add_byte(hex_chars[(c >> 4) & 0x0F]);
+                    p_out.add_byte(hex_chars[c & 0x0F]);
+                }
+            }
+        } else {
+            for (t_size i = 0; i < p_dataLength; ++i) {
+                unsigned char c = static_cast<unsigned char>(p_data[i]);
+                if (c == ' ') {
+                    p_out.add_string("%20", 3);
+                } else {
+                    p_out.add_byte(static_cast<char>(c));
+                }
+            }
+        }
+    }
+};
+
 // Execute custom button action (shared implementation)
 // Supports buttons 0-11 (1-12 in UI)
 static void execute_cbutton_action(int button_index) {
@@ -68,16 +103,24 @@ static void execute_cbutton_action(int button_index) {
             service_ptr_t<titleformat_object> script;
             titleformat_compiler::get()->compile_safe(script, path);
             
+            url_titleformat_text_filter url_filter;
             if (has_track && track.is_valid() && script.is_valid()) {
-                track->format_title(nullptr, evaluated_url, script, nullptr);
+                track->format_title(nullptr, evaluated_url, script, &url_filter);
             } else if (script.is_valid()) {
                 // Fallback to playing track if no selection
                 auto pc = playback_control::get();
-                pc->playback_format_title(nullptr, evaluated_url, script, nullptr, playback_control::display_level_all);
+                pc->playback_format_title(nullptr, evaluated_url, script, &url_filter, playback_control::display_level_all);
             }
         } else {
-            // No title formatting - use path directly as URL
-            evaluated_url = path;
+            // No title formatting - use path directly as URL, escaping spaces
+            for (t_size i = 0; i < path.get_length(); ++i) {
+                char c = path[i];
+                if (c == ' ') {
+                    evaluated_url.add_string("%20", 3);
+                } else {
+                    evaluated_url.add_byte(c);
+                }
+            }
         }
         
         if (!evaluated_url.is_empty()) {
