@@ -106,6 +106,7 @@ public:
     void on_playback_time_changed(double time) override;
     void on_volume_changed(float volume_db) override;
     void on_track_changed() override;
+    void on_track_info_changed() override;
     void on_dynamic_info_changed() override;
     
     // Artwork
@@ -119,6 +120,9 @@ public:
     // MiniPlayer state (for icon color)
     void set_miniplayer_active(bool active);
     
+    // Effective track for album cover, track info, rating, and mood (respects Selection Mode)
+    metadb_handle_ptr get_display_track() const;
+
     // Force a full repaint on the next WM_PAINT (disables spectrum-only fast path for one frame)
     void force_full_repaint() { m_needs_full_repaint = true; }
 
@@ -275,7 +279,9 @@ private:
     void do_toggle_mood();
     void do_set_rating(int star);
     void update_rating_state();
-    metadb_handle_ptr get_rating_track();  // Get focused playlist item, or now-playing as fallback
+    metadb_handle_ptr get_selected_track() const;  // Get currently selected/focused track
+    metadb_handle_ptr get_rating_track();  // Calls get_display_track()
+    void on_selection_or_focus_changed();  // Handler for UI selection and playlist focus changes
 
     void update_mood_state();
     void show_picture_viewer();
@@ -338,6 +344,10 @@ private:
     bool m_mood_active = false;  // MOOD tag state for heart icon color
     int m_rating_value = 0;        // Current track rating (0=unrated, 1-5)
     int m_rating_hover_star = 0;   // Which star is hovered (0=none, 1-5)
+
+    // UI selection tracking for Selection Mode
+    class SelectionCallback;
+    std::unique_ptr<SelectionCallback> m_selection_callback;
 
     // Playlist focus tracking for rating display
     class PlaylistFocusCallback;
@@ -448,6 +458,7 @@ private:
 
     // Mode 1 drawing methods
     void draw_thin_progress_bar(Gdiplus::Graphics& g);
+    void draw_thin_progress_tooltip(Gdiplus::Graphics& g);
     void draw_full_spectrum(HDC hdc);  // Direct pixel rendering for performance
     void draw_full_spectrum_gdiplus(Gdiplus::Graphics& g);  // GDI+ fallback (used by paint())
     void draw_time_display_top_right(Gdiplus::Graphics& g);
