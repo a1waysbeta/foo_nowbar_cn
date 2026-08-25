@@ -65,6 +65,41 @@ static pfc::string8 resolve_unicode_notation(const pfc::string8& input) {
     return input;
 }
 
+// Title formatting text filter for URL execution:
+// Encodes metadata values (& to %26, spaces to %20, and other unsafe URL characters)
+// while preserving static URL structure and query parameter delimiters.
+class url_titleformat_text_filter : public titleformat_text_filter {
+public:
+    void write(const GUID & p_inputType, pfc::string_receiver & p_out, const char * p_data, t_size p_dataLength) override {
+        p_dataLength = pfc::strlen_max(p_data, p_dataLength);
+        if (p_inputType == titleformat_inputtypes::meta) {
+            for (t_size i = 0; i < p_dataLength; ++i) {
+                unsigned char c = static_cast<unsigned char>(p_data[i]);
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                    c == '-' || c == '_' || c == '.' || c == '~') {
+                    p_out.add_byte(static_cast<char>(c));
+                } else if (c == ' ') {
+                    p_out.add_string("%20", 3);
+                } else {
+                    static const char hex_chars[] = "0123456789ABCDEF";
+                    p_out.add_byte('%');
+                    p_out.add_byte(hex_chars[(c >> 4) & 0x0F]);
+                    p_out.add_byte(hex_chars[c & 0x0F]);
+                }
+            }
+        } else {
+            for (t_size i = 0; i < p_dataLength; ++i) {
+                unsigned char c = static_cast<unsigned char>(p_data[i]);
+                if (c == ' ') {
+                    p_out.add_string("%20", 3);
+                } else {
+                    p_out.add_byte(static_cast<char>(c));
+                }
+            }
+        }
+    }
+};
+
 namespace nowbar {
 
 // Static instance registry for theme/settings change notifications
@@ -5213,6 +5248,58 @@ void ControlPanelCore::update_waveform_brushes() {
         Gdiplus::Color(255, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color)));
     m_waveform_brush_dim = std::make_unique<Gdiplus::SolidBrush>(
         Gdiplus::Color(255, GetRValue(unplayed_color), GetGValue(unplayed_color), GetBValue(unplayed_color)));
+
+    // Style 2: Two-tone layered brushes (outer peaks / outline and inner core)
+    BYTE pr = GetRValue(wave_color);
+    BYTE pg = GetGValue(wave_color);
+    BYTE pb = GetBValue(wave_color);
+
+    // Played Outer: saturated/deep primary accent
+    BYTE pr_out = pr;
+    BYTE pg_out = pg;
+    BYTE pb_out = pb;
+
+    // Played Inner: lighter tint core
+    BYTE pr_in = static_cast<BYTE>(pr + (255 - pr) * 0.42f);
+    BYTE pg_in = static_cast<BYTE>(pg + (255 - pg) * 0.42f);
+    BYTE pb_in = static_cast<BYTE>(pb + (255 - pb) * 0.42f);
+
+    m_waveform_brush_accent_outer = std::make_unique<Gdiplus::SolidBrush>(
+        Gdiplus::Color(255, pr_out, pg_out, pb_out));
+    m_waveform_brush_accent_inner = std::make_unique<Gdiplus::SolidBrush>(
+        Gdiplus::Color(255, pr_in, pg_in, pb_in));
+
+    // Unplayed Outer (dark slate / charcoal) & Inner (mid-gray)
+    BYTE ur = GetRValue(unplayed_color);
+    BYTE ug = GetGValue(unplayed_color);
+    BYTE ub = GetBValue(unplayed_color);
+
+    if (m_dark_mode) {
+        // Dark theme: Outer is darker charcoal/slate, Inner is medium gray
+        BYTE ur_out = static_cast<BYTE>(ur * 0.55f);
+        BYTE ug_out = static_cast<BYTE>(ug * 0.55f);
+        BYTE ub_out = static_cast<BYTE>(ub * 0.55f);
+        BYTE ur_in = static_cast<BYTE>(std::min(255, (int)(ur * 0.85f + 30)));
+        BYTE ug_in = static_cast<BYTE>(std::min(255, (int)(ug * 0.85f + 30)));
+        BYTE ub_in = static_cast<BYTE>(std::min(255, (int)(ub * 0.85f + 30)));
+        m_waveform_brush_dim_outer = std::make_unique<Gdiplus::SolidBrush>(
+            Gdiplus::Color(255, ur_out, ug_out, ub_out));
+        m_waveform_brush_dim_inner = std::make_unique<Gdiplus::SolidBrush>(
+            Gdiplus::Color(255, ur_in, ug_in, ub_in));
+    } else {
+        // Light theme: Outer is darker edge, Inner is lighter fill
+        BYTE ur_out = static_cast<BYTE>(ur * 0.70f);
+        BYTE ug_out = static_cast<BYTE>(ug * 0.70f);
+        BYTE ub_out = static_cast<BYTE>(ub * 0.70f);
+        BYTE ur_in = static_cast<BYTE>(ur + (255 - ur) * 0.35f);
+        BYTE ug_in = static_cast<BYTE>(ug + (255 - ug) * 0.35f);
+        BYTE ub_in = static_cast<BYTE>(ub + (255 - ub) * 0.35f);
+        m_waveform_brush_dim_outer = std::make_unique<Gdiplus::SolidBrush>(
+            Gdiplus::Color(255, ur_out, ug_out, ub_out));
+        m_waveform_brush_dim_inner = std::make_unique<Gdiplus::SolidBrush>(
+            Gdiplus::Color(255, ur_in, ug_in, ub_in));
+    }
+
     m_waveform_brushes_dirty = false;
 }
 
@@ -5235,7 +5322,9 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
   progress = std::max(0.0, std::min(1.0, progress));
 
   // Ensure cached brushes are up to date
-  if (m_waveform_brushes_dirty || !m_waveform_brush_accent || !m_waveform_brush_dim) {
+  if (m_waveform_brushes_dirty || !m_waveform_brush_accent || !m_waveform_brush_dim ||
+      !m_waveform_brush_accent_outer || !m_waveform_brush_accent_inner ||
+      !m_waveform_brush_dim_outer || !m_waveform_brush_dim_inner) {
       update_waveform_brushes();
   }
 
@@ -5277,26 +5366,26 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     int wave_style = get_nowbar_waveform_style();
     int wave_w_setting = get_nowbar_waveform_width();
 
-    float bar_w_f, gap;
+    int display_count;
+    float bar_w_f, gap, bar_total_w;
     if (wave_style == 1) {
-      // Style 2: Centered mirrored waveform envelope bar width & gap
-      bar_w_f = (wave_w_setting == 0) ? (1.0f * m_dpi_scale) :
-                (wave_w_setting == 2) ? (4.0f * m_dpi_scale) :
-                                        (2.0f * m_dpi_scale);
-      gap = (wave_w_setting == 0) ? (0.5f * m_dpi_scale) :
-            (wave_w_setting == 2) ? (1.5f * m_dpi_scale) :
-                                    (1.0f * m_dpi_scale);
+      // Style 2: Solid continuous envelope (0-gap, 1 column per pixel)
+      display_count = w;
+      if (display_count < 1) display_count = 1;
+      bar_w_f = 1.0f;
+      gap = 0.0f;
+      bar_total_w = 1.0f;
     } else {
       // Style 1: SoundCloud bottom-aligned bars width & gap
       bar_w_f = (wave_w_setting == 0) ? 0.5f :
                 (wave_w_setting == 2) ? 2.0f :
                                         1.0f;
       gap = 1.0f;
+      bar_total_w = bar_w_f + gap;
+      display_count = (int)((float)w / bar_total_w);
+      if (display_count < 1) display_count = 1;
     }
 
-    float bar_total_w = bar_w_f + gap;
-    int display_count = (int)((float)w / bar_total_w);
-    if (display_count < 1) display_count = 1;
     int num_segments = (int)peaks.size();
     if (num_segments < 1) num_segments = 1;
 
@@ -5304,10 +5393,11 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     float reveal_bar_limit = (m_waveform_reveal_pos / (float)WAVEFORM_SEGMENTS) * display_count;
 
     if (wave_style == 1) {
-      // Style 2: Centered continuous mirrored waveform envelope
+      // Style 2: Centered continuous mirrored waveform envelope with two-tone shading
       float center_y = m_rect_waveform.top + h * 0.5f;
       float max_half_h = (float)h * 0.5f;
-      float min_half_h = 0.75f * m_dpi_scale;
+      float min_outer_h = 0.75f * m_dpi_scale;
+      float min_inner_h = 0.5f * m_dpi_scale;
 
       Gdiplus::SmoothingMode oldSmoothing = g.GetSmoothingMode();
       Gdiplus::PixelOffsetMode oldPixelOffset = g.GetPixelOffsetMode();
@@ -5325,18 +5415,23 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
         float frac = src - lo;
         float peak = peaks[lo] * (1.0f - frac) + peaks[hi] * frac;
 
-        float half_h = peak * max_half_h;
-        if (half_h < min_half_h) half_h = min_half_h;
+        float outer_half_h = peak * max_half_h;
+        if (outer_half_h < min_outer_h) outer_half_h = min_outer_h;
 
-        float bx = m_rect_waveform.left + i * bar_total_w;
-        float by = center_y - half_h;
-        float slice_h = half_h * 2.0f;
+        float inner_half_h = outer_half_h * 0.55f;
+        if (inner_half_h < min_inner_h) inner_half_h = min_inner_h;
 
+        float bx = (float)(m_rect_waveform.left + i);
         float seg_progress = (float)(i + 0.5f) / display_count;
         bool played = (seg_progress <= (float)progress);
 
-        g.FillRectangle(played ? m_waveform_brush_accent.get() : m_waveform_brush_dim.get(),
-                        bx, by, bar_w_f, slice_h);
+        auto* brush_outer = played ? m_waveform_brush_accent_outer.get() : m_waveform_brush_dim_outer.get();
+        auto* brush_inner = played ? m_waveform_brush_accent_inner.get() : m_waveform_brush_dim_inner.get();
+
+        // 1. Draw outer envelope (peaks / outline)
+        g.FillRectangle(brush_outer, bx, center_y - outer_half_h, 1.0f, outer_half_h * 2.0f);
+        // 2. Draw inner core (RMS body)
+        g.FillRectangle(brush_inner, bx, center_y - inner_half_h, 1.0f, inner_half_h * 2.0f);
       }
 
       g.SetSmoothingMode(oldSmoothing);
@@ -6232,16 +6327,24 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
           service_ptr_t<titleformat_object> script;
           titleformat_compiler::get()->compile_safe(script, path);
           
+          url_titleformat_text_filter url_filter;
           if (has_track && track.is_valid() && script.is_valid()) {
-            track->format_title(nullptr, evaluated_url, script, nullptr);
+            track->format_title(nullptr, evaluated_url, script, &url_filter);
           } else if (script.is_valid()) {
             // Fallback to playing track if no selection
             auto pc = playback_control::get();
-            pc->playback_format_title(nullptr, evaluated_url, script, nullptr, playback_control::display_level_all);
+            pc->playback_format_title(nullptr, evaluated_url, script, &url_filter, playback_control::display_level_all);
           }
         } else {
-          // No title formatting - use path directly as URL
-          evaluated_url = path;
+          // No title formatting - use path directly as URL, escaping spaces
+          for (t_size i = 0; i < path.get_length(); ++i) {
+            char c = path[i];
+            if (c == ' ') {
+              evaluated_url.add_string("%20", 3);
+            } else {
+              evaluated_url.add_byte(c);
+            }
+          }
         }
         
         if (!evaluated_url.is_empty()) {
@@ -7193,11 +7296,12 @@ void ControlPanelCore::on_playback_time_changed(double time) {
     // Progress bar does not use smooth animation for performance reasons
     invalidate_progress();
 
-    // Re-evaluate line formats only if they reference %playback_time*%,
-    // and invalidate the track info region so the new value is painted.
+    // Re-evaluate line formats if they reference dynamic fields (%playback_time*%, %bitrate*%),
+    // and flag full repaint so the UI wrapper redraws track info into the offscreen cache.
     if (m_lines_have_dynamic_time) {
       evaluate_title_formats();
-      if (m_hwnd) InvalidateRect(m_hwnd, &m_rect_track_info, FALSE);
+      m_needs_full_repaint = true;
+      if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
     }
   }
 }
@@ -7264,6 +7368,14 @@ void ControlPanelCore::on_track_changed() {
     m_artwork_request_cb();
   }
   invalidate();
+}
+
+void ControlPanelCore::on_dynamic_info_changed() {
+  if (m_lines_have_dynamic_time) {
+    evaluate_title_formats();
+    m_needs_full_repaint = true;
+    if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
+  }
 }
 
 void ControlPanelCore::set_artwork(album_art_data_ptr data) {
@@ -8402,16 +8514,22 @@ void ControlPanelCore::update_title_formats() {
   if (line3_fmt.get_length() > 0)
     compiler->compile_safe_ex(m_titleformat_line3, line3_fmt.c_str());
 
-  // Detect %playback_time*% so on_playback_time_changed knows whether to
-  // re-evaluate every tick. Substring match catches %playback_time%,
-  // %playback_time_seconds%, %playback_time_ms%, %playback_time_remaining%,
-  // and %playback_time_remaining_seconds%.
-  auto has_dynamic_time = [](const char* s) {
-    return s && strstr(s, "%playback_time") != nullptr;
+  // Detect dynamic fields (%playback_time*%, %bitrate*%) so on_playback_time_changed
+  // and on_dynamic_info_changed know whether to re-evaluate dynamically.
+  // Case-insensitive substring match catches %playback_time%, %playback_time_seconds%,
+  // %playback_time_ms%, %playback_time_remaining%, %playback_time_remaining_seconds%,
+  // %bitrate%, %bitrate_dynamic%, %bitrate_peak%, %BITRATE%, etc.
+  auto has_dynamic_fields = [](const char* s) -> bool {
+    if (!s || !*s) return false;
+    std::string lower(s);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lower.find("%playback_time") != std::string::npos ||
+           lower.find("%bitrate") != std::string::npos;
   };
-  m_lines_have_dynamic_time = has_dynamic_time(line1_fmt.c_str()) ||
-                              has_dynamic_time(line2_fmt.c_str()) ||
-                              has_dynamic_time(line3_fmt.c_str());
+  m_lines_have_dynamic_time = has_dynamic_fields(line1_fmt.c_str()) ||
+                              has_dynamic_fields(line2_fmt.c_str()) ||
+                              has_dynamic_fields(line3_fmt.c_str());
 
   // Re-evaluate with current track
   evaluate_title_formats();
@@ -8736,11 +8854,33 @@ void ControlPanelCore::draw_radio_icon(Gdiplus::Graphics &g, const RECT &rect,
 }
 
 
+static pfc::string8 make_waveform_key(const playable_location& loc) {
+  pfc::string8 key = loc.get_path();
+  t_uint32 subsong = loc.get_subsong();
+  if (subsong != 0) {
+    key << ":" << subsong;
+  }
+  return key;
+}
+
 void ControlPanelCore::start_waveform_computation() {
   cancel_waveform_computation();
 
   // Guard: skip if no current track or stream (track_length <= 0)
-  if (m_state.track_length <= 0 || !m_state.current_track.is_valid()) {
+  if (!m_state.current_track.is_valid()) {
+    std::lock_guard<std::mutex> lock(m_waveform_mutex);
+    m_waveform_is_stream = m_state.is_playing;
+    m_waveform_valid = false;
+    m_waveform_peaks.clear();
+    return;
+  }
+
+  double track_length = m_state.track_length;
+  if (track_length <= 0 && m_state.current_track.is_valid()) {
+    track_length = m_state.current_track->get_length();
+  }
+
+  if (track_length <= 0) {
     std::lock_guard<std::mutex> lock(m_waveform_mutex);
     m_waveform_is_stream = (m_state.track_length <= 0 && m_state.is_playing);
     m_waveform_valid = false;
@@ -8748,27 +8888,29 @@ void ControlPanelCore::start_waveform_computation() {
     return;
   }
 
-  // Get the file path from the current track
-  pfc::string8 path;
+  // Get the playable location from the current track
+  playable_location_impl location;
+  pfc::string8 track_key;
   try {
-    path = m_state.current_track->get_path();
+    location = m_state.current_track->get_location();
+    track_key = make_waveform_key(location);
   } catch (...) {
     return;
   }
 
   // Don't recompute if same track is already valid
-  if (m_waveform_valid && m_waveform_track_path == path) return;
+  if (m_waveform_valid && m_waveform_track_path == track_key) return;
 
   // Check waveform cache before spawning a decoding thread
   {
     std::vector<float> cached_peaks;
-    if (lookup_waveform_cache(path.c_str(), cached_peaks)) {
+    if (lookup_waveform_cache(track_key.c_str(), cached_peaks)) {
       {
         std::lock_guard<std::mutex> lock(m_waveform_mutex);
         m_waveform_peaks = std::move(cached_peaks);
         m_waveform_valid = true;
         m_waveform_is_stream = false;
-        m_waveform_track_path = path.c_str();
+        m_waveform_track_path = track_key;
       }
       // All segments available — reveal animation will sweep across
       m_waveform_decode_count.store(WAVEFORM_SEGMENTS, std::memory_order_relaxed);
@@ -8787,14 +8929,12 @@ void ControlPanelCore::start_waveform_computation() {
     std::lock_guard<std::mutex> lock(m_waveform_mutex);
     m_waveform_peaks.assign(WAVEFORM_SEGMENTS, 0.0f);
     m_waveform_is_stream = false;
-    m_waveform_track_path = path.c_str();
+    m_waveform_track_path = track_key;
   }
 
   HWND hwnd = m_hwnd;
-  double track_length = m_state.track_length;
-  metadb_handle_ptr track_handle = m_state.current_track;
 
-  m_waveform_thread = std::thread([this, path, hwnd, track_length, track_handle]() {
+  m_waveform_thread = std::thread([this, track_key, location, hwnd, track_length]() {
     try {
       int num_segments = WAVEFORM_SEGMENTS;
       double segment_duration = track_length / num_segments;
@@ -8808,8 +8948,8 @@ void ControlPanelCore::start_waveform_computation() {
       // where the underlying full-track file is both played and tagged).
       {
         service_ptr_t<input_decoder> decoder;
-        input_entry::g_open_for_decoding(decoder, nullptr, path.c_str(), m_waveform_abort);
-        decoder->initialize(0, input_flag_simpledecode, m_waveform_abort);
+        input_entry::g_open_for_decoding(decoder, nullptr, location.get_path(), m_waveform_abort);
+        decoder->initialize(location.get_subsong(), input_flag_simpledecode, m_waveform_abort);
 
         audio_chunk_impl_temporary chunk;
         int current_segment = 0;
@@ -8912,12 +9052,12 @@ void ControlPanelCore::start_waveform_computation() {
       }
 
       // Persist to disk cache (file I/O only, no shared state)
-      save_waveform_entry(path.c_str(), peaks);
+      save_waveform_entry(track_key.c_str(), peaks);
 
       // Store final normalized peaks and update in-memory cache
       {
         std::lock_guard<std::mutex> lock(m_waveform_mutex);
-        m_waveform_cache[std::string(path.c_str())] = peaks;
+        m_waveform_cache[std::string(track_key.c_str())] = peaks;
         m_waveform_peaks = std::move(peaks);
         m_waveform_valid = true;
       }
