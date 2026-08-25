@@ -224,24 +224,40 @@ static inline float slider_to_db(float slider_pos) {
     return static_cast<float>(volume);
 }
 
-// Playlist focus and order callback - updates rating display and playback order buttons
+// UI selection callback - updates display when selection changes in playlist/library
+class ControlPanelCore::SelectionCallback : public ui_selection_callback_impl_base_ex<ui_selection_manager_v2::flag_no_now_playing> {
+public:
+  SelectionCallback(ControlPanelCore* owner) : m_owner(owner) {}
+
+  void on_selection_changed(metadb_handle_list_cref) override {
+    m_owner->on_selection_or_focus_changed();
+  }
+
+private:
+  ControlPanelCore* m_owner;
+};
+
+// Playlist focus and order callback - updates rating display, selection mode, and playback order buttons
 class ControlPanelCore::PlaylistFocusCallback : public playlist_callback_impl_base {
 public:
   PlaylistFocusCallback(ControlPanelCore* owner)
       : playlist_callback_impl_base(
             playlist_callback::flag_on_item_focus_change |
+            playlist_callback::flag_on_items_selection_change |
             playlist_callback::flag_on_playlist_activate |
             playlist_callback::flag_on_playback_order_changed)
       , m_owner(owner) {}
 
   void on_item_focus_change(t_size, t_size, t_size) override {
-    m_owner->update_rating_state();
-    m_owner->invalidate();
+    m_owner->on_selection_or_focus_changed();
+  }
+
+  void on_items_selection_change(t_size, const bit_array&, const bit_array&) override {
+    m_owner->on_selection_or_focus_changed();
   }
 
   void on_playlist_activate(t_size, t_size) override {
-    m_owner->update_rating_state();
-    m_owner->invalidate();
+    m_owner->on_selection_or_focus_changed();
   }
 
   void on_playback_order_changed(t_size new_order) override {
@@ -261,13 +277,19 @@ public:
 
   void on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) override {
     // Check if the currently displayed track is among the changed items
-    metadb_handle_ptr track = m_owner->get_rating_track();
+    metadb_handle_ptr track = m_owner->get_display_track();
     if (!track.is_valid()) return;
 
     if (t_size index{}; p_items_sorted.bsearch_t(
             pfc::compare_t<metadb_handle_ptr, metadb_handle_ptr>, track, index)) {
+      m_owner->evaluate_title_formats();
       m_owner->update_rating_state();
       m_owner->update_mood_state();
+      if (m_owner->m_artwork_request_cb) {
+        m_owner->m_artwork_request_cb();
+      }
+      m_owner->m_needs_full_repaint = true;
+      m_owner->m_bg_cache_valid = false;
       m_owner->invalidate();
     }
   }
@@ -280,6 +302,9 @@ ControlPanelCore::ControlPanelCore() {
   // Register for playback callbacks
   PlaybackStateManager::get().register_callback(this);
   m_state = PlaybackStateManager::get().get_state();
+
+  // Register for UI selection changes
+  m_selection_callback = std::make_unique<SelectionCallback>(this);
 
   // Register for playlist focus changes (rating display)
   m_playlist_focus_callback = std::make_unique<PlaylistFocusCallback>(this);
@@ -328,6 +353,7 @@ ControlPanelCore::~ControlPanelCore() {
   // Destroy callbacks before services are gone
   m_metadb_change_callback.reset();
   m_playlist_focus_callback.reset();
+  m_selection_callback.reset();
 
   // Stop command state polling timer
   stop_command_state_timer();
@@ -750,8 +776,13 @@ void ControlPanelCore::on_settings_changed() {
   // Invalidate target background to prevent stale content during transition
   m_target_background.reset();
 
-  // Refresh mood state in case mood tag config changed
+  // Refresh mood, rating, format, and artwork state in case track targeting or formatting changed
   update_mood_state();
+  update_rating_state();
+  evaluate_title_formats();
+  if (m_artwork_request_cb) {
+    m_artwork_request_cb();
+  }
 
   // Handle visualization mode setting changes
   int settings_vis_mode = get_nowbar_visualization_mode();
@@ -1916,10 +1947,9 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   } else if (paint_vis_mode == 2) {
     draw_track_info(g);
     if (paint_seekbar_visible) {
-      // Mode 2: waveform behind buttons, then buttons, then tooltip on top, then time display
+      // Mode 2: waveform behind buttons, then buttons, then time display
       draw_waveform_bar(g);
       draw_playback_buttons(g);
-      draw_waveform_tooltip(g);
       draw_time_display(g);
     } else {
       draw_playback_buttons(g);
@@ -1938,7 +1968,19 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   draw_miniplayer_button(g);
 
   // Draw tooltips last so they render on top of all other elements
-  draw_seekbar_tooltip(g);
+  if (paint_vis_mode == 1) {
+    if (paint_seekbar_visible) {
+      draw_thin_progress_tooltip(g);
+    }
+  } else if (paint_vis_mode == 2) {
+    if (paint_seekbar_visible) {
+      draw_waveform_tooltip(g);
+    }
+  } else {
+    if (paint_seekbar_visible) {
+      draw_seekbar_tooltip(g);
+    }
+  }
   draw_volume_tooltip(g);
 
   // Centralized animation loop: manage animation timer based on active animations
@@ -2276,7 +2318,7 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // Draw tooltips last so they render on top of all other elements
   // (matches full paint path — without this, the background BitBlt above
   // erases any tooltip drawn by a previous full paint, causing flicker)
-  draw_seekbar_tooltip(g2);
+  draw_thin_progress_tooltip(g2);
   draw_volume_tooltip(g2);
 }
 
@@ -2595,8 +2637,9 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
         og.FillRectangle(&brush, 0, 0, w, h);
 
         bool is_stream = false;
-        if (m_state.current_track.is_valid()) {
-          const char* path = m_state.current_track->get_path();
+        metadb_handle_ptr art_track = get_display_track();
+        if (art_track.is_valid()) {
+          const char* path = art_track->get_path();
           is_stream = (strstr(path, "http://") == path) ||
                       (strstr(path, "https://") == path) ||
                       (strstr(path, "mms://") == path) ||
@@ -2672,8 +2715,9 @@ void ControlPanelCore::draw_artwork(Gdiplus::Graphics &g) {
       g.FillRectangle(&brush, artR);
 
       bool is_stream = false;
-      if (m_state.current_track.is_valid()) {
-        const char* path = m_state.current_track->get_path();
+      metadb_handle_ptr art_track = get_display_track();
+      if (art_track.is_valid()) {
+        const char* path = art_track->get_path();
         is_stream = (strstr(path, "http://") == path) ||
                     (strstr(path, "https://") == path) ||
                     (strstr(path, "mms://") == path) ||
@@ -2791,8 +2835,8 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
                  line3BrushPtr);
   }
 
-  // Rating stars on Line 3 mode — draw within track info area (only when a track is loaded)
-  if (get_nowbar_rating_mode() == 2 && m_line3_visible && (m_state.is_playing || m_state.is_paused)) {
+  // Rating stars on Line 3 mode — draw within track info area (when a track is loaded/selected)
+  if (get_nowbar_rating_mode() == 2 && m_line3_visible && get_display_track().is_valid()) {
     Gdiplus::Color ratingAccentColor(255, 255, 193, 7);  // Material Design Amber
 
     // Determine secondary color for unrated stars (same logic as draw_playback_buttons)
@@ -4736,46 +4780,68 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
         GetRValue(handle_accent), GetGValue(handle_accent), GetBValue(handle_accent)));
     g.FillRectangle(&handleBrush, handle_x, top, handle_w, h);
   }
+}
 
-  // Tooltip showing time at cursor position
-  if (active && m_state.track_length > 0) {
-    double preview = m_seeking ? m_state.playback_time : m_target_progress * m_state.track_length;
-    // On hover (not seeking), compute from cursor X
-    if (hovered && !m_seeking) {
-      double pos = static_cast<double>(m_seekbar_hover_x - m_rect_thin_progress.left) / w;
-      pos = std::max(0.0, std::min(1.0, pos));
-      preview = pos * m_state.track_length;
-    }
-    std::wstring timeStr = format_time(preview);
-    Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Gdiplus::RectF textBounds;
-    g.MeasureString(timeStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
-    int padding_h = static_cast<int>(6 * m_dpi_scale);
-    int padding_v = static_cast<int>(3 * m_dpi_scale);
-    int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
-    int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
-    int cursor_x = m_seeking ? (m_rect_thin_progress.left + progress_w) : m_seekbar_hover_x;
-    int tooltip_x = cursor_x - tooltip_w / 2;
-    int tooltip_y = top + h + static_cast<int>(20 * m_dpi_scale);
-    tooltip_x = std::max((int)m_rect_thin_progress.left, std::min(tooltip_x, (int)m_rect_thin_progress.right - tooltip_w));
-    Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
-    Gdiplus::SolidBrush tooltipBgBrush(bgColor);
-    int corner = static_cast<int>(4 * m_dpi_scale);
-    Gdiplus::GraphicsPath tooltipPath;
-    tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
-    tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
-    tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
-    tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
-    tooltipPath.CloseFigure();
-    g.FillPath(&tooltipBgBrush, &tooltipPath);
-    Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
-    Gdiplus::StringFormat sf;
-    sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-    sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
-                            static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
-    g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
+void ControlPanelCore::draw_thin_progress_tooltip(Gdiplus::Graphics& g) {
+  if (m_rect_thin_progress.right <= m_rect_thin_progress.left) return;
+  if (m_state.track_length <= 0) return;
+
+  bool hovered = (m_hover_region == HitRegion::ThinProgressBar);
+  bool active = hovered || (m_seeking && m_pressed_region == HitRegion::ThinProgressBar);
+  if (!active) return;
+
+  int w = m_rect_thin_progress.right - m_rect_thin_progress.left;
+  int base_h = m_rect_thin_progress.bottom - m_rect_thin_progress.top;
+  int h = active ? base_h * 2 : base_h;
+  int top = m_rect_thin_progress.top;
+
+  double progress;
+  if (m_seeking && m_pressed_region == HitRegion::ThinProgressBar) {
+    progress = (m_state.track_length > 0)
+                   ? (m_state.playback_time / m_state.track_length)
+                   : 0.0;
+  } else {
+    progress = m_target_progress;
   }
+  progress = std::max(0.0, std::min(1.0, progress));
+  int progress_w = static_cast<int>(w * progress);
+
+  double preview = m_seeking ? m_state.playback_time : m_target_progress * m_state.track_length;
+  // On hover (not seeking), compute from cursor X
+  if (hovered && !m_seeking) {
+    double pos = static_cast<double>(m_seekbar_hover_x - m_rect_thin_progress.left) / w;
+    pos = std::max(0.0, std::min(1.0, pos));
+    preview = pos * m_state.track_length;
+  }
+  std::wstring timeStr = format_time(preview);
+  Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::RectF textBounds;
+  g.MeasureString(timeStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
+  int padding_h = static_cast<int>(6 * m_dpi_scale);
+  int padding_v = static_cast<int>(3 * m_dpi_scale);
+  int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
+  int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
+  int cursor_x = m_seeking ? (m_rect_thin_progress.left + progress_w) : m_seekbar_hover_x;
+  int tooltip_x = cursor_x - tooltip_w / 2;
+  int tooltip_y = top + h + static_cast<int>(20 * m_dpi_scale);
+  tooltip_x = std::max((int)m_rect_thin_progress.left, std::min(tooltip_x, (int)m_rect_thin_progress.right - tooltip_w));
+  Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
+  Gdiplus::SolidBrush tooltipBgBrush(bgColor);
+  int corner = static_cast<int>(4 * m_dpi_scale);
+  Gdiplus::GraphicsPath tooltipPath;
+  tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
+  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
+  tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
+  tooltipPath.CloseFigure();
+  g.FillPath(&tooltipBgBrush, &tooltipPath);
+  Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
+  Gdiplus::StringFormat sf;
+  sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
+                          static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
+  g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
 }
 
 // High-performance spectrum renderer using direct pixel writes + AlphaBlend.
@@ -5377,10 +5443,22 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
       bar_total_w = 1.0f;
     } else {
       // Style 1: SoundCloud bottom-aligned bars width & gap
-      bar_w_f = (wave_w_setting == 0) ? 0.5f :
-                (wave_w_setting == 2) ? 2.0f :
-                                        1.0f;
-      gap = 1.0f;
+      if (wave_w_setting == 0) {
+        // Thin: 1px dark, 1px blank
+        bar_w_f = 1.0f;
+        gap = 1.0f;
+      } else if (wave_w_setting == 1) {
+        // Wide: 2px dark, 1px blank
+        bar_w_f = 2.0f;
+        gap = 1.0f;
+      } else if (wave_w_setting == 2) {
+        // Wide (4K): 3px dark, 2px blank
+        bar_w_f = 3.0f;
+        gap = 2.0f;
+      } else {
+        bar_w_f = 1.0f;
+        gap = 1.0f;
+      }
       bar_total_w = bar_w_f + gap;
       display_count = (int)((float)w / bar_total_w);
       if (display_count < 1) display_count = 1;
@@ -5454,8 +5532,8 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
         float bar_h = peak * (float)h;
         if (bar_h < min_bar_h) bar_h = min_bar_h;
 
-        float bx = m_rect_waveform.left + i * bar_total_w + gap * 0.5f;
-        float by = m_rect_waveform.bottom - bar_h;
+        float bx = (float)m_rect_waveform.left + (float)i * bar_total_w;
+        float by = (float)m_rect_waveform.bottom - bar_h;
 
         float seg_progress = (float)(i + 0.5f) / display_count;
         bool played = (seg_progress <= (float)progress);
@@ -6509,9 +6587,8 @@ void ControlPanelCore::on_lbutton_dblclk(int x, int y) {
 
 void ControlPanelCore::show_picture_viewer() {
   // Use foobar2000's built-in Picture Viewer (available since 1.6.2)
-  auto pc = playback_control::get();
-  metadb_handle_ptr track;
-  if (!pc->get_now_playing(track) || !track.is_valid())
+  metadb_handle_ptr track = get_display_track();
+  if (!track.is_valid())
     return;
 
   auto viewer = fb2k::imageViewer::tryGet();
@@ -6585,6 +6662,9 @@ void ControlPanelCore::show_autoplaylist_menu() {
     ID_SKIP_LOW_RATING_1,
     ID_SKIP_LOW_RATING_2,
     ID_SKIP_LOW_RATING_3,
+    // Selection Mode submenu IDs
+    ID_SELECTION_MODE_PRIORITIZE_NOW_PLAYING,
+    ID_SELECTION_MODE_FOLLOW_SELECTION,
     ID_SETTINGS
   };
   
@@ -6694,6 +6774,20 @@ void ControlPanelCore::show_autoplaylist_menu() {
     AppendMenuW(skip_submenu, s3_flags, ID_SKIP_LOW_RATING_3, L"Skip if rating \x2264 3");
 
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)skip_submenu, L"Skip Low Rating");
+  }
+
+  // Group 8: Selection Mode submenu
+  HMENU selection_submenu = CreatePopupMenu();
+  if (selection_submenu) {
+    int sel_mode = get_nowbar_selection_mode();
+
+    UINT pnp_flags = MF_STRING | (sel_mode == 0 ? MF_CHECKED : 0);
+    UINT fs_flags = MF_STRING | (sel_mode == 1 ? MF_CHECKED : 0);
+
+    AppendMenuW(selection_submenu, pnp_flags, ID_SELECTION_MODE_PRIORITIZE_NOW_PLAYING, L"Prioritize Now Playing Mode");
+    AppendMenuW(selection_submenu, fs_flags, ID_SELECTION_MODE_FOLLOW_SELECTION, L"Follow Selection");
+
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)selection_submenu, L"Selection Mode");
   }
 
   // Separator before Settings
@@ -6860,6 +6954,14 @@ void ControlPanelCore::show_autoplaylist_menu() {
       set_nowbar_skip_low_rating_enabled(true);
       set_nowbar_skip_low_rating_threshold(3);
       break;
+    case ID_SELECTION_MODE_PRIORITIZE_NOW_PLAYING:
+      set_nowbar_selection_mode(0);
+      notify_all_settings_changed();
+      break;
+    case ID_SELECTION_MODE_FOLLOW_SELECTION:
+      set_nowbar_selection_mode(1);
+      notify_all_settings_changed();
+      break;
     case ID_SETTINGS:
       // Defer via one-shot timer so show_autoplaylist_menu() returns first,
       // allowing animation frames between menu close and preferences open
@@ -7025,9 +7127,8 @@ void ControlPanelCore::do_set_rating(int star) {
 }
 
 void ControlPanelCore::do_toggle_mood() {
-  auto pc = playback_control::get();
-  metadb_handle_ptr track;
-  if (!pc->get_now_playing(track) || !track.is_valid()) {
+  metadb_handle_ptr track = get_display_track();
+  if (!track.is_valid()) {
     return;
   }
 
@@ -7090,9 +7191,8 @@ void ControlPanelCore::do_toggle_mood() {
 }
 
 void ControlPanelCore::update_mood_state() {
-  auto pc = playback_control::get();
-  metadb_handle_ptr track;
-  if (!pc->get_now_playing(track) || !track.is_valid()) {
+  metadb_handle_ptr track = get_display_track();
+  if (!track.is_valid()) {
     m_mood_active = false;
     return;
   }
@@ -7147,30 +7247,99 @@ void ControlPanelCore::update_mood_state() {
   }
 }
 
-metadb_handle_ptr ControlPanelCore::get_rating_track() {
-  // Prefer the focused playlist item so rating reflects selection
+metadb_handle_ptr ControlPanelCore::get_selected_track() const {
+  // 1. Try ui_selection_manager
+  metadb_handle_list list;
+  if (static_api_test_t<ui_selection_manager_v2>()) {
+    ui_selection_manager_v2::get()->get_selection(list, ui_selection_manager_v2::flag_no_now_playing);
+  } else if (static_api_test_t<ui_selection_manager>()) {
+    ui_selection_manager::get()->get_selection(list);
+  }
+  if (list.get_count() > 0 && list[0].is_valid()) {
+    return list[0];
+  }
+
+  // 2. Fall back to focused item in active playlist
   auto pm = playlist_manager::get();
   t_size active = pm->get_active_playlist();
   if (active != pfc_infinite) {
     t_size focus = pm->playlist_get_focus_item(active);
     if (focus != pfc_infinite) {
       metadb_handle_ptr track;
-      if (pm->playlist_get_item_handle(track, active, focus)) {
+      if (pm->playlist_get_item_handle(track, active, focus) && track.is_valid()) {
         return track;
       }
     }
   }
-  // Fall back to now-playing
-  auto pc = playback_control::get();
-  metadb_handle_ptr track;
-  if (pc->get_now_playing(track) && track.is_valid()) {
-    return track;
-  }
+
   return metadb_handle_ptr();
 }
 
+metadb_handle_ptr ControlPanelCore::get_display_track() const {
+  int mode = get_nowbar_selection_mode(); // 0 = Prioritize Now Playing Mode, 1 = Follow Selection
+  auto pc = playback_control::get();
+  bool is_playing = pc->is_playing() || pc->is_paused();
+
+  if (mode == 0) {
+    // Prioritize Now Playing Mode: always show now playing during playback, fall back to follow selection when stopped
+    if (is_playing) {
+      metadb_handle_ptr track;
+      if (pc->get_now_playing(track) && track.is_valid()) {
+        return track;
+      }
+      if (m_state.current_track.is_valid()) {
+        return m_state.current_track;
+      }
+    }
+    return get_selected_track();
+  } else {
+    // Follow Selection: always follow selected track regardless of playback state
+    metadb_handle_ptr sel = get_selected_track();
+    if (sel.is_valid()) {
+      return sel;
+    }
+    // Fall back to now-playing if playing and no track is selected
+    if (is_playing) {
+      metadb_handle_ptr track;
+      if (pc->get_now_playing(track) && track.is_valid()) {
+        return track;
+      }
+      if (m_state.current_track.is_valid()) {
+        return m_state.current_track;
+      }
+    }
+    return metadb_handle_ptr();
+  }
+}
+
+metadb_handle_ptr ControlPanelCore::get_rating_track() {
+  return get_display_track();
+}
+
+void ControlPanelCore::on_selection_or_focus_changed() {
+  int mode = get_nowbar_selection_mode();
+  auto pc = playback_control::get();
+  bool is_playing = pc->is_playing() || pc->is_paused();
+
+  // In Prioritize Now Playing mode while playback is active, selection changes do not affect display
+  if (mode == 0 && is_playing) {
+    return;
+  }
+
+  update_rating_state();
+  update_mood_state();
+  evaluate_title_formats();
+
+  if (m_artwork_request_cb) {
+    m_artwork_request_cb();
+  }
+
+  m_needs_full_repaint = true;
+  invalidate();
+}
+
 void ControlPanelCore::update_rating_state() {
-  metadb_handle_ptr track = get_rating_track();
+  metadb_handle_ptr track = get_display_track();
   if (!track.is_valid()) {
     m_rating_value = 0;
     return;
@@ -7219,17 +7388,19 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
     m_animated_progress = 0.0;
     m_target_progress = 0.0;
 
-    // Clear artwork to show placeholder
-    clear_artwork();
-
-    // Reset mood state
-    m_mood_active = false;
-
     // Reset stop-after-current state (SDK clears it when playback stops)
     m_stop_after_current_active = false;
 
-    // Reset rating when not playing
-    m_rating_value = 0;
+    // Fall back to selection (or refresh display track)
+    update_mood_state();
+    update_rating_state();
+    evaluate_title_formats();
+
+    if (m_artwork_request_cb) {
+      m_artwork_request_cb();
+    } else {
+      clear_artwork();
+    }
   }
 
   // Reapply theme when transitioning between stopped and playing/paused
@@ -7364,6 +7535,32 @@ void ControlPanelCore::on_track_changed() {
   }
 
   // Request artwork update from UI wrapper
+  if (m_artwork_request_cb) {
+    m_artwork_request_cb();
+  }
+  invalidate();
+}
+
+void ControlPanelCore::on_track_info_changed() {
+  if (PlaybackStateManager::is_available()) {
+    m_state = PlaybackStateManager::get().get_state();
+  }
+
+  m_needs_full_repaint = true;
+  m_bg_cache_valid = false;
+
+  // Re-apply theme to ensure colors are updated if customized
+  apply_theme();
+  nowbar_notify_color_changed();
+
+  // Update mood and rating state (tags might have changed)
+  update_mood_state();
+  update_rating_state();
+
+  // Re-evaluate title formats with the updated metadata
+  evaluate_title_formats();
+
+  // Request artwork update from UI wrapper if tags or cover art changed
   if (m_artwork_request_cb) {
     m_artwork_request_cb();
   }
@@ -8536,18 +8733,26 @@ void ControlPanelCore::update_title_formats() {
 }
 
 void ControlPanelCore::evaluate_title_formats() {
-  if (!m_state.current_track.is_valid()) {
-    m_formatted_line1 = m_state.track_title;
-    m_formatted_line2 = m_state.track_artist;
+  metadb_handle_ptr track = get_display_track();
+  if (!track.is_valid()) {
+    m_formatted_line1 = "";
+    m_formatted_line2 = "";
     m_formatted_line3 = "";
     return;
   }
 
-  // Use playback_format_title when playing - it merges dynamic stream
+  // Use playback_format_title when playing the target track - it merges dynamic stream
   // metadata (internet radio artist/title) with static file metadata.
-  // Fall back to metadb_handle::format_title when not actively playing.
+  // Fall back to metadb_handle::format_title when not actively playing this track.
   auto pc = playback_control::get();
-  bool use_playback = pc->is_playing() || pc->is_paused();
+  bool is_playing = pc->is_playing() || pc->is_paused();
+  bool use_playback = false;
+  if (is_playing) {
+    metadb_handle_ptr now_playing_track;
+    if (pc->get_now_playing(now_playing_track) && now_playing_track == track) {
+      use_playback = true;
+    }
+  }
 
   if (m_titleformat_line1.is_valid()) {
     if (use_playback) {
@@ -8555,11 +8760,11 @@ void ControlPanelCore::evaluate_title_formats() {
                                 m_titleformat_line1, nullptr,
                                 playback_control::display_level_all);
     } else {
-      m_state.current_track->format_title(nullptr, m_formatted_line1,
-                                          m_titleformat_line1, nullptr);
+      track->format_title(nullptr, m_formatted_line1,
+                          m_titleformat_line1, nullptr);
     }
   } else {
-    m_formatted_line1 = m_state.track_title;
+    m_formatted_line1 = "";
   }
 
   if (m_titleformat_line2.is_valid()) {
@@ -8568,11 +8773,11 @@ void ControlPanelCore::evaluate_title_formats() {
                                 m_titleformat_line2, nullptr,
                                 playback_control::display_level_all);
     } else {
-      m_state.current_track->format_title(nullptr, m_formatted_line2,
-                                          m_titleformat_line2, nullptr);
+      track->format_title(nullptr, m_formatted_line2,
+                          m_titleformat_line2, nullptr);
     }
   } else {
-    m_formatted_line2 = m_state.track_artist;
+    m_formatted_line2 = "";
   }
 
   if (m_titleformat_line3.is_valid()) {
@@ -8581,8 +8786,8 @@ void ControlPanelCore::evaluate_title_formats() {
                                 m_titleformat_line3, nullptr,
                                 playback_control::display_level_all);
     } else {
-      m_state.current_track->format_title(nullptr, m_formatted_line3,
-                                          m_titleformat_line3, nullptr);
+      track->format_title(nullptr, m_formatted_line3,
+                          m_titleformat_line3, nullptr);
     }
   } else {
     m_formatted_line3 = "";
