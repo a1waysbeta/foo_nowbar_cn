@@ -35,6 +35,7 @@ public:
     virtual void on_playback_time_changed(double time) = 0;
     virtual void on_volume_changed(float volume_db) = 0;
     virtual void on_track_changed() = 0;
+    virtual void on_dynamic_info_changed() {}
 };
 
 // Playback state manager - uses play_callback_impl_base which self-registers
@@ -62,7 +63,7 @@ private:
     void on_playback_time(double p_time) noexcept override;
     void on_volume_change(float p_new_val) noexcept override;
     void on_playback_edited(metadb_handle_ptr p_track) noexcept override {}
-    void on_playback_dynamic_info(const file_info& p_info) noexcept override {}
+    void on_playback_dynamic_info(const file_info& p_info) noexcept override;
     void on_playback_dynamic_info_track(const file_info& p_info) noexcept override;
 
     // metadb_io_callback_dynamic override
@@ -73,6 +74,7 @@ private:
     void notify_time_changed(double time);
     void notify_volume_changed(float volume);
     void notify_track_changed();
+    void notify_dynamic_info_changed();
     void handle_infinite_playback();  // Add similar tracks when playlist ends
     void check_preview_skip(double current_time);  // Check if playback preview should skip to next track
 
