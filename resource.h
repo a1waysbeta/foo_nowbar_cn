@@ -185,7 +185,6 @@
 #define IDC_ONLINE_ARTWORK_CHECK       1416
 #define IDC_FOO_ARTWORK_LINK           1417
 #define IDC_FOO_TRAYCONTROLS_LINK      1418
-#define IDC_FOO_SVG_SERVICES_LINK      1419
 
 // Color custom-enable checkboxes (Fonts & Colors tab)
 #define IDC_COLORS_GROUP               1500
