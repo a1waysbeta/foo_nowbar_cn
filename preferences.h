@@ -39,6 +39,8 @@ bool get_nowbar_skip_low_rating_enabled();  // true=Enabled, false=Disabled
 void set_nowbar_skip_low_rating_enabled(bool enabled);  // Toggle skip low rating
 int get_nowbar_skip_low_rating_threshold();  // 1, 2, or 3
 void set_nowbar_skip_low_rating_threshold(int threshold);  // Set skip rating threshold
+int get_nowbar_selection_mode();  // 0=Prioritize Now Playing Mode, 1=Follow Selection
+void set_nowbar_selection_mode(int mode);  // Set selection mode
 bool get_nowbar_spectrum_visible();  // true=Enabled, false=Disabled
 int get_nowbar_visualization_mode();  // 0=Disabled, 1=Spectrum, 2=Waveform
 COLORREF get_nowbar_spectrum_color();
@@ -51,7 +53,7 @@ COLORREF get_nowbar_spectrum_color2();   // Gradient bottom color
 bool get_nowbar_vis_60fps();
 COLORREF get_nowbar_waveform_color();
 COLORREF get_nowbar_waveform_unplayed_color();
-int get_nowbar_waveform_width();     // 0=Thin, 1=Normal, 2=Wide
+int get_nowbar_waveform_width();     // 0=Thin, 1=Wide, 2=Wide (4K)
 int get_nowbar_waveform_style();     // 0=Waveform 1 (Bottom bars), 1=Waveform 2 (Centered envelope)
 int get_nowbar_background_style();  // 0=Solid, 1=Artwork Colors, 2=Blurred Artwork
 bool get_nowbar_smooth_animations_enabled();  // true=Enabled, false=Disabled
