@@ -60,9 +60,8 @@ void ControlPanelCUI::update_artwork() {
         }
     }
 
-    auto pc = playback_control::get();
-    metadb_handle_ptr track;
-    if (pc->get_now_playing(track) && track.is_valid()) {
+    metadb_handle_ptr track = m_core->get_display_track();
+    if (track.is_valid()) {
         // Try local/embedded artwork first
         auto art_manager = album_art_manager_v3::get();
         try {
@@ -81,6 +80,16 @@ void ControlPanelCUI::update_artwork() {
             }
         } catch (...) {}
 
+        auto pc = playback_control::get();
+        bool is_playing = pc->is_playing() || pc->is_paused();
+        bool is_playing_track = false;
+        if (is_playing) {
+            metadb_handle_ptr now_playing_track;
+            if (pc->get_now_playing(now_playing_track) && now_playing_track == track) {
+                is_playing_track = true;
+            }
+        }
+
         // Check if foo_artwork has a cached cover image file on disk
         if (get_nowbar_online_artwork()) {
             static service_ptr_t<titleformat_object> tf_cover;
@@ -88,7 +97,11 @@ void ControlPanelCUI::update_artwork() {
                 titleformat_compiler::get()->compile_safe(tf_cover, "%foo_artwork_cover%");
             }
             pfc::string8 cover_path;
-            pc->playback_format_title(nullptr, cover_path, tf_cover, nullptr, playback_control::display_level_all);
+            if (is_playing_track) {
+                pc->playback_format_title(nullptr, cover_path, tf_cover, nullptr, playback_control::display_level_all);
+            } else {
+                track->format_title(nullptr, cover_path, tf_cover, nullptr);
+            }
             if (!cover_path.is_empty() && GetFileAttributesA(cover_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
                 HANDLE hFile = CreateFileA(cover_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
                 if (hFile != INVALID_HANDLE_VALUE) {
@@ -128,9 +141,13 @@ void ControlPanelCUI::update_artwork() {
             if (!m_tf_title.is_valid())
                 titleformat_compiler::get()->compile_safe(m_tf_title, "$if2(%foo_artwork_title%,%title%)");
             pfc::string8 artist, title;
-            // Use playback_format_title for streams - it merges dynamic stream metadata
-            pc->playback_format_title(nullptr, artist, m_tf_artist, nullptr, playback_control::display_level_all);
-            pc->playback_format_title(nullptr, title, m_tf_title, nullptr, playback_control::display_level_all);
+            if (is_playing_track) {
+                pc->playback_format_title(nullptr, artist, m_tf_artist, nullptr, playback_control::display_level_all);
+                pc->playback_format_title(nullptr, title, m_tf_title, nullptr, playback_control::display_level_all);
+            } else {
+                track->format_title(nullptr, artist, m_tf_artist, nullptr);
+                track->format_title(nullptr, title, m_tf_title, nullptr);
+            }
             if (!artist.is_empty() || !title.is_empty()) {
                 request_online_artwork(artist.c_str(), title.c_str());
             }
