@@ -175,6 +175,18 @@ void PlaybackStateManager::on_volume_change(float p_new_val) noexcept {
     } catch (...) {}
 }
 
+void PlaybackStateManager::on_playback_dynamic_info(const file_info& p_info) noexcept {
+    try {
+        // on_playback_dynamic_info fires on the audio decoder thread (e.g. VBR bitrate changes).
+        // Marshal to main thread to update dynamic format evaluations.
+        fb2k::inMainThread([]() {
+            if (!is_available()) return;
+            auto& mgr = get();
+            mgr.notify_dynamic_info_changed();
+        });
+    } catch (...) {}
+}
+
 void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_info) noexcept {
     try {
         // Extract metadata from dynamic info (for streaming sources like internet radio)
@@ -321,6 +333,17 @@ void PlaybackStateManager::notify_track_changed() {
     }
     for (auto* cb : callbacks) {
         cb->on_track_changed();
+    }
+}
+
+void PlaybackStateManager::notify_dynamic_info_changed() {
+    std::vector<IPlaybackStateCallback*> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        callbacks = m_callbacks;
+    }
+    for (auto* cb : callbacks) {
+        cb->on_dynamic_info_changed();
     }
 }
 
