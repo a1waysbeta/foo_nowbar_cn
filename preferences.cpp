@@ -3173,8 +3173,9 @@ static void update_vis_section_state(HWND hwnd) {
     BOOL wave_on = enabled && waveform_sel;
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_STYLE_1), wave_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_STYLE_2), wave_on);
-    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), wave_on);
-    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), wave_on);
+    BOOL wave_bars = wave_on && (IsDlgButtonChecked(hwnd, IDC_VIS_WAVEFORM_STYLE_1) == BST_CHECKED);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), wave_bars);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), wave_bars);
 }
 
 // Helper to enable/disable color buttons based on checkbox state
