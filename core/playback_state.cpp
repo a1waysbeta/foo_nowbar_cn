@@ -235,14 +235,25 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
     } catch (...) {}
 }
 
+void PlaybackStateManager::on_playback_edited(metadb_handle_ptr p_track) noexcept {
+    try {
+        if (!m_state.is_playing && !m_state.is_paused) return;
+        if (!m_state.current_track.is_valid()) return;
+
+        if (p_track.is_valid() && p_track == m_state.current_track) {
+            update_track_info(p_track);
+            notify_track_info_changed();
+        }
+    } catch (...) {}
+}
+
 void PlaybackStateManager::on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) {
     if (!m_state.is_playing && !m_state.is_paused) return;
     if (!m_state.current_track.is_valid()) return;
 
     if (metadb_handle_list_helper::bsearch_by_pointer(p_items_sorted, m_state.current_track) != pfc_infinite) {
         update_track_info(m_state.current_track);
-        notify_track_changed();
-        notify_state_changed();
+        notify_track_info_changed();
     }
 }
 
@@ -333,6 +344,17 @@ void PlaybackStateManager::notify_track_changed() {
     }
     for (auto* cb : callbacks) {
         cb->on_track_changed();
+    }
+}
+
+void PlaybackStateManager::notify_track_info_changed() {
+    std::vector<IPlaybackStateCallback*> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        callbacks = m_callbacks;
+    }
+    for (auto* cb : callbacks) {
+        cb->on_track_info_changed();
     }
 }
 
