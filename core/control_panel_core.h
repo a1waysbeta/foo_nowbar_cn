@@ -106,6 +106,7 @@ public:
     void on_playback_time_changed(double time) override;
     void on_volume_changed(float volume_db) override;
     void on_track_changed() override;
+    void on_dynamic_info_changed() override;
     
     // Artwork
     void set_artwork(album_art_data_ptr data);
@@ -485,6 +486,10 @@ private:
     // Cached waveform brushes (avoid ~400 allocations per frame)
     std::unique_ptr<Gdiplus::SolidBrush> m_waveform_brush_accent;
     std::unique_ptr<Gdiplus::SolidBrush> m_waveform_brush_dim;
+    std::unique_ptr<Gdiplus::SolidBrush> m_waveform_brush_accent_outer;
+    std::unique_ptr<Gdiplus::SolidBrush> m_waveform_brush_accent_inner;
+    std::unique_ptr<Gdiplus::SolidBrush> m_waveform_brush_dim_outer;
+    std::unique_ptr<Gdiplus::SolidBrush> m_waveform_brush_dim_inner;
     bool m_waveform_brushes_dirty = true;
 
     // Smooth progress bar animation
