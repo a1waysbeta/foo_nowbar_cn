@@ -305,7 +305,6 @@ foo_nowbar/
 - [Columns UI SDK](https://github.com/reupen/columns_ui-sdk)
 - [foo_traycontrols](https://github.com/jame25/foo_traycontrols) (optional, for MiniPlayer functionality)
 - [foo_artwork](https://github.com/jame25/foo_artwork) (optional, for online artwork)
-- [foo_svg_services](https://www.foobar2000.org/components/view/foo_svg_services) (optional, for SVG custom button icons)
 
 ## License
 
