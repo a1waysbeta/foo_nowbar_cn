@@ -240,6 +240,11 @@ static cfg_int cfg_nowbar_skip_low_rating_threshold(
     1  // Default: 1 (skip if rating <= 1)
 );
 
+static cfg_int cfg_nowbar_selection_mode(
+    GUID{0xABCDEF5F, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xEF}},
+    0  // Default: 0=Prioritize Now Playing Mode, 1=Follow Selection
+);
+
 static cfg_int cfg_nowbar_visualization_mode(
     GUID{0xABCDEF5C, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xEC}},
     0  // Default: Disabled (0=Disabled, 1=Spectrum, 2=Waveform)
@@ -299,7 +304,7 @@ static cfg_int cfg_nowbar_waveform_color(
 
 static cfg_int cfg_nowbar_waveform_width(
     GUID{0xABCDEF85, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x85}},
-    1  // Default: Normal (0=Thin, 1=Normal, 2=Wide)
+    0  // Default: Thin (0=Thin, 1=Wide, 2=Wide (4K))
 );
 
 static cfg_int cfg_nowbar_waveform_style(
@@ -1778,6 +1783,19 @@ void set_nowbar_skip_low_rating_threshold(int threshold) {
     if (threshold < 1) threshold = 1;
     if (threshold > 3) threshold = 3;
     cfg_nowbar_skip_low_rating_threshold = threshold;
+}
+
+int get_nowbar_selection_mode() {
+    int mode = cfg_nowbar_selection_mode;
+    if (mode < 0) mode = 0;
+    if (mode > 1) mode = 1;  // 0=Prioritize Now Playing Mode, 1=Follow Selection
+    return mode;
+}
+
+void set_nowbar_selection_mode(int mode) {
+    if (mode < 0) mode = 0;
+    if (mode > 1) mode = 1;
+    cfg_nowbar_selection_mode = mode;
 }
 
 int get_nowbar_visualization_mode() {
@@ -3611,11 +3629,11 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                 SendMessage(hColorMode, CB_SETCURSEL, cfg_nowbar_spectrum_gradient_mode, 0);
             }
 
-            // Populate waveform width combo (Thin/Normal/Wide)
+            // Populate waveform width combo (Thin/Wide/Wide (4K))
             HWND hWaveWidth = GetDlgItem(hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO);
             SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Thin");
-            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Normal");
             SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide");
+            SendMessage(hWaveWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide (4K)");
             SendMessage(hWaveWidth, CB_SETCURSEL, cfg_nowbar_waveform_width, 0);
 
             // Initialize waveform style radio buttons (1 vs 2)
@@ -4935,7 +4953,7 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_spectrum_width = 1;  // Default: Normal
             cfg_nowbar_spectrum_style = 1;  // Default: Curve
             cfg_nowbar_spectrum_height = 2;  // Default: High
-            cfg_nowbar_waveform_width = 1;  // Default: Normal
+            cfg_nowbar_waveform_width = 0;  // Default: Thin
             cfg_nowbar_waveform_style = 0;  // Default: Waveform 1
             cfg_nowbar_vis_60fps = 0;  // Default: Disabled
 
@@ -4957,7 +4975,7 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), CB_SETCURSEL, 1, 0);  // Normal
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), CB_SETCURSEL, 1, 0);  // Curve
             SendMessage(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), CB_SETCURSEL, 2, 0);  // High
-            SendMessage(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), CB_SETCURSEL, 1, 0);  // Normal
+            SendMessage(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), CB_SETCURSEL, 0, 0);  // Thin
             update_vis_section_state(m_hwnd);
         } else if (m_current_tab == 1) {
             // Reset Appearance tab settings
