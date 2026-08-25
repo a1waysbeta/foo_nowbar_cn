@@ -72,13 +72,6 @@
     #include <columns_ui-sdk/ui_extension.h>
 #endif
 
-// 3. SVG Services API
-#if __has_include("../columns_ui/svg-services/api/api.h")
-    #include "../columns_ui/svg-services/api/api.h"
-#elif __has_include("lib/columns_ui/svg-services/api/api.h")
-    #include "lib/columns_ui/svg-services/api/api.h"
-#endif
-
 // Project headers
 #include "guids.h"
 #include "version.h"
