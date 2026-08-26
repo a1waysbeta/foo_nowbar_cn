@@ -418,6 +418,8 @@ private:
     void create_vis_stream();
     void release_vis_stream();
     void draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& area_rect);
+    COLORREF get_spectrum_primary_color() const;
+    COLORREF get_spectrum_secondary_color() const;
 
     // Cached spectrum region background (GDI objects for fast BitBlt)
     HDC m_spectrum_bg_hdc = nullptr;
