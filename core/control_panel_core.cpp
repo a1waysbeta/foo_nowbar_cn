@@ -831,10 +831,11 @@ void ControlPanelCore::on_settings_changed() {
     }
   }
 
-  // Invalidate cached command references so next poll does a fresh lookup
+  // Invalidate cached command references and poll immediately so state is up-to-date before repainting
   for (int i = 0; i < 6; i++) {
-    m_cbutton_states[i] = {};
+    m_cbutton_states[i].cache_valid = false;
   }
+  poll_custom_button_states();
 
   // Reset 3D button press state
   for (int i = 0; i < 6; i++) {
@@ -4362,6 +4363,94 @@ static COLORREF hsl_to_rgb(float h, float s, float l) {
     return RGB((BYTE)((r1+m)*255), (BYTE)((g1+m)*255), (BYTE)((b1+m)*255));
 }
 
+static void rgb_to_hsl(BYTE r, BYTE g, BYTE b, float& h, float& s, float& l) {
+    float rf = r / 255.0f;
+    float gf = g / 255.0f;
+    float bf = b / 255.0f;
+    float max_val = std::max({rf, gf, bf});
+    float min_val = std::min({rf, gf, bf});
+    float delta = max_val - min_val;
+
+    l = (max_val + min_val) / 2.0f;
+
+    if (delta <= 0.0001f) {
+        h = 0.0f;
+        s = 0.0f;
+    } else {
+        s = (l > 0.5f) ? (delta / (2.0f - max_val - min_val))
+                       : (delta / (max_val + min_val));
+        if (max_val == rf) {
+            h = (gf - bf) / delta + (gf < bf ? 6.0f : 0.0f);
+        } else if (max_val == gf) {
+            h = (bf - rf) / delta + 2.0f;
+        } else {
+            h = (rf - gf) / delta + 4.0f;
+        }
+        h *= 60.0f;
+    }
+}
+
+static COLORREF adjust_adaptive_artwork_color(const Gdiplus::Color& src_color, bool is_dark_bg, bool is_secondary = false) {
+    float h, s, l;
+    rgb_to_hsl(src_color.GetR(), src_color.GetG(), src_color.GetB(), h, s, l);
+
+    if (is_dark_bg) {
+        // On dark backgrounds (Dark mode, Blurred Artwork, Artwork Colors)
+        if (s < 0.12f) {
+            // Grayscale / monochrome artwork (e.g. black & white covers)
+            // Elevate lightness to a bright, readable silver/white
+            float target_l = is_secondary ? 0.55f : 0.70f;
+            l = std::max(l, target_l);
+        } else {
+            // Colored artwork: boost saturation slightly if diluted and ensure vivid lightness
+            s = std::max(s, 0.45f);
+            float min_l = is_secondary ? 0.42f : 0.55f;
+            float max_l = is_secondary ? 0.65f : 0.78f;
+            l = std::clamp(l, min_l, max_l);
+        }
+    } else {
+        // On light backgrounds (Light theme with solid background)
+        if (s < 0.12f) {
+            // Grayscale: darken to charcoal/slate
+            float target_l = is_secondary ? 0.40f : 0.28f;
+            l = std::min(l, target_l);
+        } else {
+            s = std::max(s, 0.45f);
+            float min_l = is_secondary ? 0.25f : 0.30f;
+            float max_l = is_secondary ? 0.48f : 0.45f;
+            l = std::clamp(l, min_l, max_l);
+        }
+    }
+
+    return hsl_to_rgb(h, s, l);
+}
+
+COLORREF ControlPanelCore::get_spectrum_primary_color() const {
+  int mode = get_nowbar_spectrum_gradient_mode();
+  if (mode != 0 && get_nowbar_custom_spectrum_color_enabled()) {
+    return get_nowbar_spectrum_color();
+  }
+  if (m_artwork_colors_valid) {
+    int bg_style = get_nowbar_background_style();
+    bool is_dark_bg = m_dark_mode || (bg_style == 1) || (bg_style == 2);
+    return adjust_adaptive_artwork_color(m_artwork_color_primary, is_dark_bg, false);
+  }
+  return m_theme_highlight;
+}
+
+COLORREF ControlPanelCore::get_spectrum_secondary_color() const {
+  int mode = get_nowbar_spectrum_gradient_mode();
+  if (mode != 0 && get_nowbar_custom_spectrum_color_enabled()) {
+    return get_nowbar_spectrum_color2();
+  }
+  if (m_artwork_colors_valid) {
+    int bg_style = get_nowbar_background_style();
+    bool is_dark_bg = m_dark_mode || (bg_style == 1) || (bg_style == 2);
+    return adjust_adaptive_artwork_color(m_artwork_color_secondary, is_dark_bg, true);
+  }
+  return get_nowbar_spectrum_color2();
+}
+
 void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   if (!get_nowbar_spectrum_visible()) return;
   if (m_rect_spectrum.right <= m_rect_spectrum.left) return;
@@ -4423,8 +4512,7 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   bool stereo = false;
 
   // Colors from preferences
-  COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
-      ? get_nowbar_spectrum_color() : m_theme_highlight;
+  COLORREF spec_color = get_spectrum_primary_color();
   int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
   int alpha = (int)(user_alpha * m_spectrum_opacity);
   if (alpha > 255) alpha = 255;
@@ -4432,7 +4520,7 @@ void ControlPanelCore::draw_spectrum(Gdiplus::Graphics& g) {
   BYTE r1 = GetRValue(spec_color), g1 = GetGValue(spec_color), b1 = GetBValue(spec_color);
 
   int gradient_mode = get_nowbar_spectrum_gradient_mode();
-  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  COLORREF spec_color2 = get_spectrum_secondary_color();
   BYTE r2 = GetRValue(spec_color2), g2 = GetGValue(spec_color2), b2 = GetBValue(spec_color2);
 
   // Stereo default colors: warm left (red-orange), cool right (teal-green)
@@ -4619,8 +4707,7 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
   curvePath.CloseFigure();
 
   // Color setup
-  COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
-      ? get_nowbar_spectrum_color() : m_theme_highlight;
+  COLORREF spec_color = get_spectrum_primary_color();
   int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
   int alpha = (int)(user_alpha * m_spectrum_opacity * m_spectrum_hover_opacity);
   if (alpha > 255) alpha = 255;
@@ -4628,7 +4715,7 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
   BYTE cr = GetRValue(spec_color), cg = GetGValue(spec_color), cb = GetBValue(spec_color);
 
   int gradient_mode = get_nowbar_spectrum_gradient_mode();
-  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  COLORREF spec_color2 = get_spectrum_secondary_color();
   BYTE cr2 = GetRValue(spec_color2), cg2 = GetGValue(spec_color2), cb2 = GetBValue(spec_color2);
 
   // Enable anti-aliasing for smooth curves
@@ -4926,8 +5013,7 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   bool stereo = false;
 
   // Colors from preferences
-  COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
-      ? get_nowbar_spectrum_color() : m_theme_highlight;
+  COLORREF spec_color = get_spectrum_primary_color();
   int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
   int alpha = (int)(user_alpha * m_spectrum_opacity * m_spectrum_hover_opacity);
   if (alpha > 255) alpha = 255;
@@ -4938,7 +5024,7 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   BYTE b1 = GetBValue(spec_color);
 
   int gradient_mode = get_nowbar_spectrum_gradient_mode();
-  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  COLORREF spec_color2 = get_spectrum_secondary_color();
   BYTE r2 = GetRValue(spec_color2);
   BYTE g2 = GetGValue(spec_color2);
   BYTE b2 = GetBValue(spec_color2);
@@ -5148,8 +5234,7 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   float bar_w = (float)bar_w_i;
 
   // Colors from preferences
-  COLORREF spec_color = get_nowbar_custom_spectrum_color_enabled()
-      ? get_nowbar_spectrum_color() : m_theme_highlight;
+  COLORREF spec_color = get_spectrum_primary_color();
   int user_alpha = get_nowbar_spectrum_opacity() * 255 / 100;
   int alpha = (int)(user_alpha * m_spectrum_opacity * m_spectrum_hover_opacity);
   if (alpha > 255) alpha = 255;
@@ -5157,7 +5242,7 @@ void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   BYTE r1 = GetRValue(spec_color), g1 = GetGValue(spec_color), b1 = GetBValue(spec_color);
 
   int gradient_mode = get_nowbar_spectrum_gradient_mode();
-  COLORREF spec_color2 = get_nowbar_spectrum_color2();
+  COLORREF spec_color2 = get_spectrum_secondary_color();
   BYTE r2 = GetRValue(spec_color2), g2 = GetGValue(spec_color2), b2 = GetBValue(spec_color2);
 
   // Stereo default colors
@@ -6775,6 +6860,9 @@ void ControlPanelCore::show_autoplaylist_menu() {
 
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)skip_submenu, L"Skip Low Rating");
   }
+
+  // Separator between Skip Low Rating and Selection Mode
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
   // Group 8: Selection Mode submenu
   HMENU selection_submenu = CreatePopupMenu();
@@ -8714,7 +8802,7 @@ void ControlPanelCore::update_title_formats() {
   // Detect dynamic fields (%playback_time*%, %bitrate*%) so on_playback_time_changed
   // and on_dynamic_info_changed know whether to re-evaluate dynamically.
   // Case-insensitive substring match catches %playback_time%, %playback_time_seconds%,
-  // %playback_time_ms%, %playback_time_remaining%, %playback_time_remaining_seconds%,
+  // %playback_time_remaining%, %playback_time_remaining_seconds%,
   // %bitrate%, %bitrate_dynamic%, %bitrate_peak%, %BITRATE%, etc.
   auto has_dynamic_fields = [](const char* s) -> bool {
     if (!s || !*s) return false;
@@ -9441,11 +9529,22 @@ void ControlPanelCore::poll_custom_button_states() {
   
   for (int i = 0; i < 6; i++) {
     // Only poll enabled buttons with fb2k action type (3)
-    if (!get_nowbar_cbutton_enabled(i)) continue;
-    if (get_nowbar_cbutton_action(i) != 3) continue;
+    if (!get_nowbar_cbutton_enabled(i) || get_nowbar_cbutton_action(i) != 3) {
+      if (m_cbutton_states[i].found || m_cbutton_states[i].checked || m_cbutton_states[i].disabled || m_cbutton_states[i].cache_valid) {
+        m_cbutton_states[i] = {};
+        needs_repaint = true;
+      }
+      continue;
+    }
     
     pfc::string8 path = get_nowbar_cbutton_path(i);
-    if (path.is_empty()) continue;
+    if (path.is_empty()) {
+      if (m_cbutton_states[i].found || m_cbutton_states[i].checked || m_cbutton_states[i].disabled || m_cbutton_states[i].cache_valid) {
+        m_cbutton_states[i] = {};
+        needs_repaint = true;
+      }
+      continue;
+    }
 
     if (m_cbutton_states[i].cache_valid) {
       // Fast path: use cached service reference, no full enumeration
