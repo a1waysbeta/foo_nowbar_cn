@@ -3137,6 +3137,7 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ACCENT_BTN), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_HOVER_COLOR_CHECK), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_HOVER_COLOR_BTN), show_fonts);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_COLOR_MODE_LABEL), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), show_fonts);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_OPACITY_LABEL), show_fonts);
@@ -3208,14 +3209,17 @@ static void update_color_buttons_state(HWND hwnd) {
         IsDlgButtonChecked(hwnd, IDC_CUSTOM_VOLUME_ACCENT_CHECK) == BST_CHECKED);
     EnableWindow(GetDlgItem(hwnd, IDC_HOVER_COLOR_BTN),
         IsDlgButtonChecked(hwnd, IDC_CUSTOM_HOVER_COLOR_CHECK) == BST_CHECKED);
-    BOOL spectrum_custom = (IsDlgButtonChecked(hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK) == BST_CHECKED);
     int color_mode = (int)SendMessage(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), CB_GETCURSEL, 0, 0);
-    EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), spectrum_custom && color_mode != 0 && color_mode != 3);
+    BOOL spectrum_mode_has_custom = (color_mode == 1 || color_mode == 2);
+    EnableWindow(GetDlgItem(hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK), spectrum_mode_has_custom);
+    BOOL spectrum_custom = spectrum_mode_has_custom && (IsDlgButtonChecked(hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK) == BST_CHECKED);
+    EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), spectrum_custom);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR2_BTN), spectrum_custom && color_mode == 2);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_LABEL), TRUE);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), TRUE);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_LABEL), TRUE);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_SLIDER), TRUE);
     EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_OPACITY_VALUE), TRUE);
-    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), spectrum_custom);
-    EnableWindow(GetDlgItem(hwnd, IDC_SPECTRUM_COLOR2_BTN), spectrum_custom && color_mode == 2);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_COLOR_BTN),
         IsDlgButtonChecked(hwnd, IDC_CUSTOM_WAVEFORM_COLOR_CHECK) == BST_CHECKED);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN),
