@@ -117,9 +117,6 @@ public:
     // Get minimum size
     SIZE get_min_size() const;
     
-    // MiniPlayer state (for icon color)
-    void set_miniplayer_active(bool active);
-    
     // Effective track for album cover, track info, rating, and mood (respects Selection Mode)
     metadb_handle_ptr get_display_track() const;
 
@@ -230,7 +227,6 @@ private:
     void draw_seekbar(Gdiplus::Graphics& g);
     void draw_seekbar_tooltip(Gdiplus::Graphics& g);
     void draw_volume(Gdiplus::Graphics& g);
-    void draw_volume_tooltip(Gdiplus::Graphics& g);
     void draw_time_display(Gdiplus::Graphics& g);
     void draw_miniplayer_button(Gdiplus::Graphics& g);
     
@@ -338,9 +334,7 @@ private:
     HitRegion m_pressed_region = HitRegion::None;
     bool m_seeking = false;
     bool m_volume_dragging = false;
-    bool m_volume_wheel_active = false;  // True while mouse wheel is adjusting volume (for tooltip)
     float m_prev_volume_db = 0.0f;  // Store previous volume for mute toggle
-    bool m_miniplayer_active = false;  // MiniPlayer enabled state for icon color
     bool m_mood_active = false;  // MOOD tag state for heart icon color
     int m_rating_value = 0;        // Current track rating (0=unrated, 1-5)
     int m_rating_hover_star = 0;   // Which star is hovered (0=none, 1-5)
@@ -602,6 +596,10 @@ private:
     int m_title_font_height = 0;   // Measured pixel height of title font
     int m_artist_font_height = 0;  // Measured pixel height of artist font
     int m_line3_font_height = 0;   // Measured pixel height of line 3 font
+    int m_volume_number_width = 0; // Measured pixel width of volume number "100"
+    float m_volume_number_glyph_y = 0.0f; // Measured glyph Y offset for vertical centering
+    float m_volume_number_glyph_h = 0.0f; // Measured glyph ink height for vertical centering
+    float m_volume_number_line_h = 0.0f;  // Measured line height
     bool m_line3_visible = false;  // Whether line 3 is shown (false when panel too short)
 
     // Artwork request callback
