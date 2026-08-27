@@ -495,7 +495,6 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
         InvalidateRect(m_hwnd, dirty, FALSE);
         if (m_core) m_core->clear_animation_dirty();
-        UpdateWindow(m_hwnd);
         return 0;
     }
 
