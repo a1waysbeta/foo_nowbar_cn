@@ -313,7 +313,6 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
         InvalidateRect(wnd, dirty, FALSE);
         if (m_core) m_core->clear_animation_dirty();
-        UpdateWindow(wnd);
         return 0;
     }
 
