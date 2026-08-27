@@ -653,12 +653,7 @@ SIZE ControlPanelCore::get_min_size() const {
   return {min_width, min_height};
 }
 
-void ControlPanelCore::set_miniplayer_active(bool active) {
-  if (m_miniplayer_active != active) {
-    m_miniplayer_active = active;
-    invalidate();
-  }
-}
+
 
 void ControlPanelCore::notify_all_settings_changed() {
   std::vector<ControlPanelCore*> snapshot;
@@ -953,6 +948,40 @@ void ControlPanelCore::update_fonts() {
   m_font_artist.reset(make_font(lf_artist, get_nowbar_default_font(true)));
   m_font_line3.reset(make_font(lf_line3,  get_nowbar_default_font(true)));
   m_font_time.reset(make_font(lf_time,   get_nowbar_default_time_font()));
+
+  // Pre-measure volume number width and glyph vertical centering for "100"
+  if (m_font_time) {
+    Gdiplus::Graphics g_temp(hdc);
+    Gdiplus::StringFormat sfMeasure(Gdiplus::StringFormat::GenericTypographic());
+    sfMeasure.SetFormatFlags(sfMeasure.GetFormatFlags() | Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
+    Gdiplus::RectF bounds;
+    g_temp.MeasureString(L"100", -1, m_font_time.get(), Gdiplus::PointF(0, 0), &sfMeasure, &bounds);
+    m_volume_number_width = static_cast<int>(std::ceil(bounds.Width)) + static_cast<int>(4 * m_dpi_scale);
+
+    Gdiplus::FontFamily time_family;
+    m_font_time->GetFamily(&time_family);
+    int time_style = m_font_time->GetStyle();
+    UINT16 em_height = time_family.GetEmHeight(time_style);
+    UINT16 cell_ascent = time_family.GetCellAscent(time_style);
+    UINT16 cell_descent = time_family.GetCellDescent(time_style);
+    float font_size = m_font_time->GetSize();
+    float ascent_px = em_height ? font_size * cell_ascent / em_height : 0.0f;
+    float descent_px = em_height ? font_size * cell_descent / em_height : 0.0f;
+    m_volume_number_line_h = ascent_px + descent_px;
+
+    Gdiplus::GraphicsPath measure_path;
+    measure_path.AddString(L"100", -1, &time_family, time_style, font_size,
+                           Gdiplus::PointF(0.0f, 0.0f), &sfMeasure);
+    Gdiplus::RectF glyph_bounds;
+    measure_path.GetBounds(&glyph_bounds);
+    m_volume_number_glyph_y = glyph_bounds.Y;
+    m_volume_number_glyph_h = glyph_bounds.Height;
+  } else {
+    m_volume_number_width = static_cast<int>(28 * m_dpi_scale);
+    m_volume_number_glyph_y = 0.0f;
+    m_volume_number_glyph_h = 10.0f;
+    m_volume_number_line_h = 14.0f;
+  }
 
   ReleaseDC(m_hwnd, hdc);
 
@@ -1553,13 +1582,25 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Calculate total dimensions of all enabled right-side elements
   bool volume_bar_vis = get_nowbar_volume_bar_visible();
   bool volume_icon_vis = get_nowbar_volume_icon_visible();
+  bool volume_number_vis = get_nowbar_volume_number_enabled() && volume_bar_vis;
   bool volume_visible = volume_icon_vis || volume_bar_vis;
   int volume_width = 0;
+  int icon_size = volume_icon_vis ? static_cast<int>(23 * m_dpi_scale * m_size_scale) : 0;
+  int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
+  int num_width = volume_number_vis
+      ? ((m_volume_number_width > 0) ? m_volume_number_width : static_cast<int>(28 * m_dpi_scale))
+      : 0;
   if (volume_bar_vis) {
     volume_width = static_cast<int>(m_metrics.volume_width * m_size_scale);
   } else if (volume_icon_vis) {
     volume_width = static_cast<int>(23 * m_dpi_scale * m_size_scale);
   }
+
+  // Balance the distance from the center of the volume number to the mini-player icon
+  // with the distance from the left speaker icon to the custom buttons
+  int mp_spacing = (volume_number_vis && volume_bar_vis)
+      ? std::max(static_cast<int>(4 * m_dpi_scale), spacing - static_cast<int>(8 * m_dpi_scale * m_size_scale))
+      : spacing;
 
   bool mp_visible = get_nowbar_miniplayer_icon_visible();
   int mp_width = mp_visible ? button_size : 0;
@@ -1609,7 +1650,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     has_prev_right = true;
   }
   if (mp_visible) {
-    if (has_prev_right) right_group_width += spacing;
+    if (has_prev_right) right_group_width += (volume_visible ? mp_spacing : spacing);
     right_group_width += mp_width;
     has_prev_right = true;
   }
@@ -1689,7 +1730,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     int vol_x = cur_right_x;
     int vol_right = vol_x + volume_width;
     m_rect_volume = {vol_x, right_btn_y, vol_right, right_btn_y + button_size};
-    cur_right_x += volume_width + spacing;
+    cur_right_x += volume_width + (mp_visible ? mp_spacing : spacing);
   } else {
     m_rect_volume = {};
   }
@@ -1982,7 +2023,6 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
       draw_seekbar_tooltip(g);
     }
   }
-  draw_volume_tooltip(g);
 
   // Centralized animation loop: manage animation timer based on active animations
   if (get_nowbar_smooth_animations_enabled()) {
@@ -2041,66 +2081,23 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   int cache_w = cache_rect.right - cache_rect.left;
   int cache_h = cache_rect.bottom - cache_rect.top;
 
-  // First, restore the cached background (without spectrum or buttons)
+  // First, restore the cached clean background (without spectrum, buttons, or hover artifacts)
   if (m_spectrum_bg_cache_valid && m_spectrum_bg_hdc) {
     // Fast path: raw GDI BitBlt from cached background
     BitBlt(hdc, cache_rect.left, cache_rect.top, cache_w, cache_h,
            m_spectrum_bg_hdc, 0, 0, SRCCOPY);
   } else if (cache_w > 0 && cache_h > 0) {
-    // Slow path: draw background via GDI+, then capture into GDI cache
-    // Note: we do NOT draw buttons here - they will be drawn after the spectrum
+    // Slow path: draw clean background via GDI+, then capture into GDI cache
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
     g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
     g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
 
-    // Clip to individual element rects (not the union) so draw_background
-    // doesn't overwrite artwork or track info in the gaps between them.
-    // Each rect is padded by 2px to match the cache_rect inflation,
-    // covering anti-aliased curve stroke edges.
-    // Volume and miniplayer rects are included so the cache stores clean
-    // background under them — paint_spectrum_only() redraws these elements
-    // every frame, and without a clean base the anti-aliased edges of
-    // icons drawn on top of their cached prior rendering accumulate,
-    // causing a visible brightening artifact.
+    // Build clip region covering all redrawn elements (spectrum, thin progress,
+    // time display, track info, buttons, volume, miniplayer) while preserving artwork.
     Gdiplus::Region clip;
     clip.MakeEmpty();
-    clip.Union(Gdiplus::Rect(m_rect_spectrum_full.left - 2, m_rect_spectrum_full.top - 2,
-        m_rect_spectrum_full.right - m_rect_spectrum_full.left + 4,
-        m_rect_spectrum_full.bottom - m_rect_spectrum_full.top + 4));
-    clip.Union(Gdiplus::Rect(m_rect_thin_progress.left - 2, m_rect_thin_progress.top - 2,
-        m_rect_thin_progress.right - m_rect_thin_progress.left + 4,
-        m_rect_thin_progress.bottom - m_rect_thin_progress.top + 4));
-    clip.Union(Gdiplus::Rect(m_rect_time.left - 2, m_rect_time.top - 2,
-        m_rect_time.right - m_rect_time.left + 4,
-        m_rect_time.bottom - m_rect_time.top + 4));
-    if (m_rect_track_info.right > m_rect_track_info.left) {
-      clip.Union(Gdiplus::Rect(m_rect_track_info.left - 2, m_rect_track_info.top - 2,
-          m_rect_track_info.right - m_rect_track_info.left + 4,
-          m_rect_track_info.bottom - m_rect_track_info.top + 4));
-    }
-    if (m_rect_volume.right > m_rect_volume.left) {
-      // Volume icon hover circle: centered on icon, diameter = button height.
-      int icon_sz = static_cast<int>(23 * m_dpi_scale * m_size_scale);
-      int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
-      int vol_h = m_rect_volume.bottom - m_rect_volume.top;
-      int icon_base_x = get_nowbar_volume_bar_visible()
-          ? (m_rect_volume.left - icon_gap)
-          : m_rect_volume.left;
-      int icon_center_x = icon_base_x + icon_sz / 2;
-      int vol_left = icon_center_x - vol_h / 2;
-      clip.Union(Gdiplus::Rect(vol_left - 2, m_rect_volume.top - 2,
-          m_rect_volume.right - vol_left + 4, vol_h + 4));
-    }
-    if (m_rect_miniplayer.right > m_rect_miniplayer.left) {
-      clip.Union(Gdiplus::Rect(m_rect_miniplayer.left - 2, m_rect_miniplayer.top - 2,
-          m_rect_miniplayer.right - m_rect_miniplayer.left + 4,
-          m_rect_miniplayer.bottom - m_rect_miniplayer.top + 4));
-    }
-    // Exclude artwork so the padded element rects above don't bleed
-    // draw_background into the top rows of the artwork image.  Those
-    // pixels are only drawn during full paint(); overwriting them here
-    // would produce a visible gap that flickers on hover transitions.
+    clip.Union(Gdiplus::Rect(cache_rect.left, cache_rect.top, cache_w, cache_h));
     if (get_nowbar_cover_artwork_visible() &&
         m_rect_artwork.right > m_rect_artwork.left) {
       clip.Exclude(Gdiplus::Rect(m_rect_artwork.left, m_rect_artwork.top,
@@ -2133,101 +2130,8 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // This is drawn BEFORE buttons so spectrum appears behind them
   draw_full_spectrum(hdc);
 
-  // Restore background behind core button rects that extend above the spectrum
-  // area.  At small panel heights the track info text clamp pushes
-  // m_rect_spectrum_full.top below the button tops, so the cache_rect restore
-  // above does not cover them.  Without clearing, semi-transparent elements
-  // (hover circles at alpha 40, anti-aliased icon edges) accumulate on stale
-  // cache content each frame.  We draw background clipped to only the
-  // individual button rects to avoid overwriting artwork, track info, or volume.
-  {
-    int spec_top = m_rect_spectrum_full.top;
-    bool buttons_above_spectrum =
-        (m_rect_play.right > m_rect_play.left && m_rect_play.top < spec_top) ||
-        (m_rect_miniplayer.right > m_rect_miniplayer.left && m_rect_miniplayer.top < spec_top);
-    // Custom buttons are outside the spectrum area and always need full
-    // background restoration (via add_full_rect), so any enabled custom
-    // button should trigger this block.
-    bool has_cbuttons =
-        (m_rect_cbutton1.right > m_rect_cbutton1.left) ||
-        (m_rect_cbutton2.right > m_rect_cbutton2.left) ||
-        (m_rect_cbutton3.right > m_rect_cbutton3.left) ||
-        (m_rect_cbutton4.right > m_rect_cbutton4.left) ||
-        (m_rect_cbutton5.right > m_rect_cbutton5.left) ||
-        (m_rect_cbutton6.right > m_rect_cbutton6.left);
-    buttons_above_spectrum = buttons_above_spectrum || has_cbuttons;
-
-    if (buttons_above_spectrum) {
-      Gdiplus::Graphics g(hdc);
-      g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
-      g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
-      g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
-
-      // Build clip region from individual button rects that are above spectrum_top
-      Gdiplus::Region btn_clip;
-      btn_clip.MakeEmpty();
-
-      // Core buttons sit WITHIN the spectrum area — below spec_top the
-      // spectrum overlay provides their visual background, so we only
-      // restore background above spec_top to avoid gaps in the spectrum.
-      auto add_core_rect = [&](const RECT& r) {
-        if (r.right > r.left && r.top < spec_top) {
-          int w = r.right - r.left;
-          int h = r.bottom - r.top;
-          int pad_x = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
-          int pad_y = static_cast<int>(h * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
-          int left = r.left - pad_x;
-          int top = r.top - pad_y;
-          int right = r.right + pad_x;
-          int bottom = std::min((int)r.bottom + pad_y, spec_top);
-          btn_clip.Union(Gdiplus::Rect(left, top, right - left, bottom - top));
-        }
-      };
-      // Custom buttons sit OUTSIDE the spectrum area horizontally (right
-      // of the super button).  Below spec_top they have no spectrum overlay
-      // — only stale cached content from the previous full paint, which
-      // includes the button icon baked in.  Drawing a semi-transparent
-      // hover circle on top of the baked-in icon makes the lower half
-      // nearly invisible.  Restore their full rect so hover circles draw
-      // on a clean background both above and below spec_top.
-      auto add_full_rect = [&](const RECT& r) {
-        if (r.right > r.left && r.bottom > r.top) {
-          int w = r.right - r.left;
-          int h = r.bottom - r.top;
-          int pad_x = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
-          int pad_y = static_cast<int>(h * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
-          btn_clip.Union(Gdiplus::Rect(r.left - pad_x, r.top - pad_y,
-              w + pad_x * 2, h + pad_y * 2));
-        }
-      };
-      add_core_rect(m_rect_heart);
-      add_core_rect(m_rect_shuffle);
-      add_core_rect(m_rect_prev);
-      add_core_rect(m_rect_play);
-      add_core_rect(m_rect_next);
-      add_core_rect(m_rect_stop);
-      add_core_rect(m_rect_stop_after_current);
-      add_core_rect(m_rect_repeat);
-      add_core_rect(m_rect_super);
-      add_core_rect(m_rect_miniplayer);
-      for (int i = 0; i < 5; i++) add_core_rect(m_rect_stars[i]);
-      add_full_rect(m_rect_cbutton1);
-      add_full_rect(m_rect_cbutton2);
-      add_full_rect(m_rect_cbutton3);
-      add_full_rect(m_rect_cbutton4);
-      add_full_rect(m_rect_cbutton5);
-      add_full_rect(m_rect_cbutton6);
-
-      g.SetClip(&btn_clip);
-      draw_background(g, panel_rect);
-      g.ResetClip();
-    }
-  }
-
-  // Now draw track info and buttons ON TOP of the spectrum.
-  // The background cache restore above may overlap the track info area when
-  // the spectrum extends leftward in Scaling mode, erasing text. Redrawing
-  // track info here (without background) layers text over the spectrum bars.
+  // Now draw track info, buttons, progress bar, time, volume, and miniplayer ON TOP of the spectrum.
+  // Single GDI+ pass eliminates redundant Graphics allocations and per-frame background redraws.
   {
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
@@ -2237,90 +2141,14 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
 
     draw_track_info(g);
     draw_playback_buttons(g);
+    draw_thin_progress_bar(g);
+    draw_time_display_top_right(g);
+    draw_volume(g);
+    draw_miniplayer_button(g);
+
+    // Draw tooltips last so they render on top of all other elements
+    draw_thin_progress_tooltip(g);
   }
-
-  // Progress bar and time display still use GDI+ (lightweight, few calls)
-  Gdiplus::Graphics g2(hdc);
-  g2.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-  g2.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-  g2.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
-  draw_thin_progress_bar(g2);
-  draw_time_display_top_right(g2);
-
-  // Restore clean background under volume and miniplayer before redrawing.
-  // The background cache BitBlt covers the entire panel (because
-  // m_rect_thin_progress spans full width), so it restores stale rendered
-  // content in the volume/miniplayer areas from the previous full paint.
-  // Drawing icons on top of their cached prior rendering causes
-  // anti-aliased edge pixels to accumulate and visibly brighten.
-  {
-    Gdiplus::Graphics gv(hdc);
-    gv.SetSmoothingMode(Gdiplus::SmoothingModeNone);
-    gv.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
-    gv.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
-    Gdiplus::Region vol_clip;
-    vol_clip.MakeEmpty();
-    if (m_rect_volume.right > m_rect_volume.left) {
-      // Volume icon hover circle: centered on icon, diameter = button height.
-      int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
-      int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
-      int vol_h = m_rect_volume.bottom - m_rect_volume.top;
-      int icon_base_x = get_nowbar_volume_bar_visible()
-          ? (m_rect_volume.left - icon_gap)
-          : m_rect_volume.left;
-      int icon_center_x = icon_base_x + icon_size / 2;
-      int vol_left = icon_center_x - vol_h / 2;
-      vol_clip.Union(Gdiplus::Rect(vol_left, m_rect_volume.top,
-          m_rect_volume.right - vol_left, vol_h));
-    }
-    if (m_rect_miniplayer.right > m_rect_miniplayer.left) {
-      int mpw = m_rect_miniplayer.right - m_rect_miniplayer.left;
-      int mph = m_rect_miniplayer.bottom - m_rect_miniplayer.top;
-      int pad = static_cast<int>(mpw * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
-      vol_clip.Union(Gdiplus::Rect(
-          m_rect_miniplayer.left - pad, m_rect_miniplayer.top - pad,
-          mpw + pad * 2, mph + pad * 2));
-    }
-    // Exclude the time display rect — at minimum panel height it overlaps the
-    // volume/miniplayer area and we must not wipe the already-drawn text.
-    if (m_rect_time.right > m_rect_time.left) {
-      vol_clip.Exclude(Gdiplus::Rect(m_rect_time.left, m_rect_time.top,
-          m_rect_time.right - m_rect_time.left,
-          m_rect_time.bottom - m_rect_time.top));
-    }
-    // Exclude custom button rects — the volume icon hover circle region
-    // (icon_center_x ± vol_h/2) can extend leftward into adjacent custom
-    // buttons.  draw_playback_buttons() already drew hover circles on those
-    // buttons; wiping them here produces half-rendered hover circles.
-    auto exclude_cbutton = [&](const RECT& r) {
-      if (r.right > r.left) {
-        int w = r.right - r.left;
-        int h = r.bottom - r.top;
-        int pad = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 2;
-        vol_clip.Exclude(Gdiplus::Rect(r.left - pad, r.top - pad,
-            w + pad * 2, h + pad * 2));
-      }
-    };
-    exclude_cbutton(m_rect_cbutton1);
-    exclude_cbutton(m_rect_cbutton2);
-    exclude_cbutton(m_rect_cbutton3);
-    exclude_cbutton(m_rect_cbutton4);
-    exclude_cbutton(m_rect_cbutton5);
-    exclude_cbutton(m_rect_cbutton6);
-    if (!vol_clip.IsEmpty(&gv)) {
-      gv.SetClip(&vol_clip);
-      draw_background(gv, panel_rect);
-    }
-  }
-
-  draw_volume(g2);
-  draw_miniplayer_button(g2);
-
-  // Draw tooltips last so they render on top of all other elements
-  // (matches full paint path — without this, the background BitBlt above
-  // erases any tooltip drawn by a previous full paint, causing flicker)
-  draw_thin_progress_tooltip(g2);
-  draw_volume_tooltip(g2);
 }
 
 void ControlPanelCore::paint_waveform_only(HDC hdc, const RECT& panel_rect) {
@@ -3817,26 +3645,20 @@ void ControlPanelCore::draw_miniplayer_button(Gdiplus::Graphics &g) {
     mp_hover_color = Gdiplus::Color(40, GetRValue(m_theme_selection),
         GetGValue(m_theme_selection), GetBValue(m_theme_selection));
   }
-  Gdiplus::Color mp_secondary_color = use_light_foreground
+  Gdiplus::Color mp_color = use_light_foreground
       ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-  COLORREF mp_btn_accent = get_nowbar_custom_button_accent_enabled()
-      ? get_nowbar_button_accent_color() : m_theme_highlight;
-  Gdiplus::Color mp_accent_override(255, GetRValue(mp_btn_accent),
-      GetGValue(mp_btn_accent), GetBValue(mp_btn_accent));
 
   if (mp_hovered && get_nowbar_hover_circles_enabled()) {
     Gdiplus::SolidBrush hoverBrush(mp_hover_color);
     g.FillEllipse(&hoverBrush, m_rect_miniplayer.left, m_rect_miniplayer.top,
                   mp_w, mp_h);
   }
-  Gdiplus::Color mpColor =
-      m_miniplayer_active ? mp_accent_override : mp_secondary_color;
   float mp_scale = mp_hovered ? HOVER_SCALE_FACTOR : 1.0f;
   int mp_inset = static_cast<int>(mp_w * (1.0f - 0.70f * mp_scale) / 2.0f);
   RECT miniplayerIconRect = {
       m_rect_miniplayer.left + mp_inset, m_rect_miniplayer.top + mp_inset,
       m_rect_miniplayer.right - mp_inset, m_rect_miniplayer.bottom - mp_inset};
-  draw_miniplayer_icon(g, miniplayerIconRect, mpColor);
+  draw_miniplayer_icon(g, miniplayerIconRect, mp_color);
 }
 
 void ControlPanelCore::draw_seekbar_tooltip(Gdiplus::Graphics &g) {
@@ -5757,22 +5579,14 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     vol_level = (level <= 0.5f) ? 1 : 2;
   }
 
-  // Icon dimensions needed for bar offset calculation
-  int icon_size =
-      static_cast<int>(23 * m_dpi_scale * m_size_scale); // Volume icon (scaled)
-  int icon_gap = static_cast<int>(6 * m_dpi_scale *
-                                  m_size_scale); // Extra gap to move icon left
+  // Icon dimensions
+  int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+  int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
 
   if (get_nowbar_volume_icon_visible()) {
     // Draw custom volume icon (scaled with panel height) - always grayed
     int icon_y = m_rect_volume.top + (h - icon_size) / 2;
-
-    // When the bar is visible the icon sits to the LEFT of m_rect_volume
-    // (the bar fills the rect). When the bar is hidden the rect was shrunk
-    // to icon-only width, so the icon sits AT m_rect_volume.left.
-    int icon_base_x = get_nowbar_volume_bar_visible()
-        ? (m_rect_volume.left - icon_gap)
-        : m_rect_volume.left;
+    int icon_base_x = m_rect_volume.left;
 
     // Hover circle on volume icon (same pattern as MiniPlayer button)
     bool icon_hovered = (m_hover_region == HitRegion::VolumeIcon);
@@ -5796,173 +5610,131 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
   }
 
   if (get_nowbar_volume_bar_visible()) {
-  // Volume bar - use same thickness as seekbar
-  int bar_offset =
-      icon_size +
-      static_cast<int>(12 * m_dpi_scale * m_size_scale); // Icon + gap (scaled)
-  int bar_x = m_rect_volume.left + bar_offset;
-  int bar_w = w - bar_offset;
-  int bar_h = static_cast<int>(m_metrics.seekbar_height * m_size_scale);
-  int bar_y = m_rect_volume.top + (h - bar_h) / 2;
-  int radius = bar_h / 2;
-  bool is_pill = (get_nowbar_bar_style() == 0); // 0=Pill-shaped, 1=Rectangular
+    // Volume bar - use same thickness as seekbar
+    bool volume_icon_vis = get_nowbar_volume_icon_visible();
+    bool volume_number_vis = get_nowbar_volume_number_enabled();
+    int num_width = volume_number_vis
+        ? ((m_volume_number_width > 0) ? m_volume_number_width : static_cast<int>(28 * m_dpi_scale))
+        : 0;
 
-  // Background - theme-aware track color
-  Gdiplus::Color trackColor;
-  bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
+    int bar_x = m_rect_volume.left + (volume_icon_vis ? (icon_size + vol_gap) : 0);
+    int bar_w = (m_rect_volume.right - (volume_number_vis ? (vol_gap + num_width) : 0)) - bar_x;
+    if (bar_w < 10) bar_w = 10;
+    int bar_h = static_cast<int>(m_metrics.seekbar_height * m_size_scale);
+    int bar_y = m_rect_volume.top + (h - bar_h) / 2;
+    int radius = bar_h / 2;
+    bool is_pill = (get_nowbar_bar_style() == 0); // 0=Pill-shaped, 1=Rectangular
 
-  if (get_nowbar_custom_volume_track_enabled()) {
-    // Custom color overrides everything
-    COLORREF tc = get_nowbar_volume_track_color();
-    trackColor = Gdiplus::Color(255, GetRValue(tc), GetGValue(tc), GetBValue(tc));
-  } else if (has_artwork_bg) {
-    // Artwork backgrounds: approximate the rendered background color
-    int r = m_artwork_color_primary.GetR();
-    int g = m_artwork_color_primary.GetG();
-    int b = m_artwork_color_primary.GetB();
-    BYTE ov = (bg_style == 1) ? (m_dark_mode ? 120 : 80)
-                               : (m_dark_mode ? 140 : 180);
-    r = r * (255 - ov) / 255 + 15;
-    g = g * (255 - ov) / 255 + 15;
-    b = b * (255 - ov) / 255 + 15;
-    trackColor = Gdiplus::Color(255, std::min(r, 255), std::min(g, 255), std::min(b, 255));
-  } else {
-    // Solid background: use theme-appropriate track color
-    trackColor = Gdiplus::Color(255, GetRValue(m_track_color),
-        GetGValue(m_track_color), GetBValue(m_track_color));
-  }
-  Gdiplus::SolidBrush trackBrush(trackColor);
-  if (is_pill) {
-    Gdiplus::GraphicsPath trackPath;
-    int r = std::min(radius, bar_w / 2);
-    trackPath.AddArc(bar_x, bar_y, r * 2, bar_h, 90, 180);
-    trackPath.AddArc(bar_x + bar_w - r * 2, bar_y, r * 2, bar_h, 270, 180);
-    trackPath.CloseFigure();
-    g.FillPath(&trackBrush, &trackPath);
-  } else {
-    g.FillRectangle(&trackBrush, bar_x, bar_y, bar_w, bar_h);
-  }
+    // Background - theme-aware track color
+    Gdiplus::Color trackColor;
+    bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
 
-  // Level - use perceptual mapping so slider reflects perceived loudness
-  float bar_level = db_to_slider(m_state.volume_db);
-  int level_w = static_cast<int>(bar_w * bar_level);
-
-  if (level_w > 0) {
-    // Get custom volume accent color from preferences
-    COLORREF vol_accent = get_nowbar_custom_volume_accent_enabled()
-        ? get_nowbar_volume_accent_color() : m_theme_highlight;
-    Gdiplus::SolidBrush levelBrush(
-        Gdiplus::Color(255, GetRValue(vol_accent), GetGValue(vol_accent), GetBValue(vol_accent)));
-    if (is_pill && level_w > radius * 2) {
-      Gdiplus::GraphicsPath levelPath;
-      int r = std::min(radius, level_w / 2);
-      levelPath.AddArc(bar_x, bar_y, r * 2, bar_h, 90, 180);
-      levelPath.AddArc(bar_x + level_w - r * 2, bar_y, r * 2, bar_h, 270, 180);
-      levelPath.CloseFigure();
-      g.FillPath(&levelBrush, &levelPath);
-    } else if (is_pill) {
-      // Too small for pill, just draw circle
-      g.FillEllipse(&levelBrush, bar_x, bar_y, bar_h, bar_h);
+    if (get_nowbar_custom_volume_track_enabled()) {
+      // Custom color overrides everything
+      COLORREF tc = get_nowbar_volume_track_color();
+      trackColor = Gdiplus::Color(255, GetRValue(tc), GetGValue(tc), GetBValue(tc));
+    } else if (has_artwork_bg) {
+      // Artwork backgrounds: approximate the rendered background color
+      int r = m_artwork_color_primary.GetR();
+      int g = m_artwork_color_primary.GetG();
+      int b = m_artwork_color_primary.GetB();
+      BYTE ov = (bg_style == 1) ? (m_dark_mode ? 120 : 80)
+                                 : (m_dark_mode ? 140 : 180);
+      r = r * (255 - ov) / 255 + 15;
+      g = g * (255 - ov) / 255 + 15;
+      b = b * (255 - ov) / 255 + 15;
+      trackColor = Gdiplus::Color(255, std::min(r, 255), std::min(g, 255), std::min(b, 255));
     } else {
-      g.FillRectangle(&levelBrush, bar_x, bar_y, level_w, bar_h);
+      // Solid background: use theme-appropriate track color
+      trackColor = Gdiplus::Color(255, GetRValue(m_track_color),
+          GetGValue(m_track_color), GetBValue(m_track_color));
     }
-  }
+    Gdiplus::SolidBrush trackBrush(trackColor);
+    if (is_pill) {
+      Gdiplus::GraphicsPath trackPath;
+      int r = std::min(radius, bar_w / 2);
+      trackPath.AddArc(bar_x, bar_y, r * 2, bar_h, 90, 180);
+      trackPath.AddArc(bar_x + bar_w - r * 2, bar_y, r * 2, bar_h, 270, 180);
+      trackPath.CloseFigure();
+      g.FillPath(&trackBrush, &trackPath);
+    } else {
+      g.FillRectangle(&trackBrush, bar_x, bar_y, bar_w, bar_h);
+    }
 
-  // Volume handle dot (only on hover or drag) - uses highlight color
-  if (m_hover_region == HitRegion::VolumeSlider || m_volume_dragging) {
-    int handle_size = bar_h * 2;
-    int handle_x = bar_x + level_w - handle_size / 2;
-    int handle_y = m_rect_volume.top + (h - handle_size) / 2;
-    COLORREF vol_handle_accent = get_nowbar_custom_volume_accent_enabled()
-        ? get_nowbar_volume_accent_color() : m_theme_highlight;
-    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255,
-        GetRValue(vol_handle_accent), GetGValue(vol_handle_accent), GetBValue(vol_handle_accent)));
-    g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
-  }
+    // Level - use perceptual mapping so slider reflects perceived loudness
+    float bar_level = db_to_slider(m_state.volume_db);
+    int level_w = static_cast<int>(bar_w * bar_level);
+
+    if (level_w > 0) {
+      // Get custom volume accent color from preferences
+      COLORREF vol_accent = get_nowbar_custom_volume_accent_enabled()
+          ? get_nowbar_volume_accent_color() : m_theme_highlight;
+      Gdiplus::SolidBrush levelBrush(
+          Gdiplus::Color(255, GetRValue(vol_accent), GetGValue(vol_accent), GetBValue(vol_accent)));
+      if (is_pill && level_w > radius * 2) {
+        Gdiplus::GraphicsPath levelPath;
+        int r = std::min(radius, level_w / 2);
+        levelPath.AddArc(bar_x, bar_y, r * 2, bar_h, 90, 180);
+        levelPath.AddArc(bar_x + level_w - r * 2, bar_y, r * 2, bar_h, 270, 180);
+        levelPath.CloseFigure();
+        g.FillPath(&levelBrush, &levelPath);
+      } else if (is_pill) {
+        // Too small for pill, just draw circle
+        g.FillEllipse(&levelBrush, bar_x, bar_y, bar_h, bar_h);
+      } else {
+        g.FillRectangle(&levelBrush, bar_x, bar_y, level_w, bar_h);
+      }
+    }
+
+    // Volume handle dot (only on hover or drag) - uses highlight color
+    if (m_hover_region == HitRegion::VolumeSlider || m_volume_dragging) {
+      int handle_size = bar_h * 2;
+      int handle_x = bar_x + level_w - handle_size / 2;
+      int handle_y = m_rect_volume.top + (h - handle_size) / 2;
+      COLORREF vol_handle_accent = get_nowbar_custom_volume_accent_enabled()
+          ? get_nowbar_volume_accent_color() : m_theme_highlight;
+      Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255,
+          GetRValue(vol_handle_accent), GetGValue(vol_handle_accent), GetBValue(vol_handle_accent)));
+      g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
+    }
+
+    // Volume number (1-100, or 0 on mute) displayed after the volume bar
+    if (volume_number_vis && m_font_time) {
+      int vol_percent;
+      if (m_state.volume_db <= -100.0f) {
+        vol_percent = 0;
+      } else {
+        vol_percent = static_cast<int>(std::round(bar_level * 100.0f));
+        if (vol_percent < 1 && m_state.volume_db > -100.0f) vol_percent = 1;
+        if (vol_percent > 100) vol_percent = 100;
+      }
+
+      wchar_t num_str[16];
+      swprintf_s(num_str, L"%d", vol_percent);
+
+      Gdiplus::Color num_color = use_light_foreground
+          ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+      COLORREF custom_time_color;
+      if (get_nowbar_time_font_color(custom_time_color)) {
+        num_color = Gdiplus::Color(255, GetRValue(custom_time_color), GetGValue(custom_time_color), GetBValue(custom_time_color));
+      }
+      Gdiplus::SolidBrush numBrush(num_color);
+
+      int bar_center_y = bar_y + bar_h / 2;
+      float num_top = static_cast<float>(bar_center_y) - m_volume_number_glyph_y - m_volume_number_glyph_h / 2.0f;
+      float num_height = m_volume_number_line_h;
+
+      Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
+      sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+      sf.SetLineAlignment(Gdiplus::StringAlignmentNear);
+      sf.SetFormatFlags(sf.GetFormatFlags() | Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
+
+      int num_x = bar_x + bar_w + vol_gap;
+      Gdiplus::RectF numRect(static_cast<float>(num_x), num_top,
+                             static_cast<float>(num_width), num_height);
+      g.DrawString(num_str, -1, m_font_time.get(), numRect, &sf, &numBrush);
+    }
   } // volume bar visible
-
-}
-
-void ControlPanelCore::draw_volume_tooltip(Gdiplus::Graphics &g) {
-  if (!m_volume_wheel_active)
-    return;
-  if (!get_nowbar_volume_bar_visible())
-    return;
-
-  // Recompute bar geometry (same as draw_volume)
-  int w = m_rect_volume.right - m_rect_volume.left;
-  int h = m_rect_volume.bottom - m_rect_volume.top;
-  int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
-  int bar_offset = icon_size + static_cast<int>(12 * m_dpi_scale * m_size_scale);
-  int bar_x = m_rect_volume.left + bar_offset;
-  int bar_w = w - bar_offset;
-  int bar_h = static_cast<int>(m_metrics.seekbar_height * m_size_scale);
-  int bar_y = m_rect_volume.top + (h - bar_h) / 2;
-
-  float bar_level = db_to_slider(m_state.volume_db);
-  int level_w = static_cast<int>(bar_w * bar_level);
-
-  // Calculate dB at cursor position for hover, or use current volume for drag
-  float tooltip_db;
-  int cursor_x;
-  if (m_volume_dragging) {
-    tooltip_db = m_state.volume_db;
-    cursor_x = bar_x + level_w;
-  } else {
-    cursor_x = m_volume_hover_x;
-    double pos = static_cast<double>(cursor_x - bar_x) / bar_w;
-    pos = std::max(0.0, std::min(1.0, pos));
-    tooltip_db = slider_to_db(static_cast<float>(pos));
-  }
-
-  // Format dB string
-  std::wstring dbStr;
-  if (tooltip_db <= -100.0f) {
-    dbStr = L"\u2212\u221E dB";  // −∞ dB
-  } else {
-    wchar_t buf[32];
-    swprintf_s(buf, L"%.1f dB", tooltip_db);
-    dbStr = buf;
-  }
-
-  // Measure text size
-  Gdiplus::Font tooltipFont(L"Segoe UI", 10.0f * m_dpi_scale, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-  Gdiplus::RectF textBounds;
-  g.MeasureString(dbStr.c_str(), -1, &tooltipFont, Gdiplus::PointF(0, 0), &textBounds);
-
-  // Tooltip dimensions with padding
-  int padding_h = static_cast<int>(6 * m_dpi_scale);
-  int padding_v = static_cast<int>(3 * m_dpi_scale);
-  int tooltip_w = static_cast<int>(textBounds.Width) + padding_h * 2;
-  int tooltip_h = static_cast<int>(textBounds.Height) + padding_v * 2;
-
-  // Position: centered on cursor X, above volume bar
-  int tooltip_x = cursor_x - tooltip_w / 2;
-  int tooltip_y = bar_y - tooltip_h - static_cast<int>(6 * m_dpi_scale);
-
-  // Clamp to stay within volume bar bounds
-  tooltip_x = std::max(bar_x, std::min(tooltip_x, bar_x + bar_w - tooltip_w));
-
-  // Draw tooltip background (semi-transparent, themed)
-  Gdiplus::Color bgColor = m_dark_mode ? Gdiplus::Color(220, 60, 60, 60) : Gdiplus::Color(220, 40, 40, 40);
-  Gdiplus::SolidBrush bgBrush(bgColor);
-  int corner = static_cast<int>(4 * m_dpi_scale);
-  Gdiplus::GraphicsPath tooltipPath;
-  tooltipPath.AddArc(tooltip_x, tooltip_y, corner * 2, corner * 2, 180, 90);
-  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y, corner * 2, corner * 2, 270, 90);
-  tooltipPath.AddArc(tooltip_x + tooltip_w - corner * 2, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 0, 90);
-  tooltipPath.AddArc(tooltip_x, tooltip_y + tooltip_h - corner * 2, corner * 2, corner * 2, 90, 90);
-  tooltipPath.CloseFigure();
-  g.FillPath(&bgBrush, &tooltipPath);
-
-  // Draw tooltip text
-  Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
-  Gdiplus::StringFormat sf;
-  sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-  sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-  Gdiplus::RectF textRect(static_cast<float>(tooltip_x), static_cast<float>(tooltip_y),
-                          static_cast<float>(tooltip_w), static_cast<float>(tooltip_h));
-  g.DrawString(dbStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
 }
 
 HitRegion ControlPanelCore::hit_test(int x, int y) const {
@@ -6011,26 +5783,20 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
     if (get_nowbar_cbutton_enabled(5) && pt_in_rect(m_rect_cbutton6, x, y))
       return HitRegion::CButton6;
   }
-  // Volume area - check both icon (positioned left of rect) and slider
+  // Volume area - check both icon and slider
   if (get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible()) {
-    int icon_gap = static_cast<int>(6 * m_dpi_scale * m_size_scale);
-    int icon_width =
-        static_cast<int>(23 * m_dpi_scale * m_size_scale); // Match volume icon
-    // When the bar is visible the icon sits to the left of m_rect_volume,
-    // so expand the hit rect left by icon_gap. When only the icon is
-    // visible, m_rect_volume already bounds the icon exactly.
-    RECT expanded_volume = get_nowbar_volume_bar_visible()
-        ? RECT{m_rect_volume.left - icon_gap, m_rect_volume.top,
-               m_rect_volume.right, m_rect_volume.bottom}
-        : m_rect_volume;
-    if (pt_in_rect(expanded_volume, x, y)) {
-      // Check if click is on icon area or slider bar
-      if (get_nowbar_volume_icon_visible() &&
-          (!get_nowbar_volume_bar_visible() ||
-           x < m_rect_volume.left + icon_width - icon_gap)) {
+    if (pt_in_rect(m_rect_volume, x, y)) {
+      if (get_nowbar_volume_icon_visible() && get_nowbar_volume_bar_visible()) {
+        int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+        int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
+        if (x < m_rect_volume.left + icon_size + vol_gap / 2) {
+          return HitRegion::VolumeIcon;
+        } else {
+          return HitRegion::VolumeSlider;
+        }
+      } else if (get_nowbar_volume_icon_visible()) {
         return HitRegion::VolumeIcon;
-      }
-      if (get_nowbar_volume_bar_visible()) {
+      } else if (get_nowbar_volume_bar_visible()) {
         return HitRegion::VolumeSlider;
       }
     }
@@ -6046,7 +5812,6 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
 }
 
 void ControlPanelCore::on_mouse_move(int x, int y) {
-  m_volume_wheel_active = false;
   HitRegion new_region = hit_test(x, y);
 
   if (m_seeking) {
@@ -6065,13 +5830,17 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
   }
 
   if (m_volume_dragging) {
-    int icon_size =
-        static_cast<int>(23 * m_dpi_scale * m_size_scale); // Match volume icon
-    int bar_offset =
-        icon_size +
-        static_cast<int>(12 * m_dpi_scale * m_size_scale); // Match draw_volume
-    int bar_x = m_rect_volume.left + bar_offset;
-    int bar_w = (m_rect_volume.right - m_rect_volume.left) - bar_offset;
+    bool volume_icon_vis = get_nowbar_volume_icon_visible();
+    bool volume_number_vis = get_nowbar_volume_number_enabled();
+    int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+    int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
+    int num_width = volume_number_vis
+        ? ((m_volume_number_width > 0) ? m_volume_number_width : static_cast<int>(28 * m_dpi_scale))
+        : 0;
+
+    int bar_x = m_rect_volume.left + (volume_icon_vis ? (icon_size + vol_gap) : 0);
+    int bar_w = (m_rect_volume.right - (volume_number_vis ? (vol_gap + num_width) : 0)) - bar_x;
+    if (bar_w < 1) bar_w = 1;
     double level = static_cast<double>(x - bar_x) / bar_w;
     level = std::max(0.0, std::min(1.0, level));
     float db = slider_to_db(static_cast<float>(level));
@@ -6082,7 +5851,6 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     invalidate();
     return;
   }
-
 
   if (new_region != m_hover_region) {
     // Track previous hover for fade-out animation
@@ -6260,7 +6028,6 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
 }
 
 void ControlPanelCore::on_mouse_leave() {
-  m_volume_wheel_active = false;
   m_rating_hover_star = 0;
 
   if (m_hover_region != HitRegion::None) {
@@ -6409,11 +6176,7 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
       show_autoplaylist_menu();
       break;
     case HitRegion::MiniPlayerButton: {
-      // Toggle MiniPlayer active state for icon color
-      m_miniplayer_active = !m_miniplayer_active;
-
-      // Launch MiniPlayer via mainmenu command
-      // Iterate through mainmenu commands to find "Launch MiniPlayer"
+      // Launch / reveal MiniPlayer via mainmenu command
       service_enum_t<mainmenu_commands> e;
       mainmenu_commands::ptr ptr;
       while (e.next(ptr)) {
@@ -6626,7 +6389,6 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
 void ControlPanelCore::on_mouse_wheel(int delta) {
   // Adjust volume with mouse wheel using position-based stepping
   // to match foobar2000's default volume control (scroll_step = 20/1000).
-  m_volume_wheel_active = true;
   auto pc = playback_control::get();
   // Step in slider position space (0.0 to 1.0), matching SDK's 20/1000
   constexpr float position_step = 20.0f / 1000.0f;
@@ -6637,13 +6399,6 @@ void ControlPanelCore::on_mouse_wheel(int delta) {
   pc->set_volume(new_volume);
   // Update local state for immediate visual feedback (same as drag handler)
   m_state.volume_db = new_volume;
-  // Update hover X to match new volume position so tooltip shows current dB
-  int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
-  int bar_offset = icon_size + static_cast<int>(12 * m_dpi_scale * m_size_scale);
-  int bar_x = m_rect_volume.left + bar_offset;
-  int bar_w = (m_rect_volume.right - m_rect_volume.left) - bar_offset;
-  float bar_level = db_to_slider(new_volume);
-  m_volume_hover_x = bar_x + static_cast<int>(bar_w * bar_level);
   invalidate();
 }
 
