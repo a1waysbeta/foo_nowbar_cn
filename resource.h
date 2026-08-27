@@ -241,6 +241,10 @@
 #define IDC_SEEKBAR_VISIBLE_LABEL        1542
 #define IDC_SEEKBAR_VISIBLE_COMBO        1543
 
+// Volume Number controls (Appearance tab)
+#define IDC_VOLUME_NUMBER_LABEL          1545
+#define IDC_VOLUME_NUMBER_COMBO          1546
+
 // Shuffle/Repeat visibility controls (Icons tab)
 #define IDC_SHUFFLE_ICON_LABEL           1533
 #define IDC_SHUFFLE_ICON_COMBO           1534
