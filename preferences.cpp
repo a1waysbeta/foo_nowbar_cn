@@ -656,6 +656,11 @@ static cfg_int cfg_nowbar_3d_buttons(
     1  // Default: Enabled (3D style)
 );
 
+static cfg_int cfg_nowbar_volume_number(
+    GUID{0xABCDEFC2, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC2}},
+    0  // Default: Disabled
+);
+
 //=============================================================================
 // Config File for All 12 Custom Buttons
 // Buttons 1-6: Visible on panel, have enabled/icon fields
@@ -1747,6 +1752,10 @@ bool get_nowbar_volume_icon_visible() {
 
 bool get_nowbar_volume_bar_visible() {
     return cfg_nowbar_volume_bar_visible != 0;
+}
+
+bool get_nowbar_volume_number_enabled() {
+    return cfg_nowbar_volume_number != 0;
 }
 
 
@@ -3005,6 +3014,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_FOO_ARTWORK_LINK), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_LABEL), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_COMBO), show_appearance);
 
     // Icons tab controls (Tab 2)
     BOOL show_icons = (tab == 2) ? SW_SHOW : SW_HIDE;
@@ -3395,6 +3406,14 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(h3dButtonsCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
             SendMessage(h3dButtonsCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
             SendMessage(h3dButtonsCombo, CB_SETCURSEL, cfg_nowbar_3d_buttons ? 0 : 1, 0);
+        }
+
+        // Initialize Volume Number combobox
+        {
+            HWND hVolNumCombo = GetDlgItem(hwnd, IDC_VOLUME_NUMBER_COMBO);
+            SendMessage(hVolNumCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
+            SendMessage(hVolNumCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
+            SendMessage(hVolNumCombo, CB_SETCURSEL, cfg_nowbar_volume_number ? 1 : 0, 0);
         }
 
         // Initialize background style combobox
@@ -3800,6 +3819,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_PLAY_ICON_STYLE_COMBO:
         case IDC_AUTOHIDE_CBUTTONS_COMBO:
         case IDC_CBUTTON_3D_COMBO:
+        case IDC_VOLUME_NUMBER_COMBO:
         case IDC_VOLUME_ICON_COMBO:
         case IDC_VOLUME_BAR_COMBO:
         case IDC_MOOD_TAG_COMBO:
@@ -4707,6 +4727,10 @@ void nowbar_preferences::apply_settings() {
         int threeDButtonsSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_3d_buttons = (threeDButtonsSel == 0) ? 1 : 0;
 
+        // Save Volume Number setting (0=Disabled, 1=Enabled in combobox -> config 0=Disabled, 1=Enabled)
+        int volNumSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_COMBO), CB_GETCURSEL, 0, 0);
+        cfg_nowbar_volume_number = (volNumSel == 1) ? 1 : 0;
+
         // Save cover artwork visibility (0=Yes, 1=No in combobox -> config 1=Yes, 0=No)
         int coverArtworkSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_cover_artwork_visible = (coverArtworkSel == 0) ? 1 : 0;
@@ -5010,6 +5034,8 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), CB_SETCURSEL, 1, 0);  // Default: Disabled (index 1)
             CheckDlgButton(m_hwnd, IDC_ONLINE_ARTWORK_CHECK, BST_UNCHECKED);
             SendMessage(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), CB_SETCURSEL, 0, 0);  // Default: Enabled
+            cfg_nowbar_volume_number = 0;  // Default: Disabled
+            SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_COMBO), CB_SETCURSEL, 0, 0);  // Default: Disabled
             update_cover_margin_state(m_hwnd);  // Re-enable Cover Margin (Cover Artwork is Yes)
         } else if (m_current_tab == 2) {
             // Reset Icons tab settings
