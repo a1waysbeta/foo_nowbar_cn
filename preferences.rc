@@ -70,8 +70,10 @@ BEGIN
     COMBOBOX        IDC_SMOOTH_ANIMATIONS_COMBO, 90, 186, 100, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "3D Buttons:", IDC_CBUTTON_3D_LABEL, 16, 206, 50, 12
     COMBOBOX        IDC_CBUTTON_3D_COMBO, 90, 204, 100, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    AUTOCHECKBOX    "Online Artwork", IDC_ONLINE_ARTWORK_CHECK, 16, 224, 60, 12
-    CONTROL         "(requires <a href=""https://github.com/jame25/foo_artwork"">foo_artwork</a>)", IDC_FOO_ARTWORK_LINK, "SysLink", 0, 76, 226, 100, 12
+    LTEXT           "Volume Number:", IDC_VOLUME_NUMBER_LABEL, 16, 224, 60, 12
+    COMBOBOX        IDC_VOLUME_NUMBER_COMBO, 80, 222, 110, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    AUTOCHECKBOX    "Online Artwork", IDC_ONLINE_ARTWORK_CHECK, 16, 242, 60, 12
+    CONTROL         "(requires <a href=""https://github.com/jame25/foo_artwork"">foo_artwork</a>)", IDC_FOO_ARTWORK_LINK, "SysLink", 0, 76, 244, 100, 12
 
     // === Icons Tab Controls (Tab 2) ===
     LTEXT           "Mood Icon:", IDC_MOOD_ICON_LABEL, 16, 26, 50, 12
