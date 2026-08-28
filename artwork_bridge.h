@@ -30,12 +30,18 @@ void shutdown_artwork_bridge();
 
 // Check if foo_artwork integration is available
 inline bool is_artwork_bridge_available() {
+    if (!g_artwork_search) {
+        init_artwork_bridge();
+    }
     return g_artwork_search != nullptr;
 }
 
 // Request artwork from foo_artwork for given artist/title
 // No-op if bridge not available or online artwork disabled
 void request_online_artwork(const char* artist, const char* title);
+
+// Clear any pending online artwork from previous search and reset search deduplication
+void clear_pending_online_artwork();
 
 // Check if artwork was received from foo_artwork
 bool has_pending_online_artwork();
