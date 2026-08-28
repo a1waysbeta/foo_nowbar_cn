@@ -32,6 +32,7 @@ bool get_nowbar_cbutton_autohide();  // true=Yes (auto-hide), false=No
 bool get_nowbar_volume_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_volume_bar_visible();  // true=Show, false=Hidden
 bool get_nowbar_volume_number_enabled();  // true=Enabled, false=Disabled
+bool get_nowbar_playback_time_visible();  // true=Show, false=Hidden
 bool get_nowbar_infinite_playback_enabled();  // true=Enabled, false=Disabled
 void set_nowbar_infinite_playback_enabled(bool enabled);  // Toggle infinite playback mode
 int get_nowbar_preview_mode();  // 0=Off, 1=35%, 2=50%, 3=60sec
@@ -77,14 +78,14 @@ COLORREF get_nowbar_volume_track_color();
 bool get_nowbar_custom_volume_track_enabled();
 bool get_nowbar_online_artwork();  // true=Enabled, false=Disabled (requires foo_artwork)
 bool get_nowbar_custom_button_visible();  // true=Show, false=Hidden
-int get_nowbar_custom_button_action();  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder
+int get_nowbar_custom_button_action();  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder, 5=Output Device
 pfc::string8 get_nowbar_custom_button_url();
 pfc::string8 get_nowbar_custom_button_executable();
 pfc::string8 get_nowbar_custom_button_fb2k_action();
 
 // Multi-button configuration accessors (for Custom Button tab)
 bool get_nowbar_cbutton_enabled(int button_index);  // 0-5, returns enabled state
-int get_nowbar_cbutton_action(int button_index);    // 0-5, returns action 0-3
+int get_nowbar_cbutton_action(int button_index);    // 0-5, returns action 0-5
 pfc::string8 get_nowbar_cbutton_path(int button_index);  // 0-5, returns path string
 pfc::string8 get_nowbar_cbutton_icon_path(int button_index);  // 0-5, returns glyph character string
 int get_nowbar_cbutton_glyph_size(int button_index);  // 0-5, returns glyph size percentage (default 80)
@@ -93,7 +94,7 @@ pfc::string8 get_nowbar_cbutton_label(int button_index);  // 0-5, returns toolti
 bool get_nowbar_3d_buttons_enabled();  // true=3D raised style, false=flat style
 
 // Config file accessors for all 12 custom buttons (buttons 7-12 are hidden, keyboard-only)
-int get_config_button_action(int button_index);       // 0-11, returns action 0-3 from config file
+int get_config_button_action(int button_index);       // 0-11, returns action 0-5 from config file
 pfc::string8 get_config_button_path(int button_index);  // 0-11, returns path from config file
 pfc::string8 get_config_button_label(int button_index); // 0-11, returns label from config file
 void reload_custom_button_config();  // Reload config file from disk
