@@ -3,6 +3,7 @@
 #include "preferences.h"
 #include "core/control_panel_core.h"
 #include <mutex>
+#include <string>
 
 // Global function pointers
 pfn_foo_artwork_search g_artwork_search = nullptr;
@@ -19,21 +20,24 @@ static std::mutex g_pending_mutex;
 static HBITMAP g_pending_artwork_bitmap = nullptr;
 static bool g_has_pending_artwork = false;
 
+// Last requested artist & title for search deduplication
+static std::string g_last_requested_artist;
+static std::string g_last_requested_title;
+
 // Callback function that receives artwork results from foo_artwork.
 // Called on foo_artwork's worker thread - must synchronize and marshal to main thread.
 static void artwork_result_callback(bool success, HBITMAP bitmap) {
     if (success && bitmap) {
-        {
-            std::lock_guard<std::mutex> lock(g_pending_mutex);
-            g_pending_artwork_bitmap = bitmap;
-            g_has_pending_artwork = true;
-        }
-
-        // Marshal notification to main thread
-        fb2k::inMainThread([]() {
-            nowbar::ControlPanelCore::notify_online_artwork_received();
-        });
+        std::lock_guard<std::mutex> lock(g_pending_mutex);
+        g_pending_artwork_bitmap = bitmap;
+        g_has_pending_artwork = true;
     }
+
+    // Always marshal notification to main thread so that title formats (%foo_artwork_title%, %foo_artwork_artist%)
+    // and UI repaints are updated even if no artwork image was found in API search
+    fb2k::inMainThread([]() {
+        nowbar::ControlPanelCore::notify_online_artwork_received();
+    });
 }
 
 bool init_artwork_bridge() {
@@ -80,6 +84,16 @@ void shutdown_artwork_bridge() {
     std::lock_guard<std::mutex> lock(g_pending_mutex);
     g_pending_artwork_bitmap = nullptr;
     g_has_pending_artwork = false;
+    g_last_requested_artist.clear();
+    g_last_requested_title.clear();
+}
+
+void clear_pending_online_artwork() {
+    std::lock_guard<std::mutex> lock(g_pending_mutex);
+    g_pending_artwork_bitmap = nullptr;
+    g_has_pending_artwork = false;
+    g_last_requested_artist.clear();
+    g_last_requested_title.clear();
 }
 
 void request_online_artwork(const char* artist, const char* title) {
@@ -90,18 +104,31 @@ void request_online_artwork(const char* artist, const char* title) {
 
     // Check if bridge is available
     if (!g_artwork_search) {
+        init_artwork_bridge();
+        if (!g_artwork_search) return;
+    }
+
+    const char* safe_artist = artist ? artist : "";
+    const char* safe_title = title ? title : "";
+
+    if (safe_artist[0] == '\0' && safe_title[0] == '\0') {
         return;
     }
 
-    // Clear any pending artwork from previous search
+    // Deduplicate: If already requested this exact artist & title, don't re-issue search
     {
         std::lock_guard<std::mutex> lock(g_pending_mutex);
+        if (g_last_requested_artist == safe_artist && g_last_requested_title == safe_title) {
+            return;
+        }
+        g_last_requested_artist = safe_artist;
+        g_last_requested_title = safe_title;
         g_pending_artwork_bitmap = nullptr;
         g_has_pending_artwork = false;
     }
 
     // Request artwork from foo_artwork
-    g_artwork_search(artist, title);
+    g_artwork_search(safe_artist, safe_title);
 }
 
 bool has_pending_online_artwork() {
