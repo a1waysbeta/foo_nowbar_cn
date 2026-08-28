@@ -628,10 +628,25 @@ SIZE ControlPanelCore::get_min_size() const {
     if (has_prev_right) right_group_w += spacing;
     right_group_w += static_cast<int>(192.0 * dpi_scale * min_scale);
     has_prev_right = true;
-  } else if (get_nowbar_volume_icon_visible()) {
-    if (has_prev_right) right_group_w += spacing;
-    right_group_w += static_cast<int>(23.0 * dpi_scale * min_scale);
-    has_prev_right = true;
+  } else {
+    bool vol_icon = get_nowbar_volume_icon_visible();
+    bool vol_num = get_nowbar_volume_number_enabled();
+    if (vol_icon && vol_num) {
+      if (has_prev_right) right_group_w += spacing;
+      int icon_w = static_cast<int>(23.0 * dpi_scale * min_scale);
+      int gap_w = static_cast<int>(14.0 * dpi_scale * min_scale);
+      int num_w = static_cast<int>(28.0 * dpi_scale);
+      right_group_w += icon_w + gap_w + num_w;
+      has_prev_right = true;
+    } else if (vol_icon) {
+      if (has_prev_right) right_group_w += spacing;
+      right_group_w += static_cast<int>(23.0 * dpi_scale * min_scale);
+      has_prev_right = true;
+    } else if (vol_num) {
+      if (has_prev_right) right_group_w += spacing;
+      right_group_w += static_cast<int>(28.0 * dpi_scale);
+      has_prev_right = true;
+    }
   }
   if (get_nowbar_miniplayer_icon_visible()) {
     if (has_prev_right) right_group_w += spacing;
@@ -835,6 +850,31 @@ void ControlPanelCore::on_settings_changed() {
     m_cbutton_states[i].cache_valid = false;
   }
   poll_custom_button_states();
+
+  // Update custom button auto-hide opacity and animation state
+  if (get_nowbar_cbutton_autohide()) {
+    bool is_playing_now = m_state.is_playing && !m_state.is_paused;
+    float target = is_playing_now ? 0.0f : 1.0f;
+    if (m_cbutton_opacity != target || m_cbutton_target_opacity != target) {
+      m_cbutton_start_opacity = m_cbutton_opacity;
+      m_cbutton_target_opacity = target;
+      if (get_nowbar_smooth_animations_enabled()) {
+        m_cbutton_fade_start_time = std::chrono::steady_clock::now();
+        m_cbutton_fade_active = true;
+        m_cbutton_animating = true;
+        request_animation();
+      } else {
+        m_cbutton_opacity = target;
+        m_cbutton_fade_active = false;
+        m_cbutton_animating = false;
+      }
+    }
+  } else {
+    m_cbutton_opacity = 1.0f;
+    m_cbutton_target_opacity = 1.0f;
+    m_cbutton_fade_active = false;
+    m_cbutton_animating = false;
+  }
 
   // Reset 3D button press state
   for (int i = 0; i < 6; i++) {
@@ -1586,8 +1626,8 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   // Calculate total dimensions of all enabled right-side elements
   bool volume_bar_vis = get_nowbar_volume_bar_visible();
   bool volume_icon_vis = get_nowbar_volume_icon_visible();
-  bool volume_number_vis = get_nowbar_volume_number_enabled() && volume_bar_vis;
-  bool volume_visible = volume_icon_vis || volume_bar_vis;
+  bool volume_number_vis = get_nowbar_volume_number_enabled();
+  bool volume_visible = volume_icon_vis || volume_bar_vis || volume_number_vis;
   int volume_width = 0;
   int icon_size = volume_icon_vis ? static_cast<int>(23 * m_dpi_scale * m_size_scale) : 0;
   int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
@@ -1596,8 +1636,12 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       : 0;
   if (volume_bar_vis) {
     volume_width = static_cast<int>(m_metrics.volume_width * m_size_scale);
+  } else if (volume_icon_vis && volume_number_vis) {
+    volume_width = icon_size + vol_gap + num_width;
   } else if (volume_icon_vis) {
-    volume_width = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+    volume_width = icon_size;
+  } else if (volume_number_vis) {
+    volume_width = num_width;
   }
 
   // Balance the distance from the center of the volume number to the mini-player icon
@@ -3034,7 +3078,7 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
     bool should_hide = m_state.is_playing && !m_state.is_paused;
     float target = should_hide ? 0.0f : 1.0f;
     
-    if (target != m_cbutton_target_opacity) {
+    if (target != m_cbutton_target_opacity || (target != m_cbutton_opacity && !m_cbutton_fade_active)) {
       // Start new fade animation - save current opacity as starting point
       m_cbutton_start_opacity = m_cbutton_opacity;
       m_cbutton_target_opacity = target;
@@ -3071,6 +3115,7 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   } else {
     // Auto-hide disabled, always fully visible
     m_cbutton_opacity = 1.0f;
+    m_cbutton_target_opacity = 1.0f;
     m_cbutton_fade_active = false;
   }
   
@@ -5547,7 +5592,11 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
 }
 
 void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
-  if (!get_nowbar_volume_icon_visible() && !get_nowbar_volume_bar_visible())
+  bool volume_icon_vis = get_nowbar_volume_icon_visible();
+  bool volume_bar_vis = get_nowbar_volume_bar_visible();
+  bool volume_number_vis = get_nowbar_volume_number_enabled();
+
+  if (!volume_icon_vis && !volume_bar_vis && !volume_number_vis)
     return;
 
   int w = m_rect_volume.right - m_rect_volume.left;
@@ -5570,19 +5619,22 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
   }
 
   // Determine volume level: 0=mute, 1=low, 2=full
+  float bar_level = db_to_slider(m_state.volume_db); // 0.0 to 1.0
   int vol_level;
   if (m_state.volume_db <= -100.0f) {
     vol_level = 0; // mute
   } else {
-    float level = db_to_slider(m_state.volume_db); // 0.0 to 1.0
-    vol_level = (level <= 0.5f) ? 1 : 2;
+    vol_level = (bar_level <= 0.5f) ? 1 : 2;
   }
 
   // Icon dimensions
   int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
   int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
+  int num_width = volume_number_vis
+      ? ((m_volume_number_width > 0) ? m_volume_number_width : static_cast<int>(28 * m_dpi_scale))
+      : 0;
 
-  if (get_nowbar_volume_icon_visible()) {
+  if (volume_icon_vis) {
     // Draw custom volume icon (scaled with panel height) - always grayed
     int icon_y = m_rect_volume.top + (h - icon_size) / 2;
     int icon_base_x = m_rect_volume.left;
@@ -5608,16 +5660,12 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
                      volume_icon_color, vol_level);
   }
 
-  if (get_nowbar_volume_bar_visible()) {
+  int bar_x = 0;
+  int bar_w = 0;
+  if (volume_bar_vis) {
     // Volume bar - use same thickness as seekbar
-    bool volume_icon_vis = get_nowbar_volume_icon_visible();
-    bool volume_number_vis = get_nowbar_volume_number_enabled();
-    int num_width = volume_number_vis
-        ? ((m_volume_number_width > 0) ? m_volume_number_width : static_cast<int>(28 * m_dpi_scale))
-        : 0;
-
-    int bar_x = m_rect_volume.left + (volume_icon_vis ? (icon_size + vol_gap) : 0);
-    int bar_w = (m_rect_volume.right - (volume_number_vis ? (vol_gap + num_width) : 0)) - bar_x;
+    bar_x = m_rect_volume.left + (volume_icon_vis ? (icon_size + vol_gap) : 0);
+    bar_w = (m_rect_volume.right - (volume_number_vis ? (vol_gap + num_width) : 0)) - bar_x;
     if (bar_w < 10) bar_w = 10;
     int bar_h = static_cast<int>(m_metrics.seekbar_height * m_size_scale);
     int bar_y = m_rect_volume.top + (h - bar_h) / 2;
@@ -5661,7 +5709,6 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
     }
 
     // Level - use perceptual mapping so slider reflects perceived loudness
-    float bar_level = db_to_slider(m_state.volume_db);
     int level_w = static_cast<int>(bar_w * bar_level);
 
     if (level_w > 0) {
@@ -5696,44 +5743,50 @@ void ControlPanelCore::draw_volume(Gdiplus::Graphics &g) {
           GetRValue(vol_handle_accent), GetGValue(vol_handle_accent), GetBValue(vol_handle_accent)));
       g.FillEllipse(&handleBrush, handle_x, handle_y, handle_size, handle_size);
     }
+  }
 
-    // Volume number (1-100, or 0 on mute) displayed after the volume bar
-    if (volume_number_vis && m_font_time) {
-      int vol_percent;
-      if (m_state.volume_db <= -100.0f) {
-        vol_percent = 0;
-      } else {
-        vol_percent = static_cast<int>(std::round(bar_level * 100.0f));
-        if (vol_percent < 1 && m_state.volume_db > -100.0f) vol_percent = 1;
-        if (vol_percent > 100) vol_percent = 100;
-      }
-
-      wchar_t num_str[16];
-      swprintf_s(num_str, L"%d", vol_percent);
-
-      Gdiplus::Color num_color = use_light_foreground
-          ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
-      COLORREF custom_time_color;
-      if (get_nowbar_time_font_color(custom_time_color)) {
-        num_color = Gdiplus::Color(255, GetRValue(custom_time_color), GetGValue(custom_time_color), GetBValue(custom_time_color));
-      }
-      Gdiplus::SolidBrush numBrush(num_color);
-
-      int bar_center_y = bar_y + bar_h / 2;
-      float num_top = static_cast<float>(bar_center_y) - m_volume_number_glyph_y - m_volume_number_glyph_h / 2.0f;
-      float num_height = m_volume_number_line_h;
-
-      Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
-      sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-      sf.SetLineAlignment(Gdiplus::StringAlignmentNear);
-      sf.SetFormatFlags(sf.GetFormatFlags() | Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
-
-      int num_x = bar_x + bar_w + vol_gap;
-      Gdiplus::RectF numRect(static_cast<float>(num_x), num_top,
-                             static_cast<float>(num_width), num_height);
-      g.DrawString(num_str, -1, m_font_time.get(), numRect, &sf, &numBrush);
+  // Volume number (1-100, or 0 on mute) displayed after the volume bar or volume icon
+  if (volume_number_vis && m_font_time) {
+    int vol_percent;
+    if (m_state.volume_db <= -100.0f) {
+      vol_percent = 0;
+    } else {
+      vol_percent = static_cast<int>(std::round(bar_level * 100.0f));
+      if (vol_percent < 1 && m_state.volume_db > -100.0f) vol_percent = 1;
+      if (vol_percent > 100) vol_percent = 100;
     }
-  } // volume bar visible
+
+    wchar_t num_str[16];
+    swprintf_s(num_str, L"%d", vol_percent);
+
+    Gdiplus::Color num_color = use_light_foreground
+        ? Gdiplus::Color(255, 200, 200, 200) : m_text_secondary_color;
+    COLORREF custom_time_color;
+    if (get_nowbar_time_font_color(custom_time_color)) {
+      num_color = Gdiplus::Color(255, GetRValue(custom_time_color), GetGValue(custom_time_color), GetBValue(custom_time_color));
+    }
+    Gdiplus::SolidBrush numBrush(num_color);
+
+    float num_top = static_cast<float>(m_rect_volume.top + h / 2) - m_volume_number_glyph_y - m_volume_number_glyph_h / 2.0f;
+    float num_height = m_volume_number_line_h;
+
+    Gdiplus::StringFormat sf(Gdiplus::StringFormat::GenericTypographic());
+    sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+    sf.SetLineAlignment(Gdiplus::StringAlignmentNear);
+    sf.SetFormatFlags(sf.GetFormatFlags() | Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
+
+    int num_x;
+    if (volume_bar_vis) {
+      num_x = bar_x + bar_w + vol_gap;
+    } else if (volume_icon_vis) {
+      num_x = m_rect_volume.left + icon_size + vol_gap;
+    } else {
+      num_x = m_rect_volume.left;
+    }
+    Gdiplus::RectF numRect(static_cast<float>(num_x), num_top,
+                           static_cast<float>(num_width), num_height);
+    g.DrawString(num_str, -1, m_font_time.get(), numRect, &sf, &numBrush);
+  }
 }
 
 HitRegion ControlPanelCore::hit_test(int x, int y) const {
@@ -5783,7 +5836,7 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
       return HitRegion::CButton6;
   }
   // Volume area - check both icon and slider
-  if (get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible()) {
+  if (get_nowbar_volume_icon_visible() || get_nowbar_volume_bar_visible() || get_nowbar_volume_number_enabled()) {
     if (pt_in_rect(m_rect_volume, x, y)) {
       if (get_nowbar_volume_icon_visible() && get_nowbar_volume_bar_visible()) {
         int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
@@ -5794,7 +5847,11 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
           return HitRegion::VolumeSlider;
         }
       } else if (get_nowbar_volume_icon_visible()) {
-        return HitRegion::VolumeIcon;
+        int icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+        int vol_gap = static_cast<int>(14 * m_dpi_scale * m_size_scale);
+        if (!get_nowbar_volume_number_enabled() || x < m_rect_volume.left + icon_size + vol_gap / 2) {
+          return HitRegion::VolumeIcon;
+        }
       } else if (get_nowbar_volume_bar_visible()) {
         return HitRegion::VolumeSlider;
       }
@@ -7318,6 +7375,10 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
     m_cbutton_target_opacity = is_playing_now ? 0.0f : 1.0f;
     m_cbutton_fade_start_time = std::chrono::steady_clock::now();
     m_cbutton_fade_active = true;
+    if (get_nowbar_smooth_animations_enabled()) {
+      m_cbutton_animating = true;
+      request_animation();
+    }
   }
 
   // Spectrum visualizer fade animation (mode 1 only)
