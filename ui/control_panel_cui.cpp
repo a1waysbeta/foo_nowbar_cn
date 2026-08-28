@@ -62,6 +62,24 @@ void ControlPanelCUI::update_artwork() {
 
     metadb_handle_ptr track = m_core->get_display_track();
     if (track.is_valid()) {
+        auto pc = playback_control::get();
+        bool is_playing = pc->is_playing() || pc->is_paused();
+        bool is_playing_track = false;
+        if (is_playing) {
+            metadb_handle_ptr now_playing_track;
+            if (pc->get_now_playing(now_playing_track) && now_playing_track == track) {
+                is_playing_track = true;
+            }
+        }
+
+        // Remote internet streams only have dynamic artwork while actively playing
+        pfc::string8 path = track->get_path();
+        bool is_stream = (strstr(path.c_str(), "://") != nullptr && strstr(path.c_str(), "file://") != path.c_str());
+        if (is_stream && !is_playing_track) {
+            m_core->clear_artwork();
+            return;
+        }
+
         // Try local/embedded artwork first
         auto art_manager = album_art_manager_v3::get();
         try {
@@ -79,16 +97,6 @@ void ControlPanelCUI::update_artwork() {
                 }
             }
         } catch (...) {}
-
-        auto pc = playback_control::get();
-        bool is_playing = pc->is_playing() || pc->is_paused();
-        bool is_playing_track = false;
-        if (is_playing) {
-            metadb_handle_ptr now_playing_track;
-            if (pc->get_now_playing(now_playing_track) && now_playing_track == track) {
-                is_playing_track = true;
-            }
-        }
 
         // Check if foo_artwork has a cached cover image file on disk
         if (get_nowbar_online_artwork()) {
