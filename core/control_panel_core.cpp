@@ -678,6 +678,10 @@ void ControlPanelCore::notify_online_artwork_received() {
 }
 
 void ControlPanelCore::on_online_artwork_received() {
+  // Re-evaluate title formats with fresh metadata from foo_artwork
+  evaluate_title_formats();
+  m_needs_full_repaint = true;
+
   // Request artwork update - this will check for pending online artwork
   if (m_artwork_request_cb) {
     m_artwork_request_cb();
@@ -1873,7 +1877,7 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       int min_gap = (left_gap < right_gap) ? left_gap : right_gap;
       if (min_gap > 0) {
         spectrum_left -= min_gap;
-        spectrum_right -= min_gap;
+        spectrum_right += min_gap;
       }
     }
     // Spectrum area extends from a configurable fraction down to the bottom.
@@ -1888,13 +1892,17 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     m_rect_spectrum_full = {spectrum_left, spectrum_top, spectrum_right, rect.bottom};
 
     // Time display in top-right corner, just below thin progress bar
-    int time_height = static_cast<int>(m_metrics.text_height * m_size_scale);
-    int time_width = static_cast<int>(120 * m_dpi_scale);
-    int time_margin = static_cast<int>(8 * m_dpi_scale);
-    m_rect_time = {rect.right - time_width - time_margin,
-                   m_rect_thin_progress.bottom + static_cast<int>(2 * m_dpi_scale),
-                   rect.right - time_margin,
-                   m_rect_thin_progress.bottom + static_cast<int>(2 * m_dpi_scale) + time_height};
+    if (get_nowbar_playback_time_visible()) {
+      int time_height = static_cast<int>(m_metrics.text_height * m_size_scale);
+      int time_width = static_cast<int>(120 * m_dpi_scale);
+      int time_margin = static_cast<int>(8 * m_dpi_scale);
+      m_rect_time = {rect.right - time_width - time_margin,
+                     m_rect_thin_progress.bottom + static_cast<int>(2 * m_dpi_scale),
+                     rect.right - time_margin,
+                     m_rect_thin_progress.bottom + static_cast<int>(2 * m_dpi_scale) + time_height};
+    } else {
+      m_rect_time = {};
+    }
 
   } else if (vis_mode == 2) {
     // Always use tall height — reveal animation fills bars progressively
@@ -1984,7 +1992,9 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     draw_playback_buttons(g);
     if (paint_seekbar_visible) {
       draw_thin_progress_bar(g);
-      draw_time_display_top_right(g);
+      if (get_nowbar_playback_time_visible()) {
+        draw_time_display_top_right(g);
+      }
     }
   } else if (paint_vis_mode == 2) {
     draw_track_info(g);
@@ -2057,27 +2067,13 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
 void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   update_layout(panel_rect);
 
-  // Cache rect = union of spectrum + progress bar + time display
-  // Pad by 2px to cover any anti-aliased curve stroke edges that extend
-  // beyond m_rect_spectrum_full (GDI+ 2px pen with anti-aliasing).
-  RECT cache_rect;
-  UnionRect(&cache_rect, &m_rect_spectrum_full, &m_rect_thin_progress);
-  RECT cache_union;
-  UnionRect(&cache_union, &cache_rect, &m_rect_time);
-  cache_rect = cache_union;
-  // Include track info so ClearType text is always drawn on a clean background.
-  // Without this, paint_spectrum_only() redraws text on top of the previous
-  // frame's text, causing sub-pixel anti-aliasing to accumulate and degrade.
-  if (m_rect_track_info.right > m_rect_track_info.left) {
-    UnionRect(&cache_union, &cache_rect, &m_rect_track_info);
-    cache_rect = cache_union;
-  }
-  InflateRect(&cache_rect, 2, 2);
-  // Clamp to panel bounds
-  if (cache_rect.left < panel_rect.left) cache_rect.left = panel_rect.left;
-  if (cache_rect.top < panel_rect.top) cache_rect.top = panel_rect.top;
-  if (cache_rect.right > panel_rect.right) cache_rect.right = panel_rect.right;
-  if (cache_rect.bottom > panel_rect.bottom) cache_rect.bottom = panel_rect.bottom;
+  // Cache rect covers the entire non-artwork panel area (spectrum, track info,
+  // buttons, thin progress, time display, volume, and miniplayer) so that all
+  // dynamic and hover elements are always drawn on a fresh, clean background.
+  int art_right = (get_nowbar_cover_artwork_visible() && m_rect_artwork.right > m_rect_artwork.left)
+      ? m_rect_artwork.right
+      : panel_rect.left;
+  RECT cache_rect = {art_right, panel_rect.top, panel_rect.right, panel_rect.bottom};
   int cache_w = cache_rect.right - cache_rect.left;
   int cache_h = cache_rect.bottom - cache_rect.top;
 
@@ -2142,7 +2138,9 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     draw_track_info(g);
     draw_playback_buttons(g);
     draw_thin_progress_bar(g);
-    draw_time_display_top_right(g);
+    if (get_nowbar_playback_time_visible()) {
+      draw_time_display_top_right(g);
+    }
     draw_volume(g);
     draw_miniplayer_button(g);
 
@@ -5513,6 +5511,7 @@ void ControlPanelCore::draw_waveform_tooltip(Gdiplus::Graphics& g) {
 }
 
 void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
+  if (!get_nowbar_playback_time_visible()) return;
   if (m_rect_time.right <= m_rect_time.left) return;
 
   std::wstring elapsed = format_time(m_state.playback_time);
@@ -6374,6 +6373,9 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
             }
           }
         }
+      } else if (action == 5) {
+        // Output Device Menu - show popup menu with available devices
+        show_output_device_menu(button_index);
       }
       break;
     }
@@ -6813,6 +6815,62 @@ void ControlPanelCore::show_autoplaylist_menu() {
     default:
       break;
   }
+}
+
+void ControlPanelCore::show_output_device_menu_popup(HWND hwnd, POINT pt) {
+  if (!static_api_test_t<output_manager_v2>()) {
+    return;
+  }
+  auto api = output_manager_v2::get();
+
+  struct DeviceEntry {
+    GUID output_id;
+    GUID device_id;
+    pfc::string8 name;
+  };
+  std::vector<DeviceEntry> devices;
+  api->listDevices([&devices](const char* name, const GUID& output_id, const GUID& device_id) {
+    devices.push_back({output_id, device_id, name});
+  });
+
+  outputCoreConfig_t config{};
+  api->getCoreConfig(config);
+
+  HMENU menu = CreatePopupMenu();
+  if (!menu) return;
+
+  if (devices.empty()) {
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"(No output devices available)");
+  } else {
+    for (size_t i = 0; i < devices.size(); ++i) {
+      bool is_active = (devices[i].output_id == config.m_output && devices[i].device_id == config.m_device);
+      UINT flags = MF_STRING | (is_active ? MF_CHECKED : 0);
+      pfc::stringcvt::string_wide_from_utf8 wideName(devices[i].name);
+      AppendMenuW(menu, flags, static_cast<UINT>(1000 + i), wideName.get_ptr());
+    }
+  }
+
+  if (hwnd) {
+    SetForegroundWindow(hwnd);
+  }
+
+  int cmd = TrackPopupMenuEx(menu, TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+                             pt.x, pt.y, hwnd ? hwnd : core_api::get_main_window(), nullptr);
+  DestroyMenu(menu);
+
+  if (cmd >= 1000 && cmd < 1000 + static_cast<int>(devices.size())) {
+    size_t selected_idx = static_cast<size_t>(cmd - 1000);
+    api->setCoreConfigDevice(devices[selected_idx].output_id, devices[selected_idx].device_id);
+  }
+}
+
+void ControlPanelCore::show_output_device_menu(int button_index) {
+  RECT* rects[6] = {&m_rect_cbutton1, &m_rect_cbutton2, &m_rect_cbutton3,
+                    &m_rect_cbutton4, &m_rect_cbutton5, &m_rect_cbutton6};
+  RECT btn_rect = (button_index >= 0 && button_index < 6) ? *rects[button_index] : RECT{};
+  POINT pt = { btn_rect.left, btn_rect.top };
+  ClientToScreen(m_hwnd, &pt);
+  show_output_device_menu_popup(m_hwnd, pt);
 }
 
 void ControlPanelCore::do_play_pause() {
@@ -7411,11 +7469,9 @@ void ControlPanelCore::on_track_info_changed() {
 }
 
 void ControlPanelCore::on_dynamic_info_changed() {
-  if (m_lines_have_dynamic_time) {
-    evaluate_title_formats();
-    m_needs_full_repaint = true;
-    if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
-  }
+  evaluate_title_formats();
+  m_needs_full_repaint = true;
+  if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 void ControlPanelCore::set_artwork(album_art_data_ptr data) {
@@ -7504,6 +7560,9 @@ void ControlPanelCore::set_artwork_from_hbitmap(HBITMAP bitmap) {
     m_artwork_bitmap.reset();
     m_artwork_thumbnail.reset();
   }
+
+  // Re-evaluate title formats when new artwork is loaded to sync artist/title
+  evaluate_title_formats();
 
   invalidate();
 }
