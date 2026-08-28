@@ -208,6 +208,9 @@ public:
     // Releases the one-shot timer handle and resets the active flag.
     void on_animation_timer_fired();
 
+    // Output device popup menu helper (used by button click and main menu commands)
+    static void show_output_device_menu_popup(HWND hwnd, POINT pt);
+
 private:
     void update_layout(const RECT& rect);
     void invalidate();
@@ -282,6 +285,7 @@ private:
     void update_mood_state();
     void show_picture_viewer();
     void show_autoplaylist_menu();
+    void show_output_device_menu(int button_index);
     void create_autoplaylist(const char* name, const char* query, const char* sort = "");
     
     // Animation helpers
