@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "playback_state.h"
 #include "../preferences.h"
+#include "../artwork_bridge.h"
 
 namespace nowbar {
 
@@ -79,6 +80,8 @@ void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_
 
 void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) noexcept {
     try {
+        clear_pending_online_artwork();
+
         auto pc = playback_control::get();
         m_state.is_playing = true;
         m_state.is_paused = pc->is_paused();
@@ -123,6 +126,8 @@ void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason
         if (p_reason == play_control::stop_reason_eof && get_nowbar_infinite_playback_enabled()) {
             handle_infinite_playback();
         }
+
+        clear_pending_online_artwork();
 
         m_state.is_playing = false;
         m_state.is_paused = false;
@@ -217,15 +222,57 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
             artist = p_info.meta_get("PERFORMER", 0);
         }
 
-        // Update state if we found meaningful metadata
         bool changed = false;
-        if (title && strlen(title) > 0) {
-            m_state.track_title = title;
-            changed = true;
+
+        // If artist is missing, attempt to split "Artist - Title" from stream title
+        if ((!artist || strlen(artist) == 0) && title && strlen(title) > 0) {
+            std::string t_str = title;
+            const std::string delimiters[] = { " - ", " ˗ ", " / ", " by " };
+            for (const auto& delim : delimiters) {
+                size_t pos = t_str.find(delim);
+                if (pos != std::string::npos) {
+                    m_state.track_artist = t_str.substr(0, pos).c_str();
+                    m_state.track_title = t_str.substr(pos + delim.length()).c_str();
+                    changed = true;
+                    break;
+                }
+            }
         }
-        if (artist && strlen(artist) > 0) {
-            m_state.track_artist = artist;
-            changed = true;
+
+        // Update state if we found standard distinct metadata
+        if (!changed) {
+            if (title && strlen(title) > 0) {
+                m_state.track_title = title;
+                changed = true;
+            }
+            if (artist && strlen(artist) > 0) {
+                m_state.track_artist = artist;
+                changed = true;
+            }
+        }
+
+        // Fallback check for streams discovered via foo_artwork (e.g. ?azuracast_api / ?radioreg_api / ACRCloud)
+        auto pc = playback_control::get();
+        if (pc->is_playing() || pc->is_paused()) {
+            static service_ptr_t<titleformat_object> tf_fa_title, tf_fa_artist;
+            if (!tf_fa_title.is_valid()) {
+                titleformat_compiler::get()->compile_safe(tf_fa_title, "%foo_artwork_title%");
+            }
+            if (!tf_fa_artist.is_valid()) {
+                titleformat_compiler::get()->compile_safe(tf_fa_artist, "%foo_artwork_artist%");
+            }
+            pfc::string8 fa_title, fa_artist;
+            pc->playback_format_title(nullptr, fa_title, tf_fa_title, nullptr, playback_control::display_level_all);
+            pc->playback_format_title(nullptr, fa_artist, tf_fa_artist, nullptr, playback_control::display_level_all);
+
+            if (!fa_title.is_empty() && fa_title != "?") {
+                m_state.track_title = fa_title;
+                changed = true;
+            }
+            if (!fa_artist.is_empty() && fa_artist != "?") {
+                m_state.track_artist = fa_artist;
+                changed = true;
+            }
         }
 
         if (changed) {
