@@ -661,6 +661,11 @@ static cfg_int cfg_nowbar_volume_number(
     0  // Default: Disabled
 );
 
+static cfg_int cfg_nowbar_playback_time_visible(
+    GUID{0xABCDEFC3, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xC3}},
+    1  // Default: Show (1)
+);
+
 //=============================================================================
 // Config File for All 12 Custom Buttons
 // Buttons 1-6: Visible on panel, have enabled/icon fields
@@ -725,6 +730,10 @@ static int parse_action_string(const char* str) {
     if (stricmp_utf8(action, "executable") == 0) return 2;
     if (stricmp_utf8(action, "foobar2k") == 0) return 3;
     if (stricmp_utf8(action, "open_folder") == 0) return 4;
+    if (stricmp_utf8(action, "output_device") == 0 ||
+        stricmp_utf8(action, "output_devices") == 0 ||
+        stricmp_utf8(action, "output_device_menu") == 0 ||
+        stricmp_utf8(action, "device") == 0) return 5;
     return 0;  // none
 }
 
@@ -735,6 +744,7 @@ static const char* action_to_string(int action) {
         case 2: return "executable";
         case 3: return "foobar2k";
         case 4: return "open_folder";
+        case 5: return "output_device";
         default: return "none";
     }
 }
@@ -763,10 +773,10 @@ static void create_default_config_file() {
     file << "# Buttons 1-6: Visible on panel + keyboard shortcuts\n";
     file << "# Buttons 7-12: Hidden (keyboard shortcuts only)\n";
     file << "#\n";
-    file << "# Action values: none, url, executable, foobar2k, open_folder\n";
+    file << "# Action values: none, url, executable, foobar2k, open_folder, output_device\n";
     file << "# Path: URL for 'url', executable path for 'executable',\n";
     file << "#       menu path like 'Library/Search' for 'foobar2k',\n";
-    file << "#       or leave empty for 'open_folder' (opens the playing track's folder)\n";
+    file << "#       or leave empty for 'open_folder' or 'output_device'\n";
     file << "#\n";
     file << "# Title formatting is supported in URLs and paths (e.g., %artist%, %title%)\n";
     file << "\n";
@@ -1758,6 +1768,10 @@ bool get_nowbar_volume_number_enabled() {
     return cfg_nowbar_volume_number != 0;
 }
 
+bool get_nowbar_playback_time_visible() {
+    return cfg_nowbar_playback_time_visible != 0;
+}
+
 
 bool get_nowbar_infinite_playback_enabled() {
     return cfg_nowbar_infinite_playback != 0;
@@ -1969,7 +1983,7 @@ bool get_nowbar_custom_button_visible() {
 int get_nowbar_custom_button_action() {
     int action = cfg_nowbar_custom_button_action;
     if (action < 0) action = 0;
-    if (action > 4) action = 4;  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder
+    if (action > 5) action = 5;  // 0=None, 1=Open URL, 2=Run Executable, 3=Foobar2k Action, 4=Open Folder, 5=Output Device
     return action;
 }
 
@@ -2008,7 +2022,7 @@ int get_nowbar_cbutton_action(int button_index) {
         case 5: action = cfg_cbutton6_action; break;
     }
     if (action < 0) action = 0;
-    if (action > 4) action = 4;
+    if (action > 5) action = 5;
     return action;
 }
 
@@ -2986,6 +3000,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_STYLE_2), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), show_general);
     ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_LABEL), show_general);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_COMBO), show_general);
 
     // Appearance tab controls (Tab 1)
     BOOL show_appearance = (tab == 1) ? SW_SHOW : SW_HIDE;
@@ -3198,6 +3214,8 @@ static void update_vis_section_state(HWND hwnd) {
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), spec_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_HEIGHT_LABEL), spec_on);
     EnableWindow(GetDlgItem(hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), spec_on);
+    EnableWindow(GetDlgItem(hwnd, IDC_PLAYBACK_TIME_LABEL), spec_on);
+    EnableWindow(GetDlgItem(hwnd, IDC_PLAYBACK_TIME_COMBO), spec_on);
 
     // Waveform controls: enabled only if Enable checked AND Waveform selected
     BOOL wave_on = enabled && waveform_sel;
@@ -3338,6 +3356,10 @@ static void update_cbutton_path_state(HWND hwnd, int action_id, int path_id, int
             EnableWindow(hPath, FALSE);
             EnableWindow(hBrowse, FALSE);
             break;
+        case 5:  // Output Device - no path needed, disable both
+            EnableWindow(hPath, FALSE);
+            EnableWindow(hBrowse, FALSE);
+            break;
     }
 }
 
@@ -3414,6 +3436,14 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(hVolNumCombo, CB_ADDSTRING, 0, (LPARAM)L"Disabled");
             SendMessage(hVolNumCombo, CB_ADDSTRING, 0, (LPARAM)L"Enabled");
             SendMessage(hVolNumCombo, CB_SETCURSEL, cfg_nowbar_volume_number ? 1 : 0, 0);
+        }
+
+        // Initialize Playback Time combobox
+        {
+            HWND hPlaybackTimeCombo = GetDlgItem(hwnd, IDC_PLAYBACK_TIME_COMBO);
+            SendMessage(hPlaybackTimeCombo, CB_ADDSTRING, 0, (LPARAM)L"Show");
+            SendMessage(hPlaybackTimeCombo, CB_ADDSTRING, 0, (LPARAM)L"Hidden");
+            SendMessage(hPlaybackTimeCombo, CB_SETCURSEL, cfg_nowbar_playback_time_visible ? 0 : 1, 0);
         }
 
         // Initialize background style combobox
@@ -3709,6 +3739,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Run Executable");
             SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Foobar2k Action");
             SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Open Folder");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Output Device");
         }
         
         // Set checkbox and combobox states from config
@@ -3820,6 +3851,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_AUTOHIDE_CBUTTONS_COMBO:
         case IDC_CBUTTON_3D_COMBO:
         case IDC_VOLUME_NUMBER_COMBO:
+        case IDC_PLAYBACK_TIME_COMBO:
         case IDC_VOLUME_ICON_COMBO:
         case IDC_VOLUME_BAR_COMBO:
         case IDC_MOOD_TAG_COMBO:
@@ -4731,6 +4763,10 @@ void nowbar_preferences::apply_settings() {
         int volNumSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_volume_number = (volNumSel == 1) ? 1 : 0;
 
+        // Save Playback Time setting (0=Show, 1=Hidden in combobox -> config 1=Show, 0=Hidden)
+        int playbackTimeSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_COMBO), CB_GETCURSEL, 0, 0);
+        cfg_nowbar_playback_time_visible = (playbackTimeSel == 0) ? 1 : 0;
+
         // Save cover artwork visibility (0=Yes, 1=No in combobox -> config 1=Yes, 0=No)
         int coverArtworkSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_COMBO), CB_GETCURSEL, 0, 0);
         cfg_nowbar_cover_artwork_visible = (coverArtworkSel == 0) ? 1 : 0;
@@ -5036,6 +5072,8 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), CB_SETCURSEL, 0, 0);  // Default: Enabled
             cfg_nowbar_volume_number = 0;  // Default: Disabled
             SendMessage(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_COMBO), CB_SETCURSEL, 0, 0);  // Default: Disabled
+            cfg_nowbar_playback_time_visible = 1;  // Default: Show
+            SendMessage(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_COMBO), CB_SETCURSEL, 0, 0);  // Default: Show
             update_cover_margin_state(m_hwnd);  // Re-enable Cover Margin (Cover Artwork is Yes)
         } else if (m_current_tab == 2) {
             // Reset Icons tab settings
