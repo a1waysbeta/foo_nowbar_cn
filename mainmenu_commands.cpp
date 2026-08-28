@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "preferences.h"
+#include "core/control_panel_core.h"
 #include <shellapi.h>
 #include <shlobj.h>
 
@@ -223,6 +224,12 @@ static void execute_cbutton_action(int button_index) {
                 }
             }
         }
+    } else if (action == 5) {
+        // Output Device Menu
+        POINT pt;
+        GetCursorPos(&pt);
+        HWND wnd = core_api::get_main_window();
+        nowbar::ControlPanelCore::show_output_device_menu_popup(wnd, pt);
     }
 }
 
@@ -286,6 +293,9 @@ public:
                         break;
                     case 4:
                         p_out << "Open folder of playing track";
+                        break;
+                    case 5:
+                        p_out << "Select audio output device";
                         break;
                     default:
                         p_out << "No action configured";
