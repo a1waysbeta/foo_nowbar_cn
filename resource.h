@@ -245,6 +245,10 @@
 #define IDC_VOLUME_NUMBER_LABEL          1545
 #define IDC_VOLUME_NUMBER_COMBO          1546
 
+// Playback Time controls (Appearance tab)
+#define IDC_PLAYBACK_TIME_LABEL          1547
+#define IDC_PLAYBACK_TIME_COMBO          1548
+
 // Shuffle/Repeat visibility controls (Icons tab)
 #define IDC_SHUFFLE_ICON_LABEL           1533
 #define IDC_SHUFFLE_ICON_COMBO           1534
