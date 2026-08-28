@@ -176,10 +176,25 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
         if (has_prev_right) right_group_w += spacing;
         right_group_w += static_cast<int>(192.0 * dpi_scale * min_scale);
         has_prev_right = true;
-    } else if (get_nowbar_volume_icon_visible()) {
-        if (has_prev_right) right_group_w += spacing;
-        right_group_w += static_cast<int>(23.0 * dpi_scale * min_scale);
-        has_prev_right = true;
+    } else {
+        bool vol_icon = get_nowbar_volume_icon_visible();
+        bool vol_num = get_nowbar_volume_number_enabled();
+        if (vol_icon && vol_num) {
+            if (has_prev_right) right_group_w += spacing;
+            int icon_w = static_cast<int>(23.0 * dpi_scale * min_scale);
+            int gap_w = static_cast<int>(14.0 * dpi_scale * min_scale);
+            int num_w = static_cast<int>(28.0 * dpi_scale);
+            right_group_w += icon_w + gap_w + num_w;
+            has_prev_right = true;
+        } else if (vol_icon) {
+            if (has_prev_right) right_group_w += spacing;
+            right_group_w += static_cast<int>(23.0 * dpi_scale * min_scale);
+            has_prev_right = true;
+        } else if (vol_num) {
+            if (has_prev_right) right_group_w += spacing;
+            right_group_w += static_cast<int>(28.0 * dpi_scale);
+            has_prev_right = true;
+        }
     }
     if (get_nowbar_miniplayer_icon_visible()) {
         if (has_prev_right) right_group_w += spacing;
