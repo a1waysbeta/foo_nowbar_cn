@@ -332,6 +332,7 @@ private:
     RECT m_rect_thin_progress = {};    // Mode 1: thin progress bar at top
     RECT m_rect_waveform = {};         // Mode 2: waveform area
     RECT m_rect_spectrum_full = {};    // Mode 1: full-width spectrum at bottom
+    RECT m_rect_button_row = {};       // Union bounding rect for the button row (spectrum hover dimming)
     
     // Interaction state
     HitRegion m_hover_region = HitRegion::None;
@@ -454,7 +455,10 @@ private:
     void update_spectrum_hotspots(float dt);
 
     // Spectrum hover fade for mode 1
-    float m_spectrum_hover_opacity = 1.0f;  // Dims when hovering buttons in mode 1
+    float m_spectrum_hover_opacity = 1.0f;  // Current hover opacity
+    float m_spectrum_hover_target = 1.0f;   // Target hover opacity (0.3 on button hover, 1.0 normal)
+    std::chrono::steady_clock::time_point m_spectrum_hover_last_time = {};
+    void update_spectrum_hover_opacity();
 
     // Mode 1 drawing methods
     void draw_thin_progress_bar(Gdiplus::Graphics& g);
