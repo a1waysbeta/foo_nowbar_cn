@@ -816,6 +816,9 @@ void ControlPanelCore::on_settings_changed() {
     if (m_vis_stream.is_valid() || m_spectrum_opacity > 0.0f) {
       release_vis_stream();
       m_spectrum_opacity = 0.0f;
+      m_spectrum_hover_opacity = 1.0f;
+      m_spectrum_hover_target = 1.0f;
+      m_spectrum_hover_last_time = {};
       m_spectrum_fade_active = false;
       m_spectrum_animating = false;
     }
@@ -1620,6 +1623,34 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   } else if (!rating_on_line3) {
     m_rect_rating = {};
     for (int i = 0; i < 5; i++) m_rect_stars[i] = {};
+  }
+
+  // Compute union bounding rect for the button row (used for smooth spectrum hover dimming without gap flickering)
+  int row_left = INT_MAX, row_top = INT_MAX, row_right = INT_MIN, row_bottom = INT_MIN;
+  auto expand_row = [&](const RECT &r) {
+    if (r.right > r.left && r.bottom > r.top) {
+      if (r.left < row_left) row_left = r.left;
+      if (r.top < row_top) row_top = r.top;
+      if (r.right > row_right) row_right = r.right;
+      if (r.bottom > row_bottom) row_bottom = r.bottom;
+    }
+  };
+  expand_row(m_rect_rating);
+  expand_row(m_rect_heart);
+  expand_row(m_rect_shuffle);
+  expand_row(m_rect_prev);
+  expand_row(m_rect_play);
+  expand_row(m_rect_next);
+  expand_row(m_rect_stop);
+  expand_row(m_rect_stop_after_current);
+  expand_row(m_rect_repeat);
+  expand_row(m_rect_super);
+
+  if (row_left < row_right && row_top < row_bottom) {
+    int pad = static_cast<int>(2 * m_dpi_scale);
+    m_rect_button_row = {row_left - pad, row_top - pad, row_right + pad, row_bottom + pad};
+  } else {
+    m_rect_button_row = {};
   }
 
   // Right-side controls (Custom buttons, Volume, MiniPlayer)
@@ -4796,10 +4827,47 @@ void ControlPanelCore::draw_thin_progress_tooltip(Gdiplus::Graphics& g) {
   g.DrawString(timeStr.c_str(), -1, &tooltipFont, textRect, &sf, &textBrush);
 }
 
+void ControlPanelCore::update_spectrum_hover_opacity() {
+  if (!get_nowbar_smooth_animations_enabled()) {
+    m_spectrum_hover_opacity = m_spectrum_hover_target;
+    return;
+  }
+
+  auto now = std::chrono::steady_clock::now();
+  if (m_spectrum_hover_last_time.time_since_epoch().count() == 0) {
+    m_spectrum_hover_last_time = now;
+  }
+  float dt_ms = std::chrono::duration<float, std::milli>(now - m_spectrum_hover_last_time).count();
+  m_spectrum_hover_last_time = now;
+
+  // Clamp dt to avoid large jumps across pauses / stalls (max 100ms)
+  if (dt_ms > 100.0f) dt_ms = 100.0f;
+  if (dt_ms <= 0.0f) dt_ms = 1.0f;
+
+  float target = m_spectrum_hover_target;
+  if (std::abs(m_spectrum_hover_opacity - target) > 0.001f) {
+    // Asymmetric tau: fast dim (100ms) for responsive feedback,
+    // smooth restore (180ms) to prevent flicker on rapid movements
+    float tau = (target < m_spectrum_hover_opacity) ? 100.0f : 180.0f;
+    float factor = 1.0f - std::exp(-dt_ms / tau);
+    m_spectrum_hover_opacity += (target - m_spectrum_hover_opacity) * factor;
+
+    if (std::abs(m_spectrum_hover_opacity - target) < 0.005f) {
+      m_spectrum_hover_opacity = target;
+    } else {
+      m_spectrum_animating = true;
+      request_animation();
+    }
+  }
+}
+
 // High-performance spectrum renderer using direct pixel writes + AlphaBlend.
 // Eliminates all per-bar GDI+ calls (the main CPU bottleneck).
 void ControlPanelCore::draw_full_spectrum(HDC hdc) {
   if (m_rect_spectrum_full.right <= m_rect_spectrum_full.left) return;
+
+  // Update hover opacity with frame-rate independent dt exponential interpolation
+  update_spectrum_hover_opacity();
 
   // Process fade animation
   if (m_spectrum_fade_active) {
@@ -5036,6 +5104,9 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 // GDI+ version used by paint() for full repaints (not performance-critical)
 void ControlPanelCore::draw_full_spectrum_gdiplus(Gdiplus::Graphics& g) {
   if (m_rect_spectrum_full.right <= m_rect_spectrum_full.left) return;
+
+  // Update hover opacity with frame-rate independent dt exponential interpolation
+  update_spectrum_hover_opacity();
 
   if (m_spectrum_fade_active) {
     auto now = std::chrono::steady_clock::now();
@@ -5960,29 +6031,14 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     }
   }
 
-  // Spectrum hover fade (Mode 1): dim spectrum when hovering over buttons
+  // Spectrum hover fade (Mode 1): dim spectrum when hovering over button row
   if (get_nowbar_visualization_mode() == 1) {
-    bool hovering_button = (new_region == HitRegion::PlayButton ||
-                            new_region == HitRegion::PrevButton ||
-                            new_region == HitRegion::NextButton ||
-                            new_region == HitRegion::ShuffleButton ||
-                            new_region == HitRegion::RepeatButton ||
-                            new_region == HitRegion::StopButton ||
-                            new_region == HitRegion::StopAfterCurrentButton ||
-                            new_region == HitRegion::SuperButton ||
-                            new_region == HitRegion::HeartButton ||
-                            new_region == HitRegion::RatingArea);
+    bool hovering_button = pt_in_rect(m_rect_button_row, x, y);
     float target = hovering_button ? 0.3f : 1.0f;
-    if (m_spectrum_hover_opacity != target) {
-      // Simple lerp toward target
-      float delta = target - m_spectrum_hover_opacity;
-      float step = delta * 0.3f;  // Quick convergence
-      if (std::abs(delta) < 0.02f) {
-        m_spectrum_hover_opacity = target;
-      } else {
-        m_spectrum_hover_opacity += step;
-        request_animation();
-      }
+    if (m_spectrum_hover_target != target) {
+      m_spectrum_hover_target = target;
+      m_spectrum_hover_last_time = std::chrono::steady_clock::now();
+      request_animation();
       invalidate_soft();
     }
   }
@@ -6100,9 +6156,11 @@ void ControlPanelCore::on_mouse_leave() {
     }
   }
 
-  // Reset spectrum hover opacity when mouse leaves
-  if (m_spectrum_hover_opacity != 1.0f) {
-    m_spectrum_hover_opacity = 1.0f;
+  // Reset spectrum hover target when mouse leaves the panel
+  if (m_spectrum_hover_target != 1.0f) {
+    m_spectrum_hover_target = 1.0f;
+    m_spectrum_hover_last_time = std::chrono::steady_clock::now();
+    request_animation();
     invalidate_soft();
   }
 
@@ -7348,6 +7406,11 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
 
     // Reset stop-after-current state (SDK clears it when playback stops)
     m_stop_after_current_active = false;
+
+    // Reset spectrum hover state
+    m_spectrum_hover_target = 1.0f;
+    m_spectrum_hover_opacity = 1.0f;
+    m_spectrum_hover_last_time = {};
 
     // Fall back to selection (or refresh display track)
     update_mood_state();
