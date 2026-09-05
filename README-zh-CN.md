@@ -248,4 +248,4 @@ This component is provided as-is for personal use with foobar2000.
 
 ---
 
-**功能请求：** 为支持者提供付费功能请求。[请在 Discord 上联系我](https://discord.gg/YB5D5t3x) 进行讨论。
+**功能请求：** 为支持者提供付费功能请求。[请在 Discord 上联系我](https://discord.gg/jSajdJ3nMz) 进行讨论。
