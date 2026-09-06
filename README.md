@@ -40,7 +40,6 @@ A foobar2000 component that provides a "Now Playing" control panel for both Defa
 - **Volume Slider**: Click or drag to adjust volume (perceptual loudness mapping matching foobar2000's default curve)
 - **Mute Toggle**: Click volume icon to mute/unmute
 - **Mouse Wheel Support**: Scroll over panel to adjust volume
-- **dB Tooltip**: Shows current volume level on mouse wheel scroll
 
 ### Special Buttons
 - **Heart/Mood Button**: Toggle to "like" a track
