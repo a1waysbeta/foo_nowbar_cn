@@ -920,10 +920,10 @@ static void save_config_file() {
     file << "# Buttons 1-6: Visible on panel + keyboard shortcuts\n";
     file << "# Buttons 7-12: Hidden (keyboard shortcuts only)\n";
     file << "#\n";
-    file << "# Action values: none, url, executable, foobar2k, open_folder\n";
+    file << "# Action values: none, url, executable, foobar2k, open_folder, output_device\n";
     file << "# Path: URL for 'url', executable path for 'executable',\n";
     file << "#       menu path like 'Library/Search' for 'foobar2k',\n";
-    file << "#       or leave empty for 'open_folder' (opens the playing track's folder)\n";
+    file << "#       or leave empty for 'open_folder' or 'output_device'\n";
     file << "#\n";
     file << "# Title formatting is supported in URLs and paths (e.g., %artist%, %title%)\n";
     file << "\n";
