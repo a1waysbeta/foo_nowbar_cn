@@ -226,7 +226,7 @@ private:
     void draw_background(Gdiplus::Graphics& g, const RECT& rect);
     void draw_artwork(Gdiplus::Graphics& g);
     void draw_track_info(Gdiplus::Graphics& g);
-    void draw_playback_buttons(Gdiplus::Graphics& g);
+    void draw_playback_buttons(Gdiplus::Graphics& g, bool include_custom_buttons = true);
     void draw_seekbar(Gdiplus::Graphics& g);
     void draw_seekbar_tooltip(Gdiplus::Graphics& g);
     void draw_volume(Gdiplus::Graphics& g);
@@ -394,7 +394,7 @@ private:
     static constexpr float CBUTTON_RELEASE_DURATION_MS = 140.0f; // Release spring-back
 
     // Spectrum visualizer
-    static constexpr int SPECTRUM_FFT_SIZE = 4096;
+    static constexpr int SPECTRUM_FFT_SIZE = 1024;
     static constexpr float SPECTRUM_FADE_DURATION_MS = 300.0f;
     service_ptr_t<visualisation_stream_v3> m_vis_stream;
     std::vector<float> m_spectrum_bars;
@@ -410,6 +410,23 @@ private:
     float m_spectrum_start_opacity = 0.0f;
     std::chrono::steady_clock::time_point m_spectrum_fade_start_time;
     bool m_spectrum_fade_active = false;
+
+    // Spectrum DSP precomputed frequency bar mappings
+    struct SpectrumBarConfig {
+        float fbin_lo = 0.0f;
+        float fbin_hi = 0.0f;
+        float fbin_center = 0.0f;
+        int bin_lo = 0;
+        int bin_hi = 0;
+        bool is_narrow = false;
+        float a_weight = 1.0f;
+    };
+    std::vector<SpectrumBarConfig> m_spectrum_bar_configs;
+    std::vector<float> m_spectrum_normalized_values;
+    std::vector<float> m_spectrum_smoothing_scratch;
+    int m_spectrum_config_bar_count = 0;
+    int m_spectrum_config_sample_count = 0;
+    void update_spectrum_bar_configs(int sample_count);
 
     void draw_spectrum(Gdiplus::Graphics& g);
     void update_spectrum_data();
@@ -438,6 +455,14 @@ private:
     int m_spectrum_overlay_cy = 0;
     void destroy_spectrum_overlay();
     void ensure_spectrum_overlay(HDC ref_dc, int w, int h);
+
+    // Spectrum gradient precomputed color LUT
+    COLORREF m_cached_gradient_c1 = 0;
+    COLORREF m_cached_gradient_c2 = 0;
+    int m_cached_gradient_alpha = -1;
+    int m_cached_gradient_h = 0;
+    std::vector<uint32_t> m_spectrum_gradient_lut;
+    void update_spectrum_gradient_lut(int alpha, COLORREF c1, COLORREF c2, int height);
 
     // Spectrum hotspot wandering
     struct SpectrumHotspot {
