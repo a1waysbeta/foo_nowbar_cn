@@ -148,8 +148,9 @@ public:
         if (m_needs_full_repaint) return false;
         if (m_seekbar_animating || m_hover_animating || m_cbutton_animating ||
             m_bg_animating || m_waveform_animating) return false;
-        // Fall back to full paint when user is interacting with the progress bar
-        if (m_seeking || m_hover_region == HitRegion::ThinProgressBar) return false;
+        // Fall back to full paint when user is interacting with the progress bar or it is animating/enlarged
+        if (m_seeking || m_hover_region == HitRegion::ThinProgressBar ||
+            m_thin_progress_anim_active || m_thin_progress_hover_progress > 0.001f) return false;
         return true;
     }
 
@@ -492,6 +493,17 @@ private:
     void draw_full_spectrum_gdiplus(Gdiplus::Graphics& g);  // GDI+ fallback (used by paint())
     void draw_time_display_top_right(Gdiplus::Graphics& g);
 
+    // Thin progress bar hover animation (Mode 1)
+    float m_thin_progress_hover_progress = 0.0f;  // 0.0f = normal (base_h), 1.0f = enlarged (base_h * 2)
+    float m_thin_progress_target_progress = 0.0f;
+    float m_thin_progress_start_progress = 0.0f;
+    std::chrono::steady_clock::time_point m_thin_progress_anim_start_time = {};
+    float m_thin_progress_anim_duration_ms = 140.0f;
+    bool m_thin_progress_anim_active = false;
+    static constexpr float THIN_PROGRESS_ANIM_DURATION_MS = 140.0f;
+    void update_thin_progress_hover_state();
+    void update_thin_progress_hover_animation();
+
     // Mode 2: Waveform pre-computation
     static constexpr int WAVEFORM_SEGMENTS = 400;
     std::vector<float> m_waveform_peaks;
@@ -653,6 +665,7 @@ private:
     pfc::string8 m_formatted_line2;
     pfc::string8 m_formatted_line3;
     bool m_lines_have_dynamic_time = false;  // True if any line format references %playback_time*%
+    metadb_handle_ptr m_selected_track;      // Explicitly selected track when stopped in Mode 0
 
     // Methods for title formatting
     void update_title_formats();
