@@ -2959,238 +2959,125 @@ void nowbar_preferences::init_tab_control() {
     TabCtrl_InsertItem(hTab, 5, &tie);
 }
 
+static const int g_tab0_controls[] = {
+    IDC_DISPLAY_FORMAT_GROUP, IDC_LINE1_FORMAT_LABEL, IDC_LINE1_FORMAT_EDIT,
+    IDC_LINE2_FORMAT_LABEL, IDC_LINE2_FORMAT_EDIT, IDC_LINE3_FORMAT_LABEL,
+    IDC_LINE3_FORMAT_EDIT, IDC_RATING_STARS_LABEL, IDC_RATING_STARS_COMBO,
+    IDC_MOOD_TAG_LABEL, IDC_MOOD_TAG_COMBO, IDC_PLAYBACK_PREVIEW_GROUP,
+    IDC_SKIP_LOW_RATING_LABEL, IDC_SKIP_LOW_RATING_COMBO,
+    IDC_SKIP_RATING_THRESHOLD_LABEL, IDC_SKIP_RATING_THRESHOLD_COMBO,
+    IDC_VIS_GROUP, IDC_VIS_ENABLE_CHECK, IDC_VIS_60FPS_CHECK,
+    IDC_VIS_SPECTRUM_RADIO, IDC_VIS_SPECTRUM_WIDTH_LABEL,
+    IDC_VIS_SPECTRUM_WIDTH_COMBO, IDC_VIS_SPECTRUM_STYLE_LABEL,
+    IDC_VIS_SPECTRUM_STYLE_COMBO, IDC_VIS_SPECTRUM_HEIGHT_LABEL,
+    IDC_VIS_SPECTRUM_HEIGHT_COMBO, IDC_VIS_WAVEFORM_RADIO,
+    IDC_VIS_WAVEFORM_STYLE_1, IDC_VIS_WAVEFORM_STYLE_2,
+    IDC_VIS_WAVEFORM_WIDTH_LABEL, IDC_VIS_WAVEFORM_WIDTH_COMBO,
+    IDC_PLAYBACK_TIME_LABEL, IDC_PLAYBACK_TIME_COMBO
+};
+
+static const int g_tab1_controls[] = {
+    IDC_THEME_MODE_LABEL, IDC_THEME_MODE_COMBO, IDC_COVER_ARTWORK_LABEL,
+    IDC_COVER_ARTWORK_COMBO, IDC_COVER_MARGIN_LABEL, IDC_COVER_MARGIN_COMBO,
+    IDC_COVER_STYLE_LABEL, IDC_COVER_STYLE_COMBO, IDC_BACKGROUND_STYLE_LABEL,
+    IDC_BACKGROUND_STYLE_COMBO, IDC_BAR_STYLE_LABEL, IDC_BAR_STYLE_COMBO,
+    IDC_SEEKBAR_VISIBLE_LABEL, IDC_SEEKBAR_VISIBLE_COMBO, IDC_SEEKBAR_LENGTH_LABEL,
+    IDC_SEEKBAR_LENGTH_COMBO, IDC_SEEKBAR_POSITION_LABEL, IDC_SEEKBAR_POSITION_SLIDER,
+    IDC_SEEKBAR_POSITION_VALUE, IDC_SMOOTH_ANIMATIONS_LABEL, IDC_SMOOTH_ANIMATIONS_COMBO,
+    IDC_ONLINE_ARTWORK_CHECK, IDC_FOO_ARTWORK_LINK, IDC_CBUTTON_3D_LABEL,
+    IDC_CBUTTON_3D_COMBO, IDC_VOLUME_NUMBER_LABEL, IDC_VOLUME_NUMBER_COMBO
+};
+
+static const int g_tab2_controls[] = {
+    IDC_MOOD_ICON_LABEL, IDC_MOOD_ICON_COMBO, IDC_SHUFFLE_ICON_LABEL,
+    IDC_SHUFFLE_ICON_COMBO, IDC_REPEAT_ICON_LABEL, IDC_REPEAT_ICON_COMBO,
+    IDC_STOP_ICON_LABEL, IDC_STOP_ICON_COMBO, IDC_STOP_AFTER_CURRENT_LABEL,
+    IDC_STOP_AFTER_CURRENT_COMBO, IDC_SUPER_ICON_LABEL, IDC_SUPER_ICON_COMBO,
+    IDC_MINIPLAYER_ICON_LABEL, IDC_MINIPLAYER_ICON_COMBO, IDC_FOO_TRAYCONTROLS_LINK,
+    IDC_HOVER_CIRCLES_LABEL, IDC_HOVER_CIRCLES_COMBO, IDC_ALTERNATE_ICONS_LABEL,
+    IDC_ALTERNATE_ICONS_COMBO, IDC_PLAY_ICON_STYLE_LABEL, IDC_PLAY_ICON_STYLE_COMBO,
+    IDC_AUTOHIDE_CBUTTONS_LABEL, IDC_AUTOHIDE_CBUTTONS_COMBO, IDC_VOLUME_ICON_LABEL,
+    IDC_VOLUME_ICON_COMBO, IDC_VOLUME_BAR_LABEL, IDC_VOLUME_BAR_COMBO
+};
+
+static const int g_tab3_controls[] = {
+    IDC_PROFILE_NAME_LABEL, IDC_PROFILE_COMBO, IDC_PROFILE_MENU_BTN,
+    IDC_CBUTTON_ENABLE_LABEL, IDC_CBUTTON_ACTION_LABEL, IDC_CBUTTON_PATH_LABEL,
+    IDC_CBUTTON1_ENABLE, IDC_CBUTTON1_ACTION, IDC_CBUTTON1_PATH, IDC_CBUTTON1_BROWSE,
+    IDC_CBUTTON2_ENABLE, IDC_CBUTTON2_ACTION, IDC_CBUTTON2_PATH, IDC_CBUTTON2_BROWSE,
+    IDC_CBUTTON3_ENABLE, IDC_CBUTTON3_ACTION, IDC_CBUTTON3_PATH, IDC_CBUTTON3_BROWSE,
+    IDC_CBUTTON4_ENABLE, IDC_CBUTTON4_ACTION, IDC_CBUTTON4_PATH, IDC_CBUTTON4_BROWSE,
+    IDC_CBUTTON5_ENABLE, IDC_CBUTTON5_ACTION, IDC_CBUTTON5_PATH, IDC_CBUTTON5_BROWSE,
+    IDC_CBUTTON6_ENABLE, IDC_CBUTTON6_ACTION, IDC_CBUTTON6_PATH, IDC_CBUTTON6_BROWSE,
+    IDC_CBUTTON_ICON_LABEL, IDC_CBUTTON_GLYPH_LABEL, IDC_CBUTTON_FONT_LABEL,
+    IDC_CBUTTON1_GLYPH_SIZE, IDC_CBUTTON1_ICON, IDC_CBUTTON1_FONT,
+    IDC_CBUTTON2_GLYPH_SIZE, IDC_CBUTTON2_ICON, IDC_CBUTTON2_FONT,
+    IDC_CBUTTON3_GLYPH_SIZE, IDC_CBUTTON3_ICON, IDC_CBUTTON3_FONT,
+    IDC_CBUTTON4_GLYPH_SIZE, IDC_CBUTTON4_ICON, IDC_CBUTTON4_FONT,
+    IDC_CBUTTON5_GLYPH_SIZE, IDC_CBUTTON5_ICON, IDC_CBUTTON5_FONT,
+    IDC_CBUTTON6_GLYPH_SIZE, IDC_CBUTTON6_ICON, IDC_CBUTTON6_FONT,
+    IDC_CBUTTON1_ICON_LABEL, IDC_CBUTTON2_ICON_LABEL, IDC_CBUTTON3_ICON_LABEL,
+    IDC_CBUTTON4_ICON_LABEL, IDC_CBUTTON5_ICON_LABEL, IDC_CBUTTON6_ICON_LABEL,
+    IDC_CBUTTON_LABEL_LABEL, IDC_CBUTTON1_LABEL, IDC_CBUTTON2_LABEL,
+    IDC_CBUTTON3_LABEL, IDC_CBUTTON4_LABEL, IDC_CBUTTON5_LABEL, IDC_CBUTTON6_LABEL
+};
+
+static const int g_tab4_controls[] = {
+    IDC_FONTS_GROUP, IDC_TRACK_FONT_LABEL, IDC_TRACK_FONT_DISPLAY, IDC_TRACK_FONT_SELECT,
+    IDC_ARTIST_FONT_LABEL, IDC_ARTIST_FONT_DISPLAY, IDC_ARTIST_FONT_SELECT,
+    IDC_LINE3_FONT_LABEL, IDC_LINE3_FONT_DISPLAY, IDC_LINE3_FONT_SELECT,
+    IDC_TIME_FONT_LABEL, IDC_TIME_FONT_DISPLAY, IDC_TIME_FONT_SELECT,
+    IDC_COLORS_GROUP, IDC_CUSTOM_BUTTON_ACCENT_CHECK, IDC_BUTTON_ACCENT_BTN,
+    IDC_CUSTOM_PLAY_ACCENT_CHECK, IDC_PLAY_ACCENT_BTN,
+    IDC_CUSTOM_PROGRESS_ACCENT_CHECK, IDC_PROGRESS_ACCENT_BTN,
+    IDC_CUSTOM_VOLUME_ACCENT_CHECK, IDC_VOLUME_ACCENT_BTN,
+    IDC_CUSTOM_HOVER_COLOR_CHECK, IDC_HOVER_COLOR_BTN,
+    IDC_SPECTRUM_COLOR_MODE_LABEL, IDC_CUSTOM_SPECTRUM_COLOR_CHECK, IDC_VIS_SPECTRUM_COLOR_BTN,
+    IDC_SPECTRUM_OPACITY_LABEL, IDC_SPECTRUM_OPACITY_SLIDER, IDC_SPECTRUM_OPACITY_VALUE,
+    IDC_SPECTRUM_COLOR_MODE_COMBO, IDC_SPECTRUM_COLOR2_BTN,
+    IDC_CUSTOM_WAVEFORM_COLOR_CHECK, IDC_VIS_WAVEFORM_COLOR_BTN,
+    IDC_CUSTOM_WAVEFORM_UNPLAYED_CHECK, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN,
+    IDC_CUSTOM_PROGRESS_TRACK_CHECK, IDC_PROGRESS_TRACK_BTN,
+    IDC_CUSTOM_VOLUME_TRACK_CHECK, IDC_VOLUME_TRACK_BTN
+};
+
+static const int g_tab5_controls[] = {
+    IDC_ABOUT_NAME, IDC_ABOUT_DESCRIPTION, IDC_ABOUT_REPO_LINK, IDC_ABOUT_DONATE_LINK,
+    IDC_ABOUT_OTHER_LABEL, IDC_ABOUT_FOO_ARTWORK_LINK, IDC_ABOUT_FOO_TRAYCONTROLS_LINK, IDC_ABOUT_NOTE
+};
+
+static void show_tab_controls(HWND hwnd, int tab, int cmd_show) {
+    const int* ctrls = nullptr;
+    size_t count = 0;
+    switch (tab) {
+        case 0: ctrls = g_tab0_controls; count = _countof(g_tab0_controls); break;
+        case 1: ctrls = g_tab1_controls; count = _countof(g_tab1_controls); break;
+        case 2: ctrls = g_tab2_controls; count = _countof(g_tab2_controls); break;
+        case 3: ctrls = g_tab3_controls; count = _countof(g_tab3_controls); break;
+        case 4: ctrls = g_tab4_controls; count = _countof(g_tab4_controls); break;
+        case 5: ctrls = g_tab5_controls; count = _countof(g_tab5_controls); break;
+        default: return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        HWND hCtrl = GetDlgItem(hwnd, ctrls[i]);
+        if (hCtrl) ShowWindow(hCtrl, cmd_show);
+    }
+}
+
 void nowbar_preferences::switch_tab(int tab) {
+    if (tab < 0 || tab > 5) return;
+    int old_tab = m_current_tab;
     m_current_tab = tab;
 
-    // General tab controls (Tab 0)
-    BOOL show_general = (tab == 0) ? SW_SHOW : SW_HIDE;
-    // Display Format section
-    ShowWindow(GetDlgItem(m_hwnd, IDC_DISPLAY_FORMAT_GROUP), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE1_FORMAT_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE1_FORMAT_EDIT), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE2_FORMAT_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE2_FORMAT_EDIT), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FORMAT_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FORMAT_EDIT), show_general);
-    // Mood Tag setting
-    ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_TAG_COMBO), show_general);
-    // Rating Stars setting
-    ShowWindow(GetDlgItem(m_hwnd, IDC_RATING_STARS_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_RATING_STARS_COMBO), show_general);
-    // Playback Preview section
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAYBACK_PREVIEW_GROUP), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SKIP_LOW_RATING_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SKIP_LOW_RATING_COMBO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SKIP_RATING_THRESHOLD_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SKIP_RATING_THRESHOLD_COMBO), show_general);
-    // Visualization section
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_GROUP), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_ENABLE_CHECK), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_60FPS_CHECK), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_RADIO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_WIDTH_COMBO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_HEIGHT_COMBO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_RADIO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_STYLE_1), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_STYLE_2), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_WIDTH_COMBO), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_LABEL), show_general);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_COMBO), show_general);
+    SendMessage(m_hwnd, WM_SETREDRAW, FALSE, 0);
 
-    // Appearance tab controls (Tab 1)
-    BOOL show_appearance = (tab == 1) ? SW_SHOW : SW_HIDE;
-    ShowWindow(GetDlgItem(m_hwnd, IDC_THEME_MODE_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_THEME_MODE_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COVER_ARTWORK_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COVER_MARGIN_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COVER_MARGIN_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COVER_STYLE_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COVER_STYLE_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_BACKGROUND_STYLE_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_BACKGROUND_STYLE_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_BAR_STYLE_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_VISIBLE_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_VISIBLE_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_VALUE), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ONLINE_ARTWORK_CHECK), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_FOO_ARTWORK_LINK), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_3D_COMBO), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_LABEL), show_appearance);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_NUMBER_COMBO), show_appearance);
+    if (old_tab >= 0 && old_tab <= 5 && old_tab != tab) {
+        show_tab_controls(m_hwnd, old_tab, SW_HIDE);
+    }
+    show_tab_controls(m_hwnd, tab, SW_SHOW);
 
-    // Icons tab controls (Tab 2)
-    BOOL show_icons = (tab == 2) ? SW_SHOW : SW_HIDE;
-    ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_MOOD_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SHUFFLE_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SHUFFLE_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_REPEAT_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_REPEAT_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_AFTER_CURRENT_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_STOP_AFTER_CURRENT_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SUPER_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SUPER_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_MINIPLAYER_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_MINIPLAYER_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_FOO_TRAYCONTROLS_LINK), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_HOVER_CIRCLES_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_HOVER_CIRCLES_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ALTERNATE_ICONS_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ALTERNATE_ICONS_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAY_ICON_STYLE_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAY_ICON_STYLE_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_AUTOHIDE_CBUTTONS_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ICON_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ICON_COMBO), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_BAR_LABEL), show_icons);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_BAR_COMBO), show_icons);
-
-    // Custom Button tab controls (Tab 3)
-    BOOL show_cbutton = (tab == 3) ? SW_SHOW : SW_HIDE;
-    // Profile configuration controls
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PROFILE_NAME_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PROFILE_COMBO), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PROFILE_MENU_BTN), show_cbutton);
-    // Button config headers
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_ENABLE_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_ACTION_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_PATH_LABEL), show_cbutton);
-
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ENABLE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ACTION), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_PATH), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ENABLE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ACTION), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_PATH), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ENABLE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ACTION), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_PATH), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ENABLE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ACTION), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_PATH), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ENABLE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ACTION), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_PATH), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_BROWSE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ENABLE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ACTION), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_PATH), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_BROWSE), show_cbutton);
-    
-    // Custom Button font + glyph controls
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_GLYPH_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_FONT_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_GLYPH_SIZE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_FONT), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_GLYPH_SIZE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_FONT), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_GLYPH_SIZE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_FONT), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_GLYPH_SIZE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_FONT), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_GLYPH_SIZE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_FONT), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_GLYPH_SIZE), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ICON), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_FONT), show_cbutton);
-    // Icon row number labels
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_ICON_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_ICON_LABEL), show_cbutton);
-    // Tooltip label controls
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON_LABEL_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON1_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON2_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON3_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON4_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON5_LABEL), show_cbutton);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CBUTTON6_LABEL), show_cbutton);
-
-    // Fonts & Colors tab controls (Tab 4)
-    BOOL show_fonts = (tab == 4) ? SW_SHOW : SW_HIDE;
-    ShowWindow(GetDlgItem(m_hwnd, IDC_FONTS_GROUP), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_TRACK_FONT_LABEL), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_TRACK_FONT_DISPLAY), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_TRACK_FONT_SELECT), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_LABEL), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_DISPLAY), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ARTIST_FONT_SELECT), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FONT_LABEL), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FONT_DISPLAY), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_LINE3_FONT_SELECT), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_LABEL), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_DISPLAY), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_TIME_FONT_SELECT), show_fonts);
-    // Color Settings controls
-    ShowWindow(GetDlgItem(m_hwnd, IDC_COLORS_GROUP), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_BUTTON_ACCENT_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_BUTTON_ACCENT_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_PLAY_ACCENT_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PLAY_ACCENT_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_PROGRESS_ACCENT_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PROGRESS_ACCENT_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_VOLUME_ACCENT_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_ACCENT_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_HOVER_COLOR_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_HOVER_COLOR_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_COLOR_MODE_LABEL), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_SPECTRUM_COLOR_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_SPECTRUM_COLOR_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_OPACITY_LABEL), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_OPACITY_SLIDER), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_OPACITY_VALUE), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_COLOR_MODE_COMBO), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_SPECTRUM_COLOR2_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_WAVEFORM_COLOR_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_COLOR_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_WAVEFORM_UNPLAYED_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_PROGRESS_TRACK_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_PROGRESS_TRACK_BTN), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_CUSTOM_VOLUME_TRACK_CHECK), show_fonts);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_VOLUME_TRACK_BTN), show_fonts);
-
-    // About tab controls (Tab 5)
-    BOOL show_about = (tab == 5) ? SW_SHOW : SW_HIDE;
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_NAME), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_DESCRIPTION), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_REPO_LINK), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_DONATE_LINK), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_OTHER_LABEL), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_FOO_ARTWORK_LINK), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_FOO_TRAYCONTROLS_LINK), show_about);
-    ShowWindow(GetDlgItem(m_hwnd, IDC_ABOUT_NOTE), show_about);
+    SendMessage(m_hwnd, WM_SETREDRAW, TRUE, 0);
+    RedrawWindow(m_hwnd, nullptr, nullptr, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
 // Helper to update Visualization section enable/disable states
@@ -3380,6 +3267,17 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SetWindowLongPtr(hwnd, GWLP_USERDATA, lp);
         p_this->m_hwnd = hwnd;
         
+        SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
+
+        // Hide inactive tab controls immediately before theming and population
+        show_tab_controls(hwnd, 1, SW_HIDE);
+        show_tab_controls(hwnd, 2, SW_HIDE);
+        show_tab_controls(hwnd, 3, SW_HIDE);
+        show_tab_controls(hwnd, 4, SW_HIDE);
+        show_tab_controls(hwnd, 5, SW_HIDE);
+        show_tab_controls(hwnd, 0, SW_SHOW);
+        p_this->m_current_tab = 0;
+
         // Initialize dark mode hooks
         p_this->m_darkMode.AddDialogWithControls(hwnd);
         
@@ -3818,8 +3716,8 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SetDlgItemTextW(hwnd, IDC_ABOUT_DESCRIPTION, about_desc);
         }
 
-        // Show initial tab
-        p_this->switch_tab(0);
+        SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
+        RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
         
         p_this->m_has_changes = false;
     } else {
