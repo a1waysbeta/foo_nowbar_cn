@@ -886,6 +886,14 @@ void ControlPanelCore::on_settings_changed() {
     m_cbutton_pressed[i] = false;
   }
 
+  // Reset thin progress bar hover state if leaving spectrum mode or seekbar is hidden
+  if (get_nowbar_visualization_mode() != 1 || !get_nowbar_seekbar_visible()) {
+    m_thin_progress_hover_progress = 0.0f;
+    m_thin_progress_target_progress = 0.0f;
+    m_thin_progress_anim_active = false;
+    m_seekbar_animating = false;
+  }
+
   // Repaint to reflect any visual changes
   invalidate();
 
@@ -1319,23 +1327,18 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   m_panel_width = w;
   int y_center = rect.top + h / 2;
 
-  // Artwork (left side) - size based on panel height with margins
-  // When spectrum visualizer is active and artwork has no margin,
-  // reserve space for the thin progress bar at the top of the panel
+  // Artwork (left side) - size based on panel height with margins.
+  // In spectrum visualizer mode, the thin progress bar overlays directly on top
+  // of the artwork, keeping artwork height constant regardless of seekbar visibility.
   int art_margin = get_nowbar_cover_margin() ? m_metrics.artwork_margin : 0;
-  int art_top_offset = 0;
-  if (get_nowbar_visualization_mode() == 1 && art_margin == 0 && get_nowbar_seekbar_visible()) {
-    art_top_offset = static_cast<int>(3 * m_dpi_scale); // thin progress bar height
-  }
-  int art_available_h = h - art_top_offset;
-  int art_size = art_available_h - (art_margin * 2); // Fit within available height with margins
+  int art_size = h - (art_margin * 2); // Fit within available height with margins
   if (art_size > m_metrics.artwork_size) {
     art_size = m_metrics.artwork_size; // Cap at max size
   }
   if (art_size < 32) {
     art_size = 32; // Minimum size
   }
-  int art_y = rect.top + art_top_offset + (art_available_h - art_size) / 2;
+  int art_y = rect.top + (h - art_size) / 2;
   if (get_nowbar_cover_artwork_visible()) {
     m_rect_artwork = {rect.left + art_margin, art_y,
                       rect.left + art_margin + art_size, art_y + art_size};
@@ -2038,6 +2041,7 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   m_spectrum_bg_cache_valid = false;
 
   update_layout(rect);
+  update_thin_progress_hover_animation();
 
   Gdiplus::Graphics g(hdc);
   g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
@@ -2184,28 +2188,22 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     if (m_rect_button_row.right > clean_right) clean_right = m_rect_button_row.right;
   }
 
-  if (clean_right > clean_left) {
-    BitBlt(hdc, clean_left, panel_rect.top,
+  bool seekbar_vis = get_nowbar_seekbar_visible();
+  int clean_top = (seekbar_vis && m_rect_thin_progress.bottom > panel_rect.top)
+                      ? m_rect_thin_progress.bottom
+                      : panel_rect.top;
+
+  if (clean_right > clean_left && panel_rect.bottom > clean_top) {
+    BitBlt(hdc, clean_left, clean_top,
            clean_right - clean_left,
-           panel_rect.bottom - panel_rect.top,
+           panel_rect.bottom - clean_top,
            m_spectrum_bg_hdc,
            clean_left - art_right,
-           0,
+           clean_top - panel_rect.top,
            SRCCOPY);
   }
 
-  bool seekbar_vis = get_nowbar_seekbar_visible();
   if (seekbar_vis) {
-    if (m_rect_thin_progress.right > m_rect_thin_progress.left &&
-        m_rect_thin_progress.bottom > m_rect_thin_progress.top) {
-      BitBlt(hdc, m_rect_thin_progress.left, m_rect_thin_progress.top,
-             m_rect_thin_progress.right - m_rect_thin_progress.left,
-             m_rect_thin_progress.bottom - m_rect_thin_progress.top,
-             m_spectrum_bg_hdc,
-             m_rect_thin_progress.left - art_right,
-             m_rect_thin_progress.top - panel_rect.top,
-             SRCCOPY);
-    }
     if (get_nowbar_playback_time_visible() &&
         m_rect_time.right > m_rect_time.left &&
         m_rect_time.bottom > m_rect_time.top) {
@@ -2222,7 +2220,7 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // 3. Spectrum bars rendered via direct pixel writes (or curve GDI+ path) + AlphaBlend
   draw_full_spectrum(hdc);
 
-  // 4. Render only the center playback controls that sit on top of the spectrum bars and thin progress bar
+  // 4. Render only the center playback controls that sit on top of the spectrum bars
   // (Track info, custom buttons, volume controls, and miniplayer are outside the center area and preserved in the offscreen cache)
   {
     Gdiplus::Graphics g(hdc);
@@ -2234,11 +2232,9 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     draw_playback_buttons(g, false);
 
     if (seekbar_vis) {
-      draw_thin_progress_bar(g);
       if (get_nowbar_playback_time_visible()) {
         draw_time_display_top_right(g);
       }
-      draw_thin_progress_tooltip(g);
     }
   }
 }
@@ -4747,6 +4743,69 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
   g.SetPixelOffsetMode(oldPixelOffset);
 }
 
+void ControlPanelCore::update_thin_progress_hover_state() {
+  bool is_thin_mode = (get_nowbar_visualization_mode() == 1) && get_nowbar_seekbar_visible();
+  bool hovered = (m_hover_region == HitRegion::ThinProgressBar);
+  bool active = (hovered || (m_seeking && m_pressed_region == HitRegion::ThinProgressBar)) && is_thin_mode;
+
+  float target = active ? 1.0f : 0.0f;
+  if (m_thin_progress_target_progress != target) {
+    m_thin_progress_target_progress = target;
+    m_thin_progress_start_progress = m_thin_progress_hover_progress;
+    if (get_nowbar_smooth_animations_enabled()) {
+      m_thin_progress_anim_start_time = std::chrono::steady_clock::now();
+      float diff = std::abs(target - m_thin_progress_start_progress);
+      m_thin_progress_anim_duration_ms = THIN_PROGRESS_ANIM_DURATION_MS * std::max(0.3f, diff);
+      m_thin_progress_anim_active = true;
+      m_seekbar_animating = true;
+      m_needs_full_repaint = true;
+      request_animation();
+      invalidate();
+    } else {
+      m_thin_progress_hover_progress = target;
+      m_thin_progress_anim_active = false;
+      m_seekbar_animating = false;
+      m_needs_full_repaint = true;
+      invalidate();
+    }
+  }
+}
+
+void ControlPanelCore::update_thin_progress_hover_animation() {
+  if (!get_nowbar_smooth_animations_enabled()) {
+    m_thin_progress_hover_progress = m_thin_progress_target_progress;
+    m_thin_progress_anim_active = false;
+    m_seekbar_animating = false;
+    return;
+  }
+
+  if (!m_thin_progress_anim_active) {
+    m_seekbar_animating = false;
+    return;
+  }
+
+  auto now = std::chrono::steady_clock::now();
+  float elapsed_ms = std::chrono::duration<float, std::milli>(now - m_thin_progress_anim_start_time).count();
+  float dur = m_thin_progress_anim_duration_ms > 0.0f ? m_thin_progress_anim_duration_ms : THIN_PROGRESS_ANIM_DURATION_MS;
+  float t = std::min(1.0f, elapsed_ms / dur);
+
+  // Smooth quadratic ease-out interpolation
+  float ease = 1.0f - (1.0f - t) * (1.0f - t);
+
+  m_thin_progress_hover_progress = m_thin_progress_start_progress +
+      ease * (m_thin_progress_target_progress - m_thin_progress_start_progress);
+
+  if (t >= 1.0f) {
+    m_thin_progress_hover_progress = m_thin_progress_target_progress;
+    m_thin_progress_anim_active = false;
+    m_seekbar_animating = false;
+  } else {
+    m_seekbar_animating = true;
+    m_needs_full_repaint = true;
+    request_animation();
+  }
+}
+
 void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
   if (m_rect_thin_progress.right <= m_rect_thin_progress.left) return;
 
@@ -4755,15 +4814,15 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
 
   int w = m_rect_thin_progress.right - m_rect_thin_progress.left;
   int base_h = m_rect_thin_progress.bottom - m_rect_thin_progress.top;
-  // Enlarge on hover/seeking: 2x height
-  int h = active ? base_h * 2 : base_h;
+  // Smoothly animated height: interpolates from base_h to base_h * 2
+  int h = base_h + static_cast<int>(std::round(base_h * m_thin_progress_hover_progress));
   int top = m_rect_thin_progress.top;
 
   // Background: semi-transparent, theme-aware (including artwork colors)
   Gdiplus::Color bgColor;
   int bg_style = get_nowbar_background_style();
   bool has_artwork_bg = (bg_style == 1 || bg_style == 2) && m_artwork_colors_valid;
-  BYTE alpha = active ? 200 : 140;
+  BYTE alpha = static_cast<BYTE>(140 + std::round(60.0f * m_thin_progress_hover_progress));
 
   if (get_nowbar_custom_progress_track_enabled()) {
     // Custom color overrides everything
@@ -4788,6 +4847,23 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
   Gdiplus::SolidBrush bgBrush(bgColor);
   g.FillRectangle(&bgBrush, m_rect_thin_progress.left, top, w, h);
 
+  if (!m_artwork_thumbnail && get_nowbar_cover_artwork_visible() &&
+      m_rect_artwork.right > m_rect_artwork.left) {
+    int cover_x = std::max(static_cast<int>(m_rect_thin_progress.left), static_cast<int>(m_rect_artwork.left));
+    int cover_right = std::min(static_cast<int>(m_rect_thin_progress.right), static_cast<int>(m_rect_artwork.right));
+    int cover_w = cover_right - cover_x;
+    int cover_top = std::max(top, static_cast<int>(m_rect_artwork.top));
+    int cover_bottom = std::min(top + h, static_cast<int>(m_rect_artwork.bottom));
+    int cover_h = cover_bottom - cover_top;
+    if (cover_w > 0 && cover_h > 0) {
+      BYTE r = static_cast<BYTE>((bgColor.GetR() * alpha + m_bg_color.GetR() * (255 - alpha)) / 255);
+      BYTE g_val = static_cast<BYTE>((bgColor.GetG() * alpha + m_bg_color.GetG() * (255 - alpha)) / 255);
+      BYTE b = static_cast<BYTE>((bgColor.GetB() * alpha + m_bg_color.GetB() * (255 - alpha)) / 255);
+      Gdiplus::SolidBrush coverTrackBrush(Gdiplus::Color(255, r, g_val, b));
+      g.FillRectangle(&coverTrackBrush, cover_x, cover_top, cover_w, cover_h);
+    }
+  }
+
   // Progress fill
   double progress;
   if (m_seeking && m_pressed_region == HitRegion::ThinProgressBar) {
@@ -4809,12 +4885,13 @@ void ControlPanelCore::draw_thin_progress_bar(Gdiplus::Graphics& g) {
   }
 
   // Seek handle (solid block at progress position on hover/seeking) - uses highlight color
-  if (active && m_state.track_length > 0) {
+  if (m_thin_progress_hover_progress > 0.01f && m_state.track_length > 0) {
     int handle_w = static_cast<int>(8 * m_dpi_scale);
     int handle_x = m_rect_thin_progress.left + progress_w - handle_w / 2;
     COLORREF handle_accent = get_nowbar_custom_progress_accent_enabled()
         ? get_nowbar_progress_accent_color() : m_theme_highlight;
-    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255,
+    BYTE handle_alpha = static_cast<BYTE>(std::round(255.0f * m_thin_progress_hover_progress));
+    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(handle_alpha,
         GetRValue(handle_accent), GetGValue(handle_accent), GetBValue(handle_accent)));
     g.FillRectangle(&handleBrush, handle_x, top, handle_w, h);
   }
@@ -4830,7 +4907,7 @@ void ControlPanelCore::draw_thin_progress_tooltip(Gdiplus::Graphics& g) {
 
   int w = m_rect_thin_progress.right - m_rect_thin_progress.left;
   int base_h = m_rect_thin_progress.bottom - m_rect_thin_progress.top;
-  int h = active ? base_h * 2 : base_h;
+  int h = base_h + static_cast<int>(std::round(base_h * m_thin_progress_hover_progress));
   int top = m_rect_thin_progress.top;
 
   double progress;
@@ -6057,6 +6134,7 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     m_prev_hover_region = m_hover_region;
     m_hover_change_time = std::chrono::steady_clock::now();
     m_hover_region = new_region;
+    update_thin_progress_hover_state();
 
     // Only skip full repaint when transitioning strictly between center playback buttons
     // while spectrum animation is active. Any transition involving outside controls
@@ -6218,6 +6296,7 @@ void ControlPanelCore::on_mouse_leave() {
   if (m_hover_region != HitRegion::None) {
     HitRegion old_region = m_hover_region;
     m_hover_region = HitRegion::None;
+    update_thin_progress_hover_state();
 
     // If leaving a center playback button, fast path can clear it; otherwise need full repaint
     if (is_center_playback_region(old_region) && (m_spectrum_animating || m_waveform_animating)) {
@@ -6225,6 +6304,8 @@ void ControlPanelCore::on_mouse_leave() {
     } else {
       invalidate();
     }
+  } else {
+    update_thin_progress_hover_state();
   }
 
   // Reset spectrum hover target when mouse leaves the panel
@@ -6271,6 +6352,7 @@ void ControlPanelCore::on_lbutton_down(int x, int y) {
     on_mouse_move(x, y);
   } else if (m_pressed_region == HitRegion::ThinProgressBar) {
     m_seeking = true;
+    update_thin_progress_hover_state();
     // Calculate seek position using thin progress bar width
     double pos = static_cast<double>(x - m_rect_thin_progress.left) /
                  (m_rect_thin_progress.right - m_rect_thin_progress.left);
@@ -6301,6 +6383,7 @@ void ControlPanelCore::on_lbutton_up(int x, int y) {
 
   if (m_seeking) {
     m_seeking = false;
+    update_thin_progress_hover_state();
     // Commit seek - use appropriate rect based on which region started the seek
     RECT seek_rect = m_rect_seekbar;
     if (m_pressed_region == HitRegion::ThinProgressBar) {
@@ -6987,6 +7070,7 @@ void ControlPanelCore::show_autoplaylist_menu() {
       break;
     case ID_SELECTION_MODE_PRIORITIZE_NOW_PLAYING:
       set_nowbar_selection_mode(0);
+      m_selected_track.release();
       notify_all_settings_changed();
       break;
     case ID_SELECTION_MODE_FOLLOW_SELECTION:
@@ -7378,7 +7462,7 @@ metadb_handle_ptr ControlPanelCore::get_display_track() const {
         return m_state.current_track;
       }
     }
-    return get_selected_track();
+    return m_selected_track;
   } else {
     // Follow Selection: always follow selected track regardless of playback state
     metadb_handle_ptr sel = get_selected_track();
@@ -7404,6 +7488,10 @@ metadb_handle_ptr ControlPanelCore::get_rating_track() {
 }
 
 void ControlPanelCore::on_selection_or_focus_changed() {
+  if (core_api::is_initializing()) {
+    return;
+  }
+
   int mode = get_nowbar_selection_mode();
   auto pc = playback_control::get();
   bool is_playing = pc->is_playing() || pc->is_paused();
@@ -7411,6 +7499,21 @@ void ControlPanelCore::on_selection_or_focus_changed() {
   // In Prioritize Now Playing mode while playback is active, selection changes do not affect display
   if (mode == 0 && is_playing) {
     return;
+  }
+
+  if (mode == 0) {
+    // When playback is stopped in Prioritize Now Playing mode, only follow active user selection
+    metadb_handle_list list;
+    if (static_api_test_t<ui_selection_manager_v2>()) {
+      ui_selection_manager_v2::get()->get_selection(list, ui_selection_manager_v2::flag_no_now_playing);
+    } else if (static_api_test_t<ui_selection_manager>()) {
+      ui_selection_manager::get()->get_selection(list);
+    }
+    if (list.get_count() > 0 && list[0].is_valid()) {
+      m_selected_track = list[0];
+    } else {
+      m_selected_track.release();
+    }
   }
 
   update_rating_state();
@@ -7471,6 +7574,8 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
 
   // If playback stopped completely, reset to initial state
   if (was_playing && is_stopped) {
+    m_selected_track.release();
+
     // Reset progress bar
     m_animated_progress = 0.0;
     m_target_progress = 0.0;
@@ -7581,6 +7686,8 @@ void ControlPanelCore::on_volume_changed(float volume_db) {
 }
 
 void ControlPanelCore::on_track_changed() {
+  m_selected_track.release();
+
   // Sync local state from the manager.  on_playback_new_track() updates
   // current_track and track info in the manager but intentionally skips
   // notify_state_changed(), so the local m_state would still have the
@@ -7806,12 +7913,11 @@ void ControlPanelCore::invalidate_progress() {
     RECT dirty = {};
 
     if (vis_mode == 1) {
-        // Spectrum mode: full panel invalidation because paint_spectrum_only
-        // redraws buttons, thin progress bar, time display, and miniplayer
-        // which can extend outside m_rect_spectrum_full (e.g. at minimum
-        // panel height where track info clamps the spectrum top downward).
-        // On Windows 11 DUI, BeginPaint clips BitBlt to the update region,
-        // so partial invalidation leaves stale button content on screen.
+        // Spectrum mode: full panel invalidation because thin progress bar
+        // overlays artwork and time display is updated. Setting m_needs_full_repaint
+        // ensures a clean full repaint refreshes the progress bar without
+        // alpha accumulation over the cover artwork.
+        m_needs_full_repaint = true;
         InvalidateRect(m_hwnd, nullptr, FALSE);
         return;
     } else if (vis_mode == 2) {
