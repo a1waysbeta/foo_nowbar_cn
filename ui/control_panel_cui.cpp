@@ -191,6 +191,7 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         
     case WM_SIZE: {
         if (m_core) {
+            m_core->force_full_repaint();
             InvalidateRect(wnd, nullptr, FALSE);
         }
         return 0;
