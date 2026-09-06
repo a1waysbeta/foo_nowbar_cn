@@ -339,6 +339,7 @@ void ControlPanelCore::on_animation_timer_fired() {
   DeleteTimerQueueTimer(nullptr, m_anim_tp_timer, nullptr);
   m_anim_tp_timer = nullptr;
   m_animation_timer_active = false;
+  m_last_invalidate_time = std::chrono::steady_clock::now();
 }
 
 ControlPanelCore::~ControlPanelCore() {
@@ -2062,7 +2063,8 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   bool paint_seekbar_visible = get_nowbar_seekbar_visible();
   if (paint_vis_mode == 1) {
     // Mode 1: spectrum first, then track info on top, then buttons, then thin progress bar + time
-    draw_full_spectrum_gdiplus(g);
+    g.Flush();
+    draw_full_spectrum(hdc);
     draw_track_info(g);
     draw_playback_buttons(g);
     if (paint_seekbar_visible) {
@@ -2142,49 +2144,18 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
 void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   update_layout(panel_rect);
 
-  // Cache rect covers the entire non-artwork panel area (spectrum, track info,
-  // buttons, thin progress, time display, volume, and miniplayer) so that all
-  // dynamic and hover elements are always drawn on a fresh, clean background.
   int art_right = (get_nowbar_cover_artwork_visible() && m_rect_artwork.right > m_rect_artwork.left)
       ? m_rect_artwork.right
       : panel_rect.left;
   RECT cache_rect = {art_right, panel_rect.top, panel_rect.right, panel_rect.bottom};
   int cache_w = cache_rect.right - cache_rect.left;
   int cache_h = cache_rect.bottom - cache_rect.top;
+  if (cache_w <= 0 || cache_h <= 0) return;
 
-  // First, restore the cached clean background (without spectrum, buttons, or hover artifacts)
-  if (m_spectrum_bg_cache_valid && m_spectrum_bg_hdc) {
-    // Fast path: raw GDI BitBlt from cached background
-    BitBlt(hdc, cache_rect.left, cache_rect.top, cache_w, cache_h,
-           m_spectrum_bg_hdc, 0, 0, SRCCOPY);
-  } else if (cache_w > 0 && cache_h > 0) {
-    // Slow path: draw clean background via GDI+, then capture into GDI cache
-    Gdiplus::Graphics g(hdc);
-    g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
-    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
-    g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
-
-    // Build clip region covering all redrawn elements (spectrum, thin progress,
-    // time display, track info, buttons, volume, miniplayer) while preserving artwork.
-    Gdiplus::Region clip;
-    clip.MakeEmpty();
-    clip.Union(Gdiplus::Rect(cache_rect.left, cache_rect.top, cache_w, cache_h));
-    if (get_nowbar_cover_artwork_visible() &&
-        m_rect_artwork.right > m_rect_artwork.left) {
-      clip.Exclude(Gdiplus::Rect(m_rect_artwork.left, m_rect_artwork.top,
-          m_rect_artwork.right - m_rect_artwork.left,
-          m_rect_artwork.bottom - m_rect_artwork.top));
-    }
-    g.SetClip(&clip);
-
-    draw_background(g, panel_rect);
-    g.ResetClip();
-
-    // Ensure GDI+ flushes to the HDC before we capture
-    g.Flush();
-
-    // Create or resize the GDI cache DC
-    if (m_spectrum_bg_cache_cx != cache_w || m_spectrum_bg_cache_cy != cache_h) {
+  // 1. Ensure clean background cache exists
+  if (!m_spectrum_bg_cache_valid || !m_spectrum_bg_hdc ||
+      m_spectrum_bg_cache_cx != cache_w || m_spectrum_bg_cache_cy != cache_h) {
+    if (m_spectrum_bg_cache_cx != cache_w || m_spectrum_bg_cache_cy != cache_h || !m_spectrum_bg_hdc) {
       destroy_spectrum_bg_cache();
       m_spectrum_bg_hdc = CreateCompatibleDC(hdc);
       m_spectrum_bg_hbitmap = CreateCompatibleBitmap(hdc, cache_w, cache_h);
@@ -2192,17 +2163,67 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
       m_spectrum_bg_cache_cx = cache_w;
       m_spectrum_bg_cache_cy = cache_h;
     }
-    BitBlt(m_spectrum_bg_hdc, 0, 0, cache_w, cache_h,
-           hdc, cache_rect.left, cache_rect.top, SRCCOPY);
+
+    // Render clean background DIRECTLY into m_spectrum_bg_hdc — NOT onto hdc/m_cache_dc!
+    Gdiplus::Graphics g(m_spectrum_bg_hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+    g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+    g.TranslateTransform((float)-art_right, (float)-panel_rect.top);
+    draw_background(g, panel_rect);
+    g.Flush();
+
     m_spectrum_bg_cache_valid = true;
   }
 
-  // Spectrum bars rendered via direct pixel writes (no per-bar GDI+ calls)
-  // This is drawn BEFORE buttons so spectrum appears behind them
+  // 2. Restore clean background for the entire center column (spectrum + playback buttons full height)
+  int clean_left = m_rect_spectrum_full.left;
+  int clean_right = m_rect_spectrum_full.right;
+  if (m_rect_button_row.right > m_rect_button_row.left) {
+    if (m_rect_button_row.left < clean_left) clean_left = m_rect_button_row.left;
+    if (m_rect_button_row.right > clean_right) clean_right = m_rect_button_row.right;
+  }
+
+  if (clean_right > clean_left) {
+    BitBlt(hdc, clean_left, panel_rect.top,
+           clean_right - clean_left,
+           panel_rect.bottom - panel_rect.top,
+           m_spectrum_bg_hdc,
+           clean_left - art_right,
+           0,
+           SRCCOPY);
+  }
+
+  bool seekbar_vis = get_nowbar_seekbar_visible();
+  if (seekbar_vis) {
+    if (m_rect_thin_progress.right > m_rect_thin_progress.left &&
+        m_rect_thin_progress.bottom > m_rect_thin_progress.top) {
+      BitBlt(hdc, m_rect_thin_progress.left, m_rect_thin_progress.top,
+             m_rect_thin_progress.right - m_rect_thin_progress.left,
+             m_rect_thin_progress.bottom - m_rect_thin_progress.top,
+             m_spectrum_bg_hdc,
+             m_rect_thin_progress.left - art_right,
+             m_rect_thin_progress.top - panel_rect.top,
+             SRCCOPY);
+    }
+    if (get_nowbar_playback_time_visible() &&
+        m_rect_time.right > m_rect_time.left &&
+        m_rect_time.bottom > m_rect_time.top) {
+      BitBlt(hdc, m_rect_time.left, m_rect_time.top,
+             m_rect_time.right - m_rect_time.left,
+             m_rect_time.bottom - m_rect_time.top,
+             m_spectrum_bg_hdc,
+             m_rect_time.left - art_right,
+             m_rect_time.top - panel_rect.top,
+             SRCCOPY);
+    }
+  }
+
+  // 3. Spectrum bars rendered via direct pixel writes (or curve GDI+ path) + AlphaBlend
   draw_full_spectrum(hdc);
 
-  // Now draw track info, buttons, progress bar, time, volume, and miniplayer ON TOP of the spectrum.
-  // Single GDI+ pass eliminates redundant Graphics allocations and per-frame background redraws.
+  // 4. Render only the center playback controls that sit on top of the spectrum bars and thin progress bar
+  // (Track info, custom buttons, volume controls, and miniplayer are outside the center area and preserved in the offscreen cache)
   {
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
@@ -2210,17 +2231,15 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
     g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
-    draw_track_info(g);
-    draw_playback_buttons(g);
-    draw_thin_progress_bar(g);
-    if (get_nowbar_playback_time_visible()) {
-      draw_time_display_top_right(g);
-    }
-    draw_volume(g);
-    draw_miniplayer_button(g);
+    draw_playback_buttons(g, false);
 
-    // Draw tooltips last so they render on top of all other elements
-    draw_thin_progress_tooltip(g);
+    if (seekbar_vis) {
+      draw_thin_progress_bar(g);
+      if (get_nowbar_playback_time_visible()) {
+        draw_time_display_top_right(g);
+      }
+      draw_thin_progress_tooltip(g);
+    }
   }
 }
 
@@ -2770,7 +2789,7 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   g.ResetClip();
 }
 
-void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
+void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g, bool include_custom_buttons) {
   bool show_hover = get_nowbar_hover_circles_enabled();
   
   // Check if hover animation is in progress (for repaint scheduling)
@@ -3103,7 +3122,9 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
   // triggered by hover region changes
   m_hover_animating = false;
 
-  // Custom buttons #1-6 (only render if enabled)
+  // Custom buttons #1-6 (only render if enabled and requested)
+  if (!include_custom_buttons) return;
+
   // Update fade animation if active
   if (get_nowbar_cbutton_autohide()) {
     bool should_hide = m_state.is_playing && !m_state.is_paused;
@@ -3944,18 +3965,17 @@ static float a_weight(float freq) {
       (f2 + 12194.0f * 12194.0f);
   if (denom < 1e-12f) return 0.0f;
   float ra = num / denom;
-  // Normalize so that 1kHz ≈ 1.0
-  float db = 20.0f * log10f(ra + 1e-12f) + 2.0f;
-  float linear = powf(10.0f, db / 20.0f);
+  // Normalize so that 1kHz ≈ 1.0 (ra * 10^(2/20) = ra * 1.2589254)
+  float linear = ra * 1.2589254f;
   return std::max(0.0f, std::min(2.0f, linear));
 }
 
 // 5-tap neighbor smoothing kernel [1,3,5,3,1] / 13
-static void apply_neighbor_smoothing(std::vector<float>& values) {
+static void apply_neighbor_smoothing(std::vector<float>& values, std::vector<float>& scratch) {
   int n = (int)values.size();
   if (n < 3) return;
   static const float kernel[] = {1.0f, 3.0f, 5.0f, 3.0f, 1.0f};
-  std::vector<float> smoothed(n);
+  scratch.resize(n);
   for (int i = 0; i < n; i++) {
     float sum = 0.0f;
     float wsum = 0.0f;
@@ -3967,9 +3987,56 @@ static void apply_neighbor_smoothing(std::vector<float>& values) {
         wsum += w;
       }
     }
-    smoothed[i] = (wsum > 0.0f) ? sum / wsum : values[i];
+    scratch[i] = (wsum > 0.0f) ? sum / wsum : values[i];
   }
-  values = std::move(smoothed);
+  values = scratch;
+}
+
+void ControlPanelCore::update_spectrum_bar_configs(int sample_count) {
+  if (m_spectrum_bar_count <= 0 || sample_count <= 0) return;
+  if (m_spectrum_config_bar_count == m_spectrum_bar_count &&
+      m_spectrum_config_sample_count == sample_count)
+    return;
+
+  m_spectrum_config_bar_count = m_spectrum_bar_count;
+  m_spectrum_config_sample_count = sample_count;
+  m_spectrum_bar_configs.resize(m_spectrum_bar_count);
+  m_spectrum_normalized_values.resize(m_spectrum_bar_count, 0.0f);
+
+  float freq_min = 60.0f;
+  float freq_max = 16000.0f;
+  float bin_freq_step = 44100.0f / (float)SPECTRUM_FFT_SIZE;
+  float log_min = std::log10(freq_min);
+  float log_max = std::log10(freq_max);
+
+  for (int i = 0; i < m_spectrum_bar_count; i++) {
+    float f_lo = std::pow(10.0f, log_min + (log_max - log_min) * i / m_spectrum_bar_count);
+    float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / m_spectrum_bar_count);
+    float f_center = (f_lo + f_hi) * 0.5f;
+
+    float fbin_lo = f_lo / bin_freq_step;
+    float fbin_hi = f_hi / bin_freq_step;
+    if (fbin_lo < 0.0f) fbin_lo = 0.0f;
+    if (fbin_hi < 0.0f) fbin_hi = 0.0f;
+    if (fbin_lo >= (float)(sample_count - 1)) fbin_lo = (float)(sample_count - 1) - 0.001f;
+    if (fbin_hi >= (float)(sample_count - 1)) fbin_hi = (float)(sample_count - 1) - 0.001f;
+
+    float fbin_center = f_center / bin_freq_step;
+    if (fbin_center < 0.0f) fbin_center = 0.0f;
+    if (fbin_center >= (float)(sample_count - 1)) fbin_center = (float)(sample_count - 1) - 0.001f;
+
+    int bin_lo = (int)fbin_lo;
+    int bin_hi = (int)fbin_hi;
+
+    auto& cfg = m_spectrum_bar_configs[i];
+    cfg.fbin_lo = fbin_lo;
+    cfg.fbin_hi = fbin_hi;
+    cfg.fbin_center = fbin_center;
+    cfg.bin_lo = bin_lo;
+    cfg.bin_hi = bin_hi;
+    cfg.is_narrow = (bin_lo == bin_hi);
+    cfg.a_weight = a_weight(f_center);
+  }
 }
 
 // Process FFT bins into normalized bar values for one channel
@@ -4114,6 +4181,7 @@ void ControlPanelCore::update_spectrum_data() {
     m_spectrum_bars_right.resize(new_count, 0.0f);
     m_spectrum_peaks_right.resize(new_count, 0.0f);
     m_spectrum_peak_velocity_right.resize(new_count, 0.0f);
+    m_spectrum_normalized_values.resize(new_count, 0.0f);
   }
   if (m_spectrum_bar_count <= 0) return;
 
@@ -4138,11 +4206,14 @@ void ControlPanelCore::update_spectrum_data() {
 
   if (!have_data) {
     // No audio data — apply dynamics with zero input so bars decay smoothly
-    std::vector<float> silence(m_spectrum_bar_count, 0.0f);
-    apply_bar_dynamics(silence, m_spectrum_bar_count,
+    m_spectrum_normalized_values.assign(m_spectrum_bar_count, 0.0f);
+    apply_bar_dynamics(m_spectrum_normalized_values, m_spectrum_bar_count,
                         m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
     return;
   }
+
+  // Precompute frequency bins and A-weighting factors if needed
+  update_spectrum_bar_configs((int)sample_count);
 
   // Style 0=Mono, 1=Curve (both use mono data)
   bool stereo = false;
@@ -4164,24 +4235,10 @@ void ControlPanelCore::update_spectrum_data() {
     apply_bar_dynamics(right_values, m_spectrum_bar_count,
                         m_spectrum_bars_right, m_spectrum_peaks_right, m_spectrum_peak_velocity_right);
   } else {
-    // Mono: average all channels (original behavior with A-weighting + smoothing)
-    std::vector<float> normalized_values(m_spectrum_bar_count);
-    float log_min = std::log10(freq_min);
-    float log_max = std::log10(freq_max);
-
+    // Mono: average all channels (with precalculated frequency bands and A-weighting)
     for (int i = 0; i < m_spectrum_bar_count; i++) {
-      float f_lo = std::pow(10.0f, log_min + (log_max - log_min) * i / m_spectrum_bar_count);
-      float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / m_spectrum_bar_count);
-      float f_center = (f_lo + f_hi) * 0.5f;
-
-      float fbin_lo = f_lo / bin_freq_step;
-      float fbin_hi = f_hi / bin_freq_step;
-      if (fbin_lo < 0.0f) fbin_lo = 0.0f;
-      if (fbin_hi < 0.0f) fbin_hi = 0.0f;
-      if (fbin_lo >= (float)(sample_count - 1)) fbin_lo = (float)(sample_count - 1) - 0.001f;
-      if (fbin_hi >= (float)(sample_count - 1)) fbin_hi = (float)(sample_count - 1) - 0.001f;
-
-      float aw = a_weight(f_center);
+      const auto& cfg = m_spectrum_bar_configs[i];
+      float aw = cfg.a_weight;
 
       // Helper: interpolate a single bin value at a fractional position
       auto interp_bin = [&](float fbin) -> float {
@@ -4200,18 +4257,13 @@ void ControlPanelCore::update_spectrum_data() {
       };
 
       float magnitude = 0.0f;
-      int bin_lo = (int)fbin_lo;
-      int bin_hi = (int)fbin_hi;
-      if (bin_lo == bin_hi) {
+      if (cfg.is_narrow) {
         // Narrow band: interpolate at center frequency for smooth transitions
-        float fbin_center = f_center / bin_freq_step;
-        if (fbin_center < 0.0f) fbin_center = 0.0f;
-        if (fbin_center >= (float)(sample_count - 1)) fbin_center = (float)(sample_count - 1) - 0.001f;
-        magnitude = interp_bin(fbin_center);
+        magnitude = interp_bin(cfg.fbin_center);
       } else {
         // Wide band: interpolate at edges, peak across whole interior bins
-        magnitude = std::max(interp_bin(fbin_lo), interp_bin(fbin_hi));
-        for (int b = bin_lo + 1; b < bin_hi; b++) {
+        magnitude = std::max(interp_bin(cfg.fbin_lo), interp_bin(cfg.fbin_hi));
+        for (int b = cfg.bin_lo + 1; b < cfg.bin_hi; b++) {
           float val;
           if (nch >= 2) {
             float avg = 0.0f;
@@ -4231,16 +4283,16 @@ void ControlPanelCore::update_spectrum_data() {
       float normalized = std::sqrt(magnitude) * 3.0f;
       if (normalized > 0.7f)
         normalized = 0.7f + 0.3f * (1.0f - std::exp(-(normalized - 0.7f) / 0.3f));
-      normalized_values[i] = normalized;
+      m_spectrum_normalized_values[i] = normalized;
     }
 
     float hotspot_positions[SPECTRUM_HOTSPOT_COUNT];
     for (int i = 0; i < SPECTRUM_HOTSPOT_COUNT; i++)
       hotspot_positions[i] = m_spectrum_hotspots[i].position;
-    apply_hotspot_gain(normalized_values, m_spectrum_bar_count,
+    apply_hotspot_gain(m_spectrum_normalized_values, m_spectrum_bar_count,
                         hotspot_positions, SPECTRUM_HOTSPOT_COUNT);
 
-    apply_bar_dynamics(normalized_values, m_spectrum_bar_count,
+    apply_bar_dynamics(m_spectrum_normalized_values, m_spectrum_bar_count,
                         m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
   }
 }
@@ -4550,7 +4602,9 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
   // Resample bar heights to SPECTRUM_CURVE_POINTS control points
   int num_pts = SPECTRUM_CURVE_POINTS;
   if (num_pts > m_spectrum_bar_count) num_pts = m_spectrum_bar_count;
-  std::vector<Gdiplus::PointF> points(num_pts);
+  if (num_pts < 2) return;
+
+  Gdiplus::PointF points[SPECTRUM_CURVE_POINTS];
   float bottom_f = (float)area_rect.bottom;
   float left_f = (float)area_rect.left;
 
@@ -4569,9 +4623,10 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
 
   // Build Bezier control points from Catmull-Rom spline
   // For N points we get (N-1) cubic segments = 1 + (N-1)*3 Bezier points
-  std::vector<Gdiplus::PointF> bezier;
-  bezier.reserve(1 + (num_pts - 1) * 3);
-  bezier.push_back(points[0]);
+  constexpr int max_bezier_pts = 1 + (SPECTRUM_CURVE_POINTS - 1) * 3;
+  Gdiplus::PointF bezier[max_bezier_pts];
+  int bezier_count = 0;
+  bezier[bezier_count++] = points[0];
 
   for (int i = 0; i < num_pts - 1; i++) {
     // Catmull-Rom tangents with boundary clamping
@@ -4590,14 +4645,14 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
       p1.Y - (p2.Y - p0.Y) / 6.0f
     );
 
-    bezier.push_back(cp1);
-    bezier.push_back(cp2);
-    bezier.push_back(p1);
+    bezier[bezier_count++] = cp1;
+    bezier[bezier_count++] = cp2;
+    bezier[bezier_count++] = p1;
   }
 
   // Build filled path: curve on top, straight line along baseline
   Gdiplus::GraphicsPath curvePath;
-  curvePath.AddBeziers(bezier.data(), (int)bezier.size());
+  curvePath.AddBeziers(bezier, bezier_count);
   // Close along baseline
   curvePath.AddLine(points[num_pts - 1].X, bottom_f, left_f, bottom_f);
   curvePath.CloseFigure();
@@ -4679,12 +4734,12 @@ void ControlPanelCore::draw_spectrum_curve(Gdiplus::Graphics& g, const RECT& are
     strokeBrush.SetInterpolationColors(colors, positions, 5);
     Gdiplus::Pen strokePen(&strokeBrush, 2.0f);
     Gdiplus::GraphicsPath strokePath;
-    strokePath.AddBeziers(bezier.data(), (int)bezier.size());
+    strokePath.AddBeziers(bezier, bezier_count);
     g.DrawPath(&strokePen, &strokePath);
   } else {
     Gdiplus::Pen strokePen(Gdiplus::Color(stroke_alpha, bright_r, bright_g, bright_b), 2.0f);
     Gdiplus::GraphicsPath strokePath;
-    strokePath.AddBeziers(bezier.data(), (int)bezier.size());
+    strokePath.AddBeziers(bezier, bezier_count);
     g.DrawPath(&strokePen, &strokePath);
   }
 
@@ -4986,20 +5041,29 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
 
     // Determine bar color
     int base_r, base_g, base_b;
-    int base_r2 = r1, base_g2 = g1, base_b2 = b1;
     if (gradient_mode == 3) {
       float hue = (half_count > 1) ? (float)bar_idx / (float)(half_count - 1) * 300.0f : 0.0f;
       if (stereo && is_right) hue = 300.0f - hue;
       COLORREF freq_color = hsl_to_rgb(hue, 0.9f, 0.55f);
       base_r = GetRValue(freq_color); base_g = GetGValue(freq_color); base_b = GetBValue(freq_color);
-    } else if (stereo && gradient_mode == 2) {
-      base_r = is_right ? r2 : r1; base_g = is_right ? g2 : g1; base_b = is_right ? b2 : b1;
-      base_r2 = base_r; base_g2 = base_g; base_b2 = base_b;
     } else if (stereo) {
       base_r = is_right ? rr1 : lr1; base_g = is_right ? rg1 : lg1; base_b = is_right ? rb1 : lb1;
     } else {
       base_r = r1; base_g = g1; base_b = b1;
-      base_r2 = r2; base_g2 = g2; base_b2 = b2;
+    }
+
+    uint32_t bar_pixel = ((uint32_t)alpha << 24) |
+        ((uint32_t)((base_r * alpha) / 255) << 16) |
+        ((uint32_t)((base_g * alpha) / 255) << 8) |
+        ((uint32_t)((base_b * alpha) / 255));
+
+    float dr = 0.0f, dg = 0.0f, db = 0.0f;
+    float cur_r = (float)r1, cur_g = (float)g1, cur_b = (float)b1;
+    if (gradient_mode == 2 && bar_h > 1 && !stereo) {
+      float inv_h = 1.0f / (float)(bar_h - 1);
+      dr = ((float)r2 - (float)r1) * inv_h;
+      dg = ((float)g2 - (float)g1) * inv_h;
+      db = ((float)b2 - (float)b1) * inv_h;
     }
 
     for (int row = by; row < area_h; row++) {
@@ -5015,25 +5079,19 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
       int left = bx;
       int right = bx + bw;
 
-      int row_r, row_g, row_b;
-      if (gradient_mode == 3) {
-        row_r = base_r; row_g = base_g; row_b = base_b;
-      } else if (gradient_mode == 2 && bar_h > 1 && !stereo) {
-        float t = (float)(row - by) / (float)(bar_h - 1);
-        row_r = (int)((float)r1 + ((float)r2 - (float)r1) * t);
-        row_g = (int)((float)g1 + ((float)g2 - (float)g1) * t);
-        row_b = (int)((float)b1 + ((float)b2 - (float)b1) * t);
+      uint32_t row_pixel;
+      if (gradient_mode == 2 && bar_h > 1 && !stereo) {
+        int r = std::max(0, std::min(255, (int)cur_r));
+        int g = std::max(0, std::min(255, (int)cur_g));
+        int b = std::max(0, std::min(255, (int)cur_b));
+        cur_r += dr; cur_g += dg; cur_b += db;
+        row_pixel = ((uint32_t)alpha << 24) |
+            ((uint32_t)((r * alpha) / 255) << 16) |
+            ((uint32_t)((g * alpha) / 255) << 8) |
+            ((uint32_t)((b * alpha) / 255));
       } else {
-        row_r = base_r; row_g = base_g; row_b = base_b;
+        row_pixel = bar_pixel;
       }
-      row_r = std::max(0, std::min(255, row_r));
-      row_g = std::max(0, std::min(255, row_g));
-      row_b = std::max(0, std::min(255, row_b));
-
-      uint32_t row_pixel = ((uint32_t)alpha << 24) |
-          ((uint32_t)((row_r * alpha) / 255) << 16) |
-          ((uint32_t)((row_g * alpha) / 255) << 8) |
-          ((uint32_t)((row_b * alpha) / 255));
 
       uint32_t* pixel = m_spectrum_overlay_bits + row * stride + left;
       for (int col = left; col < right; col++) {
@@ -5045,11 +5103,7 @@ void ControlPanelCore::draw_full_spectrum(HDC hdc) {
     if (!is_dominoes && bar_idx < (int)peaks_vec.size() && bar_idx < (int)bars_vec.size() &&
         peaks_vec[bar_idx] > bars_vec[bar_idx]) {
       int peak_y = area_h - (int)(peaks_vec[bar_idx] * area_h);
-      int peak_r = base_r, peak_g = base_g, peak_b = base_b;
-      uint32_t peak_pixel = ((uint32_t)alpha << 24) |
-          ((uint32_t)((peak_r * alpha) / 255) << 16) |
-          ((uint32_t)((peak_g * alpha) / 255) << 8) |
-          ((uint32_t)((peak_b * alpha) / 255));
+      uint32_t peak_pixel = bar_pixel;
       for (int py = peak_y; py < peak_y + 2 && py < area_h; py++) {
         if (py < 0) continue;
         uint32_t* pixel = m_spectrum_overlay_bits + py * stride + bx;
@@ -5938,6 +5992,24 @@ HitRegion ControlPanelCore::hit_test(int x, int y) const {
   return HitRegion::None;
 }
 
+static bool is_center_playback_region(HitRegion region) {
+  switch (region) {
+    case HitRegion::HeartButton:
+    case HitRegion::RatingArea:
+    case HitRegion::ShuffleButton:
+    case HitRegion::PrevButton:
+    case HitRegion::PlayButton:
+    case HitRegion::NextButton:
+    case HitRegion::StopButton:
+    case HitRegion::StopAfterCurrentButton:
+    case HitRegion::RepeatButton:
+    case HitRegion::SuperButton:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void ControlPanelCore::on_mouse_move(int x, int y) {
   HitRegion new_region = hit_test(x, y);
 
@@ -5985,14 +6057,16 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     m_prev_hover_region = m_hover_region;
     m_hover_change_time = std::chrono::steady_clock::now();
     m_hover_region = new_region;
-    // Skip full repaint when visualization fast path is active —
-    // paint_spectrum_only() already redraws buttons with hover states each frame.
-    // Exception: ThinProgressBar draws a tooltip and expanded bar that extend
-    // outside the fast path's cached background, so transitioning to/from it
-    // needs a full repaint to clean up properly.
-    bool needs_full = (old_region == HitRegion::ThinProgressBar ||
-                       new_region == HitRegion::ThinProgressBar);
-    if (!needs_full && (m_spectrum_animating || m_waveform_animating)) {
+
+    // Only skip full repaint when transitioning strictly between center playback buttons
+    // while spectrum animation is active. Any transition involving outside controls
+    // (Custom buttons, Volume, Miniplayer, ThinProgressBar) requires a full repaint
+    // to update their static cache in m_cache_dc.
+    bool old_center = is_center_playback_region(old_region);
+    bool new_center = is_center_playback_region(new_region) || (new_region == HitRegion::None);
+    bool can_use_soft = old_center && new_center && (m_spectrum_animating || m_waveform_animating);
+
+    if (can_use_soft) {
       invalidate_soft();
     } else {
       invalidate();
@@ -6086,12 +6160,11 @@ void ControlPanelCore::on_mouse_move(int x, int y) {
     }
   }
 
-  // Track volume slider hover position for tooltip
+  // Track volume slider hover position for tooltip and dot
   if (new_region == HitRegion::VolumeSlider) {
+    int old_vol_x = m_volume_hover_x;
     m_volume_hover_x = x;
-    if (m_spectrum_animating || m_waveform_animating) {
-      invalidate_soft();
-    } else {
+    if (old_vol_x != x) {
       invalidate();
     }
   }
@@ -6143,13 +6216,11 @@ void ControlPanelCore::on_mouse_leave() {
   m_rating_hover_star = 0;
 
   if (m_hover_region != HitRegion::None) {
-    // ThinProgressBar draws a tooltip and expanded bar outside the fast path's
-    // cached background — leaving it needs a full repaint to clean up artifacts.
-    bool was_thin_progress = (m_hover_region == HitRegion::ThinProgressBar);
+    HitRegion old_region = m_hover_region;
     m_hover_region = HitRegion::None;
-    // Skip full repaint when visualization fast path is active —
-    // paint_spectrum_only() already redraws buttons with hover states each frame.
-    if (!was_thin_progress && (m_spectrum_animating || m_waveform_animating)) {
+
+    // If leaving a center playback button, fast path can clear it; otherwise need full repaint
+    if (is_center_playback_region(old_region) && (m_spectrum_animating || m_waveform_animating)) {
       invalidate_soft();
     } else {
       invalidate();
@@ -7713,9 +7784,7 @@ void ControlPanelCore::invalidate() {
 
 void ControlPanelCore::invalidate_soft() {
   // Invalidate the window without setting m_needs_full_repaint, so the
-  // spectrum/waveform fast path remains active.  Use this for hover state
-  // changes during visualization animation — the fast path already redraws
-  // buttons, volume, and time display each frame.
+  // spectrum/waveform fast path remains active.
   if (m_hwnd) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
   }
