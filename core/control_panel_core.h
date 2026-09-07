@@ -228,6 +228,7 @@ private:
     void draw_artwork(Gdiplus::Graphics& g);
     void draw_track_info(Gdiplus::Graphics& g);
     void draw_playback_buttons(Gdiplus::Graphics& g, bool include_custom_buttons = true);
+    void draw_custom_buttons(Gdiplus::Graphics& g);
     void draw_seekbar(Gdiplus::Graphics& g);
     void draw_seekbar_tooltip(Gdiplus::Graphics& g);
     void draw_volume(Gdiplus::Graphics& g);
@@ -395,7 +396,8 @@ private:
     static constexpr float CBUTTON_RELEASE_DURATION_MS = 140.0f; // Release spring-back
 
     // Spectrum visualizer
-    static constexpr int SPECTRUM_FFT_SIZE = 1024;
+    // FFT size for the legacy FFT path (used when USE_SDFT_TRANSFORM is off).
+    static constexpr int SPECTRUM_FFT_SIZE = 2048;
     static constexpr float SPECTRUM_FADE_DURATION_MS = 300.0f;
     service_ptr_t<visualisation_stream_v3> m_vis_stream;
     std::vector<float> m_spectrum_bars;
@@ -428,6 +430,26 @@ private:
     int m_spectrum_config_bar_count = 0;
     int m_spectrum_config_sample_count = 0;
     void update_spectrum_bar_configs(int sample_count);
+
+    // Sliding DFT (SDFT) per-bar resonator state.
+    // Each bar maintains an independent complex resonator at its own center
+    // frequency, updated per-sample. Avoids FFT bin collision where multiple
+    // bars read the same FFT bin and move together.
+    struct SdftBin {
+        float real = 0.0f;       // resonator state: real part
+        float imag = 0.0f;       // resonator state: imaginary part
+        float cos_w = 0.0f;      // cos(2*pi*f_center / sample_rate)
+        float sin_w = 0.0f;      // sin(2*pi*f_center / sample_rate)
+        float decay = 0.9999f;   // exponential window decay (smaller = faster)
+        float norm = 10000.0f;   // steady-state gain = 1 / (1 - decay)
+        float a_weight_val = 1.0f;
+        float freq = 0.0f;
+    };
+    std::vector<SdftBin> m_sdft_bins;
+    int m_sdft_sample_rate = 0;
+    void update_sdft_bins(int sample_rate, int bar_count);
+    static void process_sdft(const audio_sample* data, int sample_count, int nch,
+                             std::vector<SdftBin>& bins, int bar_count);
 
     void draw_spectrum(Gdiplus::Graphics& g);
     void update_spectrum_data();
