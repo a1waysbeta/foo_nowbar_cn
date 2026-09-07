@@ -15,6 +15,19 @@
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "msimg32.lib")
 
+// === Spectrum hotspot gain toggle ===
+// Enable to restore the synthetic wandering-hotspot gain that boosts
+// neighboring bars together (legacy "plateaued curve" look). Off by default.
+// #define ENABLE_SPECTRUM_HOTSPOT_GAIN
+
+// === SDFT transform toggle ===
+// When defined, spectrum uses per-bar Sliding DFT (SDFT) resonators instead
+// of the foobar2000 FFT. Each bar has an independent complex resonator at
+// its center frequency, so there is no FFT bin collision and bars move
+// independently. Uses get_chunk_absolute (raw PCM) instead of
+// get_spectrum_absolute (FFT).
+#define USE_SDFT_TRANSFORM
+
 namespace nowbar {
 
 HBITMAP create_argb_dib_section(HDC hdc, int w, int h) {
@@ -2066,17 +2079,19 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
   int paint_vis_mode = get_nowbar_visualization_mode();
   bool paint_seekbar_visible = get_nowbar_seekbar_visible();
   if (paint_vis_mode == 1) {
-    // Mode 1: spectrum first, then track info on top, then buttons, then thin progress bar + time
+    // Mode 1: spectrum first, then track info on top, center buttons, thin progress bar + time (behind right-side controls),
+    // and finally custom buttons, volume, and miniplayer on top
     g.Flush();
     draw_full_spectrum(hdc);
     draw_track_info(g);
-    draw_playback_buttons(g);
+    draw_playback_buttons(g, false);
     if (paint_seekbar_visible) {
       draw_thin_progress_bar(g);
       if (get_nowbar_playback_time_visible()) {
         draw_time_display_top_right(g);
       }
     }
+    draw_custom_buttons(g);
   } else if (paint_vis_mode == 2) {
     draw_track_info(g);
     if (paint_seekbar_visible) {
@@ -2207,21 +2222,38 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     if (get_nowbar_playback_time_visible() &&
         m_rect_time.right > m_rect_time.left &&
         m_rect_time.bottom > m_rect_time.top) {
-      BitBlt(hdc, m_rect_time.left, m_rect_time.top,
-             m_rect_time.right - m_rect_time.left,
-             m_rect_time.bottom - m_rect_time.top,
-             m_spectrum_bg_hdc,
-             m_rect_time.left - art_right,
-             m_rect_time.top - panel_rect.top,
-             SRCCOPY);
+      int right_clean_left = m_rect_time.left;
+      auto check_left = [&](const RECT& r) {
+        if (r.right > r.left && r.left < right_clean_left) {
+          right_clean_left = r.left;
+        }
+      };
+      check_left(m_rect_cbutton1);
+      check_left(m_rect_cbutton2);
+      check_left(m_rect_cbutton3);
+      check_left(m_rect_cbutton4);
+      check_left(m_rect_cbutton5);
+      check_left(m_rect_cbutton6);
+      check_left(m_rect_volume);
+      check_left(m_rect_miniplayer);
+
+      int time_clean_w = panel_rect.right - right_clean_left;
+      int time_clean_h = panel_rect.bottom - clean_top;
+      if (time_clean_w > 0 && time_clean_h > 0) {
+        BitBlt(hdc, right_clean_left, clean_top,
+               time_clean_w, time_clean_h,
+               m_spectrum_bg_hdc,
+               right_clean_left - art_right,
+               clean_top - panel_rect.top,
+               SRCCOPY);
+      }
     }
   }
 
   // 3. Spectrum bars rendered via direct pixel writes (or curve GDI+ path) + AlphaBlend
   draw_full_spectrum(hdc);
 
-  // 4. Render only the center playback controls that sit on top of the spectrum bars
-  // (Track info, custom buttons, volume controls, and miniplayer are outside the center area and preserved in the offscreen cache)
+  // 4. Render center playback controls and right controls (playback timer rendered behind buttons/icons)
   {
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
@@ -2231,10 +2263,11 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
 
     draw_playback_buttons(g, false);
 
-    if (seekbar_vis) {
-      if (get_nowbar_playback_time_visible()) {
-        draw_time_display_top_right(g);
-      }
+    if (seekbar_vis && get_nowbar_playback_time_visible()) {
+      draw_time_display_top_right(g);
+      draw_custom_buttons(g);
+      draw_volume(g);
+      draw_miniplayer_button(g);
     }
   }
 }
@@ -3118,8 +3151,43 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g, bool include_
   // triggered by hover region changes
   m_hover_animating = false;
 
-  // Custom buttons #1-6 (only render if enabled and requested)
-  if (!include_custom_buttons) return;
+  if (include_custom_buttons) {
+    draw_custom_buttons(g);
+  }
+}
+
+void ControlPanelCore::draw_custom_buttons(Gdiplus::Graphics& g) {
+  int total_enabled = 0;
+  for (int i = 0; i < 6; i++) {
+    if (get_nowbar_cbutton_enabled(i)) total_enabled++;
+  }
+  if (total_enabled == 0) return;
+
+  bool show_hover = get_nowbar_hover_circles_enabled();
+
+  // Determine if we're using artwork-based background that needs light icons
+  int bg_style = get_nowbar_background_style();
+  bool use_light_foreground = (bg_style == 1 && m_artwork_colors_valid) || 
+                              (bg_style == 2 && m_blurred_artwork);
+
+  // Override icon colors for artwork-based backgrounds (they have dark overlays)
+  Gdiplus::Color icon_secondary_color = use_light_foreground
+      ? Gdiplus::Color(255, 200, 200, 200)  // Light gray for visibility
+      : m_text_secondary_color;
+
+  // Get custom button accent color from preferences
+  COLORREF btn_accent = get_nowbar_custom_button_accent_enabled()
+      ? get_nowbar_button_accent_color() : m_theme_highlight;
+  Gdiplus::Color icon_accent_color(255, GetRValue(btn_accent), GetGValue(btn_accent), GetBValue(btn_accent));
+  Gdiplus::Color icon_hover_color;
+  if (use_light_foreground) {
+      icon_hover_color = Gdiplus::Color(40, 255, 255, 255);
+  } else if (get_nowbar_custom_hover_color_enabled()) {
+      COLORREF hc = get_nowbar_hover_color();
+      icon_hover_color = Gdiplus::Color(40, GetRValue(hc), GetGValue(hc), GetBValue(hc));
+  } else {
+      icon_hover_color = Gdiplus::Color(40, GetRValue(m_theme_selection), GetGValue(m_theme_selection), GetBValue(m_theme_selection));
+  }
 
   // Update fade animation if active
   if (get_nowbar_cbutton_autohide()) {
@@ -3935,6 +4003,9 @@ void ControlPanelCore::release_vis_stream() {
   std::fill(m_spectrum_bars_right.begin(), m_spectrum_bars_right.end(), 0.0f);
   std::fill(m_spectrum_peaks_right.begin(), m_spectrum_peaks_right.end(), 0.0f);
   std::fill(m_spectrum_peak_velocity_right.begin(), m_spectrum_peak_velocity_right.end(), 0.0f);
+  // Reset SDFT resonator states so stale energy doesn't carry over
+  for (auto& bin : m_sdft_bins) { bin.real = 0.0f; bin.imag = 0.0f; }
+  m_sdft_sample_rate = 0;
 }
 
 int ControlPanelCore::compute_spectrum_bar_count(int area_w) const {
@@ -4069,6 +4140,73 @@ static void process_channel_bars(const audio_sample* data, int sample_count, int
   }
 }
 
+// === Sliding DFT (SDFT) per-bar resonators ===
+// Initialize one complex resonator per bar at its logarithmic center
+// frequency. decay=0.9999 gives τ≈227ms @ 44100Hz — long enough for low
+// frequencies (60Hz) to accumulate over ~13 periods so adjacent low bars
+// don't collapse to similar amplitudes.
+void ControlPanelCore::update_sdft_bins(int sample_rate, int bar_count) {
+  if (bar_count <= 0 || sample_rate <= 0) return;
+  if (m_sdft_sample_rate == sample_rate &&
+      (int)m_sdft_bins.size() == bar_count)
+    return;
+
+  m_sdft_sample_rate = sample_rate;
+  m_sdft_bins.resize(bar_count);
+
+  float freq_min = 60.0f;
+  float freq_max = 16000.0f;
+  float log_min = std::log10(freq_min);
+  float log_max = std::log10(freq_max);
+  constexpr float PI = 3.14159265358979323846f;
+  float decay = 0.9999f;
+
+  for (int i = 0; i < bar_count; i++) {
+    float f_lo = std::pow(10.0f, log_min + (log_max - log_min) * i / bar_count);
+    float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / bar_count);
+    float f_center = (f_lo + f_hi) * 0.5f;
+
+    float omega = 2.0f * PI * f_center / (float)sample_rate;
+    auto& bin = m_sdft_bins[i];
+    bin.cos_w = std::cos(omega);
+    bin.sin_w = std::sin(omega);
+    bin.decay = decay;
+    bin.norm = 1.0f / (1.0f - decay);
+    bin.a_weight_val = a_weight(f_center);
+    bin.freq = f_center;
+    bin.real = 0.0f;
+    bin.imag = 0.0f;
+  }
+}
+
+// Process PCM samples through all resonators (sample-by-sample update).
+// Per-sample cost: 4 multiplies + 2 adds per bar.
+void ControlPanelCore::process_sdft(const audio_sample* data, int sample_count, int nch,
+                          std::vector<SdftBin>& bins, int bar_count) {
+  if (!data || sample_count <= 0 || bar_count <= 0) return;
+
+  for (int s = 0; s < sample_count; s++) {
+    // Average across channels (mono mixdown)
+    float x;
+    if (nch >= 2) {
+      float sum = 0.0f;
+      for (int ch = 0; ch < nch; ch++) sum += data[s * nch + ch];
+      x = sum / (float)nch;
+    } else {
+      x = data[s];
+    }
+
+    // Update each resonator: S = decay * S * e^(jw) + x
+    for (int i = 0; i < bar_count; i++) {
+      auto& b = bins[i];
+      float new_real = b.decay * (b.real * b.cos_w - b.imag * b.sin_w) + x;
+      float new_imag = b.decay * (b.real * b.sin_w + b.imag * b.cos_w);
+      b.real = new_real;
+      b.imag = new_imag;
+    }
+  }
+}
+
 // Apply smoothing, floor, and peak tracking to one channel's bar data
 static void apply_bar_dynamics(const std::vector<float>& normalized_values, int bar_count,
                                 std::vector<float>& bars, std::vector<float>& peaks,
@@ -4159,11 +4297,13 @@ static void apply_hotspot_gain(std::vector<float>& values, int bar_count,
 
 void ControlPanelCore::update_spectrum_data() {
   // Advance hotspot wandering regardless of audio data availability
+#ifdef ENABLE_SPECTRUM_HOTSPOT_GAIN
   auto now = std::chrono::steady_clock::now();
   float dt = std::chrono::duration<float>(now - m_spectrum_hotspot_last_time).count();
   if (dt > 0.1f) dt = 0.033f;  // clamp on first frame or after pause
   m_spectrum_hotspot_last_time = now;
   update_spectrum_hotspots(dt);
+#endif  // ENABLE_SPECTRUM_HOTSPOT_GAIN
 
   // Resize bars array if panel width changed
   int area_w = m_rect_spectrum_full.right - m_rect_spectrum_full.left;
@@ -4183,6 +4323,54 @@ void ControlPanelCore::update_spectrum_data() {
 
   // Try to get audio data; if unavailable, decay bars toward zero instead of freezing
   bool have_data = false;
+
+#ifdef USE_SDFT_TRANSFORM
+  // SDFT path: get raw PCM samples and process through per-bar resonators.
+  audio_chunk_impl chunk;
+  if (m_vis_stream.is_valid()) {
+    double abs_time;
+    if (m_vis_stream->get_absolute_time(abs_time)) {
+      // Request ~50ms of PCM audio (covers at least one 30fps frame)
+      if (m_vis_stream->get_chunk_absolute(chunk, abs_time, 0.05)) {
+        const audio_sample* pcm_data = chunk.get_data();
+        t_size pcm_count = chunk.get_sample_count();
+        int pcm_nch = chunk.get_channels();
+        int pcm_rate = (int)chunk.get_sample_rate();
+        if (pcm_data && pcm_count > 0 && pcm_rate > 0) {
+          update_sdft_bins(pcm_rate, m_spectrum_bar_count);
+          process_sdft(pcm_data, (int)pcm_count, pcm_nch,
+                       m_sdft_bins, m_spectrum_bar_count);
+          have_data = true;
+        }
+      }
+    }
+  }
+
+  if (!have_data) {
+    m_spectrum_normalized_values.assign(m_spectrum_bar_count, 0.0f);
+    apply_bar_dynamics(m_spectrum_normalized_values, m_spectrum_bar_count,
+                        m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
+    return;
+  }
+
+  // Extract magnitudes from SDFT resonator complex states
+  for (int i = 0; i < m_spectrum_bar_count; i++) {
+    const auto& bin = m_sdft_bins[i];
+    float magnitude = std::sqrt(bin.real * bin.real + bin.imag * bin.imag);
+    // Normalize by resonator steady-state gain and apply A-weighting
+    float normalized = magnitude / bin.norm * bin.a_weight_val;
+    // Amplify and compress: sqrt for perceptual scaling.
+    // SDFT output is smaller than FFT bin magnitudes, so boost 14x.
+    float compressed = std::sqrt(normalized) * 14.0f;
+    if (compressed > 0.7f)
+      compressed = 0.7f + 0.3f * (1.0f - std::exp(-(compressed - 0.7f) / 0.3f));
+    m_spectrum_normalized_values[i] = compressed;
+  }
+
+  apply_bar_dynamics(m_spectrum_normalized_values, m_spectrum_bar_count,
+                      m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
+
+#else  // !USE_SDFT_TRANSFORM — original FFT path
   audio_chunk_impl chunk;
   const audio_sample* data = nullptr;
   t_size sample_count = 0;
@@ -4282,15 +4470,18 @@ void ControlPanelCore::update_spectrum_data() {
       m_spectrum_normalized_values[i] = normalized;
     }
 
+#ifdef ENABLE_SPECTRUM_HOTSPOT_GAIN
     float hotspot_positions[SPECTRUM_HOTSPOT_COUNT];
     for (int i = 0; i < SPECTRUM_HOTSPOT_COUNT; i++)
       hotspot_positions[i] = m_spectrum_hotspots[i].position;
     apply_hotspot_gain(m_spectrum_normalized_values, m_spectrum_bar_count,
                         hotspot_positions, SPECTRUM_HOTSPOT_COUNT);
+#endif  // ENABLE_SPECTRUM_HOTSPOT_GAIN
 
     apply_bar_dynamics(m_spectrum_normalized_values, m_spectrum_bar_count,
                         m_spectrum_bars, m_spectrum_peaks, m_spectrum_peak_velocity);
   }
+#endif  // USE_SDFT_TRANSFORM
 }
 
 static COLORREF hsl_to_rgb(float h, float s, float l) {
