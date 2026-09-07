@@ -74,13 +74,6 @@ jobs:
         rmdir /s /q temp_traycontrols
       shell: cmd
 
-    # 1.7 SVG Services (Header only API)
-    - name: Checkout SVG Services
-      uses: actions/checkout@v6
-      with:
-        repository: reupen/svg-services
-        path: columns_ui/svg-services
-
     # -------------------------------------------------------------------------
     # 2. Build Environment Setup
     # -------------------------------------------------------------------------
