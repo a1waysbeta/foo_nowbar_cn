@@ -60,6 +60,16 @@ static cfg_int cfg_nowbar_seekbar_position(
     0  // Default: centered (no offset)
 );
 
+static cfg_int cfg_nowbar_button_scaling_enabled(
+    GUID{0xABCDEFD1, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xD1}},
+    0  // Default: 0 (dynamic scaling)
+);
+
+static cfg_int cfg_nowbar_button_scaling_percent(
+    GUID{0xABCDEFD2, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0xD2}},
+    80 // Default: 80% of max button size
+);
+
 static cfg_int cfg_nowbar_mood_icon_visible(
     GUID{0xABCDEF07, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x8F}},
     1  // Default: Show (visible)
@@ -1690,6 +1700,46 @@ int get_nowbar_seekbar_position() {
     return pos;
 }
 
+static int s_preview_button_scaling_enabled = -1;  // -1 = no preview
+static int s_preview_button_scaling_percent = -1;  // -1 = no preview
+
+bool get_nowbar_button_scaling_enabled() {
+    if (s_preview_button_scaling_enabled >= 0) {
+        return s_preview_button_scaling_enabled != 0;
+    }
+    return cfg_nowbar_button_scaling_enabled != 0;
+}
+
+int get_nowbar_button_scaling_percent() {
+    int val = (s_preview_button_scaling_percent >= 0)
+        ? s_preview_button_scaling_percent
+        : static_cast<int>(cfg_nowbar_button_scaling_percent);
+    if (val < 50) val = 50;
+    if (val > 100) val = 100;
+    return val;
+}
+
+void set_nowbar_button_scaling_enabled(bool enabled) {
+    cfg_nowbar_button_scaling_enabled = enabled ? 1 : 0;
+}
+
+void set_nowbar_button_scaling_percent(int percent) {
+    if (percent < 50) percent = 50;
+    if (percent > 100) percent = 100;
+    cfg_nowbar_button_scaling_percent = percent;
+}
+
+static void set_nowbar_button_scaling_preview(bool enabled, int percent) {
+    s_preview_button_scaling_enabled = enabled ? 1 : 0;
+    s_preview_button_scaling_percent = percent;
+    nowbar::ControlPanelCore::notify_all_settings_changed();
+}
+
+static void clear_nowbar_button_scaling_preview() {
+    s_preview_button_scaling_enabled = -1;
+    s_preview_button_scaling_percent = -1;
+}
+
 bool get_nowbar_mood_icon_visible() {
     return cfg_nowbar_mood_icon_visible != 0;
 }
@@ -2985,7 +3035,8 @@ static const int g_tab1_controls[] = {
     IDC_SEEKBAR_LENGTH_COMBO, IDC_SEEKBAR_POSITION_LABEL, IDC_SEEKBAR_POSITION_SLIDER,
     IDC_SEEKBAR_POSITION_VALUE, IDC_SMOOTH_ANIMATIONS_LABEL, IDC_SMOOTH_ANIMATIONS_COMBO,
     IDC_ONLINE_ARTWORK_CHECK, IDC_FOO_ARTWORK_LINK, IDC_CBUTTON_3D_LABEL,
-    IDC_CBUTTON_3D_COMBO, IDC_VOLUME_NUMBER_LABEL, IDC_VOLUME_NUMBER_COMBO
+    IDC_CBUTTON_3D_COMBO, IDC_VOLUME_NUMBER_LABEL, IDC_VOLUME_NUMBER_COMBO,
+    IDC_BUTTON_SCALING_CHECK, IDC_BUTTON_SCALING_SLIDER, IDC_BUTTON_SCALING_VALUE
 };
 
 static const int g_tab2_controls[] = {
@@ -3064,6 +3115,15 @@ static void show_tab_controls(HWND hwnd, int tab, int cmd_show) {
     }
 }
 
+// Helper to update Button Scaling slider visibility based on checkbox state and active tab
+static void update_button_scaling_state(HWND hwnd) {
+    int cur_tab = (int)SendDlgItemMessage(hwnd, IDC_TAB_CONTROL, TCM_GETCURSEL, 0, 0);
+    BOOL checked = (IsDlgButtonChecked(hwnd, IDC_BUTTON_SCALING_CHECK) == BST_CHECKED);
+    BOOL show = checked && (cur_tab == 1);
+    ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_SCALING_SLIDER), show ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_SCALING_VALUE), show ? SW_SHOW : SW_HIDE);
+}
+
 void nowbar_preferences::switch_tab(int tab) {
     if (tab < 0 || tab > 5) return;
     int old_tab = m_current_tab;
@@ -3075,6 +3135,9 @@ void nowbar_preferences::switch_tab(int tab) {
         show_tab_controls(m_hwnd, old_tab, SW_HIDE);
     }
     show_tab_controls(m_hwnd, tab, SW_SHOW);
+    if (tab == 1) {
+        update_button_scaling_state(m_hwnd);
+    }
 
     SendMessage(m_hwnd, WM_SETREDRAW, TRUE, 0);
     RedrawWindow(m_hwnd, nullptr, nullptr, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
@@ -3397,6 +3460,22 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
 
         // Update Cover Margin state based on Cover Artwork visibility
         update_cover_margin_state(hwnd);
+
+        // Initialize button scaling checkbox and slider
+        CheckDlgButton(hwnd, IDC_BUTTON_SCALING_CHECK, cfg_nowbar_button_scaling_enabled ? BST_CHECKED : BST_UNCHECKED);
+        {
+            HWND hBtnSlider = GetDlgItem(hwnd, IDC_BUTTON_SCALING_SLIDER);
+            SendMessage(hBtnSlider, TBM_SETRANGE, TRUE, MAKELPARAM(60, 100));
+            SendMessage(hBtnSlider, TBM_SETTICFREQ, 10, 0);
+            int pct = cfg_nowbar_button_scaling_percent;
+            if (pct < 60) pct = 60;
+            if (pct > 100) pct = 100;
+            SendMessage(hBtnSlider, TBM_SETPOS, TRUE, pct);
+            wchar_t buf[8];
+            wsprintfW(buf, L"%d%%", pct);
+            SetDlgItemTextW(hwnd, IDC_BUTTON_SCALING_VALUE, buf);
+        }
+        update_button_scaling_state(hwnd);
 
         // Initialize mood icon visibility combobox
         HWND hMoodIconCombo = GetDlgItem(hwnd, IDC_MOOD_ICON_COMBO);
@@ -3905,6 +3984,15 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             }
             break;
         case IDC_ONLINE_ARTWORK_CHECK:
+            p_this->on_changed();
+            break;
+        case IDC_BUTTON_SCALING_CHECK:
+            update_button_scaling_state(hwnd);
+            {
+                bool checked = (IsDlgButtonChecked(hwnd, IDC_BUTTON_SCALING_CHECK) == BST_CHECKED);
+                int pos = (int)SendMessage(GetDlgItem(hwnd, IDC_BUTTON_SCALING_SLIDER), TBM_GETPOS, 0, 0);
+                set_nowbar_button_scaling_preview(checked, pos);
+            }
             p_this->on_changed();
             break;
 
@@ -4549,6 +4637,15 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SetDlgItemTextW(hwnd, IDC_SEEKBAR_POSITION_VALUE, buf);
             p_this->on_changed();
         }
+        if ((HWND)lp == GetDlgItem(hwnd, IDC_BUTTON_SCALING_SLIDER)) {
+            int pos = (int)SendMessage(GetDlgItem(hwnd, IDC_BUTTON_SCALING_SLIDER), TBM_GETPOS, 0, 0);
+            wchar_t buf[8];
+            wsprintfW(buf, L"%d%%", pos);
+            SetDlgItemTextW(hwnd, IDC_BUTTON_SCALING_VALUE, buf);
+            bool checked = (IsDlgButtonChecked(hwnd, IDC_BUTTON_SCALING_CHECK) == BST_CHECKED);
+            set_nowbar_button_scaling_preview(checked, pos);
+            p_this->on_changed();
+        }
         break;
 
     case WM_DRAWITEM:
@@ -4613,6 +4710,10 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         break;
         
     case WM_DESTROY:
+        if (s_preview_button_scaling_enabled >= 0 || s_preview_button_scaling_percent >= 0) {
+            clear_nowbar_button_scaling_preview();
+            nowbar::ControlPanelCore::notify_all_settings_changed();
+        }
         p_this->m_hwnd = nullptr;
         break;
     }
@@ -4686,6 +4787,11 @@ void nowbar_preferences::apply_settings() {
 
         // Save seekbar position offset (-100 to +100)
         cfg_nowbar_seekbar_position = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_SLIDER), TBM_GETPOS, 0, 0) - 100;
+
+        // Save button scaling settings
+        cfg_nowbar_button_scaling_enabled = (IsDlgButtonChecked(m_hwnd, IDC_BUTTON_SCALING_CHECK) == BST_CHECKED) ? 1 : 0;
+        cfg_nowbar_button_scaling_percent = (int)SendMessage(GetDlgItem(m_hwnd, IDC_BUTTON_SCALING_SLIDER), TBM_GETPOS, 0, 0);
+        clear_nowbar_button_scaling_preview();
 
         // Save cover margin setting (0=Yes, 1=No in combobox -> config 1=Yes, 0=No)
         int coverMarginSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_COVER_MARGIN_COMBO), CB_GETCURSEL, 0, 0);
@@ -4973,6 +5079,13 @@ void nowbar_preferences::reset_settings() {
             cfg_nowbar_playback_time_visible = 1;  // Default: Show
             SendMessage(GetDlgItem(m_hwnd, IDC_PLAYBACK_TIME_COMBO), CB_SETCURSEL, 0, 0);  // Default: Show
             update_cover_margin_state(m_hwnd);  // Re-enable Cover Margin (Cover Artwork is Yes)
+            cfg_nowbar_button_scaling_enabled = 0;
+            cfg_nowbar_button_scaling_percent = 80;
+            clear_nowbar_button_scaling_preview();
+            CheckDlgButton(m_hwnd, IDC_BUTTON_SCALING_CHECK, BST_UNCHECKED);
+            SendMessage(GetDlgItem(m_hwnd, IDC_BUTTON_SCALING_SLIDER), TBM_SETPOS, TRUE, 80);
+            SetDlgItemTextW(m_hwnd, IDC_BUTTON_SCALING_VALUE, L"80%");
+            update_button_scaling_state(m_hwnd);
         } else if (m_current_tab == 2) {
             // Reset Icons tab settings
             cfg_nowbar_mood_icon_visible = 1;  // Show (visible)
