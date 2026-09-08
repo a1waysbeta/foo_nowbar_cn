@@ -562,6 +562,10 @@ SIZE ControlPanelCore::get_min_size() const {
 
   double dpi_scale = m_dpi_scale;
   double min_scale = 0.60;
+  if (get_nowbar_button_scaling_enabled()) {
+    double fixed_scale = static_cast<double>(get_nowbar_button_scaling_percent()) / 100.0;
+    if (fixed_scale > min_scale) min_scale = fixed_scale;
+  }
 
   int button_size = static_cast<int>(28.0 * dpi_scale * min_scale);
   int play_button_size = static_cast<int>(36.0 * dpi_scale * min_scale);
@@ -1359,20 +1363,26 @@ void ControlPanelCore::update_layout(const RECT &rect) {
     m_rect_artwork = {};  // Clear rect when hidden
   }
 
-  // Calculate size scale factor based on panel height
-  int reference_height =
-      static_cast<int>(92 * m_dpi_scale); // Reference/maximum panel height for full size
-  int min_height =
-      static_cast<int>(53 * m_dpi_scale); // Minimum panel height (0.55 inches = 53px at 96 DPI)
-  float size_ratio = (reference_height > min_height)
-      ? static_cast<float>(h - min_height) / static_cast<float>(reference_height - min_height)
-      : 1.0f;
-  if (size_ratio < 0)
-    size_ratio = 0;
-  if (size_ratio > 1)
-    size_ratio = 1;
-  // Scale from 60% at minimum to 100% at reference height
-  m_size_scale = 0.60f + 0.40f * size_ratio;
+  // Calculate size scale factor: fixed if button scaling is enabled, else dynamic based on panel height
+  if (get_nowbar_button_scaling_enabled()) {
+    int pct = get_nowbar_button_scaling_percent();
+    pct = std::clamp(pct, 50, 100);
+    m_size_scale = static_cast<float>(pct) / 100.0f;
+  } else {
+    int reference_height =
+        static_cast<int>(92 * m_dpi_scale); // Reference/maximum panel height for full size
+    int min_height =
+        static_cast<int>(53 * m_dpi_scale); // Minimum panel height (0.55 inches = 53px at 96 DPI)
+    float size_ratio = (reference_height > min_height)
+        ? static_cast<float>(h - min_height) / static_cast<float>(reference_height - min_height)
+        : 1.0f;
+    if (size_ratio < 0)
+      size_ratio = 0;
+    if (size_ratio > 1)
+      size_ratio = 1;
+    // Scale from 60% at minimum to 100% at reference height
+    m_size_scale = 0.60f + 0.40f * size_ratio;
+  }
 
   // Scaled sizes for controls
   int button_size = static_cast<int>(m_metrics.button_size * m_size_scale);
@@ -1508,6 +1518,12 @@ void ControlPanelCore::update_layout(const RECT &rect) {
         Gdiplus::RectF bounds;
         g.MeasureString(line3.c_str(), -1, m_font_line3.get(), Gdiplus::PointF(0, 0), &sf, &bounds);
         if (bounds.Width > max_w) max_w = bounds.Width;
+      }
+      if (rating_on_line3) {
+        int star_size = static_cast<int>(artist_h * 0.85f);
+        int star_gap = static_cast<int>(2 * m_dpi_scale);
+        int total_rating_width = star_size * 5 + star_gap * 4;
+        if (static_cast<float>(total_rating_width) > max_w) max_w = static_cast<float>(total_rating_width);
       }
 
       if (max_w > 0.0f) {
@@ -1652,7 +1668,9 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       if (r.bottom > row_bottom) row_bottom = r.bottom;
     }
   };
-  expand_row(m_rect_rating);
+  if (!rating_on_line3) {
+    expand_row(m_rect_rating);
+  }
   expand_row(m_rect_heart);
   expand_row(m_rect_shuffle);
   expand_row(m_rect_prev);
@@ -2223,19 +2241,48 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
         m_rect_time.right > m_rect_time.left &&
         m_rect_time.bottom > m_rect_time.top) {
       int right_clean_left = m_rect_time.left;
-      auto check_left = [&](const RECT& r) {
-        if (r.right > r.left && r.left < right_clean_left) {
-          right_clean_left = r.left;
+      auto check_left = [&](const RECT& r, int pad_left = 0) {
+        if (r.right > r.left) {
+          int candidate = r.left - pad_left;
+          if (candidate < right_clean_left) {
+            right_clean_left = candidate;
+          }
         }
       };
-      check_left(m_rect_cbutton1);
-      check_left(m_rect_cbutton2);
-      check_left(m_rect_cbutton3);
-      check_left(m_rect_cbutton4);
-      check_left(m_rect_cbutton5);
-      check_left(m_rect_cbutton6);
-      check_left(m_rect_volume);
-      check_left(m_rect_miniplayer);
+
+      // Custom buttons expand hover circle by 5% plus antialiasing fringe
+      auto check_cbutton = [&](const RECT& r) {
+        if (r.right > r.left) {
+          int cw = r.right - r.left;
+          int expand = cw * 5 / 100;
+          int pad = expand + static_cast<int>(3 * m_dpi_scale);
+          check_left(r, pad);
+        }
+      };
+      check_cbutton(m_rect_cbutton1);
+      check_cbutton(m_rect_cbutton2);
+      check_cbutton(m_rect_cbutton3);
+      check_cbutton(m_rect_cbutton4);
+      check_cbutton(m_rect_cbutton5);
+      check_cbutton(m_rect_cbutton6);
+
+      // Volume icon hover circle uses diameter = rect height 'h' centered on icon
+      int vol_pad = static_cast<int>(3 * m_dpi_scale);
+      if (m_rect_volume.right > m_rect_volume.left && m_rect_volume.bottom > m_rect_volume.top) {
+        int v_h = m_rect_volume.bottom - m_rect_volume.top;
+        int v_icon_size = static_cast<int>(23 * m_dpi_scale * m_size_scale);
+        if (v_h > v_icon_size) {
+          vol_pad += (v_h - v_icon_size) / 2;
+        }
+      }
+      check_left(m_rect_volume, vol_pad);
+
+      // MiniPlayer button hover circle antialiasing margin
+      check_left(m_rect_miniplayer, static_cast<int>(3 * m_dpi_scale));
+
+      // Clamp to spectrum background cache boundaries
+      right_clean_left = std::max(right_clean_left, static_cast<int>(art_right));
+      right_clean_left = std::min(right_clean_left, static_cast<int>(panel_rect.right));
 
       int time_clean_w = panel_rect.right - right_clean_left;
       int time_clean_h = panel_rect.bottom - clean_top;
