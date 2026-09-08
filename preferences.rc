@@ -76,6 +76,9 @@ BEGIN
     COMBOBOX        IDC_VOLUME_NUMBER_COMBO, 80, 222, 110, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     AUTOCHECKBOX    "Online Artwork", IDC_ONLINE_ARTWORK_CHECK, 16, 242, 60, 12
     CONTROL         "(requires <a href=""https://github.com/jame25/foo_artwork"">foo_artwork</a>)", IDC_FOO_ARTWORK_LINK, "SysLink", 0, 76, 244, 100, 12
+    AUTOCHECKBOX    "Fixed Button Size", IDC_BUTTON_SCALING_CHECK, 206, 26, 80, 12
+    CONTROL         "", IDC_BUTTON_SCALING_SLIDER, TRACKBAR_CLASS, TBS_AUTOTICKS | WS_TABSTOP, 204, 42, 85, 18
+    LTEXT           "80%", IDC_BUTTON_SCALING_VALUE, 292, 44, 25, 12
 
     // === Icons Tab Controls (Tab 2) ===
     LTEXT           "Mood Icon:", IDC_MOOD_ICON_LABEL, 16, 26, 50, 12
