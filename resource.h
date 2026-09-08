@@ -249,6 +249,11 @@
 #define IDC_PLAYBACK_TIME_LABEL          1547
 #define IDC_PLAYBACK_TIME_COMBO          1548
 
+// Button Scaling controls (Appearance tab)
+#define IDC_BUTTON_SCALING_CHECK         1550
+#define IDC_BUTTON_SCALING_SLIDER        1551
+#define IDC_BUTTON_SCALING_VALUE         1552
+
 // Shuffle/Repeat visibility controls (Icons tab)
 #define IDC_SHUFFLE_ICON_LABEL           1533
 #define IDC_SHUFFLE_ICON_COMBO           1534
