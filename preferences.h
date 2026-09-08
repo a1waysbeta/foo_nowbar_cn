@@ -15,6 +15,10 @@ int get_nowbar_bar_style();  // 0=Pill-shaped, 1=Rectangular
 bool get_nowbar_seekbar_visible();  // true=On, false=Off
 int get_nowbar_seekbar_length();  // 0=Fixed, 1=Scaling
 int get_nowbar_seekbar_position();  // -100 to +100 pixel offset
+bool get_nowbar_button_scaling_enabled();  // true=Fixed button size, false=Dynamic scaling
+int get_nowbar_button_scaling_percent();   // 50-100 (percentage of maximum button size, default 80)
+void set_nowbar_button_scaling_enabled(bool enabled);
+void set_nowbar_button_scaling_percent(int percent);
 bool get_nowbar_mood_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_shuffle_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_repeat_icon_visible();  // true=Show, false=Hidden
