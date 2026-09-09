@@ -8,7 +8,7 @@ jobs:
 # 1. Build x86 + x64 (matrix)
 # =============================================================================
   build-multi-platform:
-    runs-on: windows-2022  # 改为 windows-2022
+    runs-on: windows-2022
     strategy:
       matrix:
         platform: [x86, x64]
@@ -24,42 +24,36 @@ jobs:
     # -------------------------------------------------------------------------
     # 1. Checkout Repositories
     # -------------------------------------------------------------------------
-    
-    # 1.1 My Project
     - name: Checkout foo_nowbar
       uses: actions/checkout@v6
       with:
         path: foo_nowbar
 
-    # 1.2 Columns UI Component (Wrapper)
     - name: Checkout Columns UI Source
       uses: actions/checkout@v6
       with:
         repository: reupen/columns_ui
         path: foo_nowbar/lib/columns_ui
 
-    # 1.3 Columns UI SDK (Build target: columns_ui_sdk.lib)
     - name: Checkout Columns UI SDK
       uses: actions/checkout@v6
       with:
         repository: reupen/columns_ui-sdk
         path: foo_nowbar/lib/columns_ui/columns_ui-sdk
 
-    # 1.4 Foobar2000 SDK (Build target: foobar2000_SDK.lib)
     - name: Checkout Foobar2000 SDK
       uses: actions/checkout@v6
       with:
         repository: reupen/foobar2000-sdk-modified
         path: foo_nowbar/lib/columns_ui/foobar2000
 
-    # 1.5 PFC (Build target: pfc.lib)
     - name: Checkout PFC
       uses: actions/checkout@v6
       with:
         repository: reupen/pfc-modified
         path: foo_nowbar/lib/columns_ui/pfc
 
-    # 1.6 libPPUI (Helper) - 从 foo_traycontrols_cn 获取 libPPUI（包含预编译的 .lib）
+    # libPPUI (头文件必需 - SDK helpers 依赖 libPPUI 头文件)
     - name: Checkout libPPUI from foo_traycontrols_cn
       uses: actions/checkout@v6
       with:
@@ -80,7 +74,6 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v3
 
-    # Debug: Verify structure matches project expectations
     - name: Debug Directory Structure
       run: |
         echo "Listing columns_ui structure..."
@@ -94,9 +87,6 @@ jobs:
         echo ""
         echo "Checking libPPUI..."
         dir foo_nowbar\lib\columns_ui\libPPUI
-        echo ""
-        echo "Checking pre-built libPPUI.lib..."
-        dir foo_nowbar\lib\columns_ui\libPPUI\x64\Release\libPPUI.lib
       shell: cmd
 
     - name: Fix Platform Toolset for GitHub Actions
@@ -111,10 +101,8 @@ jobs:
         }
 
     # -------------------------------------------------------------------------
-    # 3. Build Dependencies (The Fix for LNK1181)
+    # 3. Build Dependencies
     # -------------------------------------------------------------------------
-
-    # 3.1 Build PFC
     - name: Build PFC (${{ matrix.platform }})
       shell: cmd
       run: |
@@ -123,8 +111,6 @@ jobs:
           /p:Platform=${{ matrix.msbuild_platform }} ^
           /p:OutDir=${{ matrix.outdir_platform }}\pfc\
 
-    # 3.2 Build Foobar2000 SDK
-    # FORCE OutDir to match what foo_nowbar expects: SDK/x64/foobar2000_SDK/
     - name: Build Foobar2000 SDK (${{ matrix.platform }})
       shell: cmd
       run: |
@@ -133,7 +119,6 @@ jobs:
           /p:Platform=${{ matrix.msbuild_platform }} ^
           /p:OutDir=${{ matrix.outdir_platform }}\foobar2000_SDK\
 
-    # 3.3 Build Columns UI SDK
     - name: Build Columns UI SDK (${{ matrix.platform }})
       shell: cmd
       run: |
@@ -142,7 +127,6 @@ jobs:
           /p:Platform=${{ matrix.msbuild_platform }} ^
           /p:OutDir=${{ matrix.outdir_platform }}\columns_ui_sdk\
 
-    # 3.4 Build Shared
     - name: Build Shared (${{ matrix.platform }})
       shell: cmd
       run: |
@@ -151,15 +135,8 @@ jobs:
             /p:Configuration=Release ^
             /p:Platform=${{ matrix.msbuild_platform }}
         ) else (
-           echo "shared.vcxproj not found, assuming shared.lib is built manually or by other projects."
-           if exist foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj (
-             msbuild foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=${{ matrix.msbuild_platform }}
-             )
+           echo "shared.vcxproj not found, assuming shared.lib is built manually."
         )
-
-    # 注意：libPPUI 不单独构建，使用预编译的 libPPUI.lib
-    # 预编译库位置：lib/columns_ui/libPPUI/x64/Release/libPPUI.lib (对于 x64)
-    # 注意：目前只有 x64 的预编译库，x86 可能需要额外处理
 
     # -------------------------------------------------------------------------
     # 4. Build Your Component
@@ -179,12 +156,11 @@ jobs:
         path: bin/${{ matrix.outdir_platform }}/foo_nowbar.dll
         if-no-files-found: error
 
-
 # =============================================================================
 # 2. Package → ONE fb2k-component
 # =============================================================================
   package:
-    runs-on: windows-2022  # 也改为 windows-2022
+    runs-on: windows-2022
     needs: build-multi-platform
     name: Package fb2k-component
 
