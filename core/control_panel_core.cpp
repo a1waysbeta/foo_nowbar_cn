@@ -9233,7 +9233,11 @@ void ControlPanelCore::evaluate_title_formats() {
   }
 
   // Fallback check for streams discovered via foo_artwork (e.g. ?azuracast_api / ?radioreg_api)
-  if (use_playback) {
+  const bool missing_native_pair =
+      (m_formatted_line1.is_empty() || m_formatted_line1 == "?" ||
+       m_formatted_line1.find_first("http://") == 0 || m_formatted_line1.find_first("https://") == 0) &&
+      (m_formatted_line2.is_empty() || m_formatted_line2 == "?");
+  if (use_playback && missing_native_pair) {
     static service_ptr_t<titleformat_object> tf_fa_title, tf_fa_artist;
     if (!tf_fa_title.is_valid()) {
       titleformat_compiler::get()->compile_safe(tf_fa_title, "%foo_artwork_title%");
@@ -9245,19 +9249,10 @@ void ControlPanelCore::evaluate_title_formats() {
     pc->playback_format_title(nullptr, fa_title, tf_fa_title, nullptr, playback_control::display_level_all);
     pc->playback_format_title(nullptr, fa_artist, tf_fa_artist, nullptr, playback_control::display_level_all);
 
-    if (!fa_title.is_empty() && fa_title != "?") {
-      pfc::string8 line1_cfg = get_nowbar_line1_format();
-      if (line1_cfg == "%title%" || m_formatted_line1.is_empty() ||
-          m_formatted_line1.find_first("http://") == 0 || m_formatted_line1.find_first("https://") == 0) {
-        m_formatted_line1 = fa_title;
-      }
-    }
-
-    if (!fa_artist.is_empty() && fa_artist != "?") {
-      pfc::string8 line2_cfg = get_nowbar_line2_format();
-      if (line2_cfg == "%artist%" || m_formatted_line2.is_empty()) {
-        m_formatted_line2 = fa_artist;
-      }
+    // Apply discovered metadata as a pair, only when native display fields are absent.
+    if (!fa_title.is_empty() && fa_title != "?" && !fa_artist.is_empty() && fa_artist != "?") {
+      m_formatted_line1 = fa_title;
+      m_formatted_line2 = fa_artist;
     }
   }
 }
