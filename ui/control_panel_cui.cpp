@@ -80,23 +80,26 @@ void ControlPanelCUI::update_artwork() {
             return;
         }
 
-        // Try local/embedded artwork first
+        // Opening a live URL here may block on network I/O with noAbort.
+        // Stream covers arrive through foo_artwork; extract embedded art only for local files.
         auto art_manager = album_art_manager_v3::get();
-        try {
-            auto extractor = art_manager->open(
-                pfc::list_single_ref_t<metadb_handle_ptr>(track),
-                pfc::list_single_ref_t<GUID>(album_art_ids::cover_front),
-                fb2k::noAbort
-            );
+        if (!is_stream) {
+            try {
+                auto extractor = art_manager->open(
+                    pfc::list_single_ref_t<metadb_handle_ptr>(track),
+                    pfc::list_single_ref_t<GUID>(album_art_ids::cover_front),
+                    fb2k::noAbort
+                );
 
-            if (extractor.is_valid()) {
-                album_art_data_ptr data;
-                if (extractor->query(album_art_ids::cover_front, data, fb2k::noAbort)) {
-                    m_core->set_artwork(data);
-                    return;
+                if (extractor.is_valid()) {
+                    album_art_data_ptr data;
+                    if (extractor->query(album_art_ids::cover_front, data, fb2k::noAbort)) {
+                        m_core->set_artwork(data);
+                        return;
+                    }
                 }
-            }
-        } catch (...) {}
+            } catch (...) {}
+        }
 
         // Check if foo_artwork has a cached cover image file on disk
         if (get_nowbar_online_artwork()) {
