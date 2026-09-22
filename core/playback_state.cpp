@@ -231,29 +231,25 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
             for (const auto& delim : delimiters) {
                 size_t pos = t_str.find(delim);
                 if (pos != std::string::npos) {
-                    m_state.track_artist = t_str.substr(0, pos).c_str();
-                    m_state.track_title = t_str.substr(pos + delim.length()).c_str();
+                    m_state.track_artist = (delim == " by " ? t_str.substr(pos + delim.length()) : t_str.substr(0, pos)).c_str();
+                    m_state.track_title = (delim == " by " ? t_str.substr(0, pos) : t_str.substr(pos + delim.length())).c_str();
                     changed = true;
                     break;
                 }
             }
         }
 
-        // Update state if we found standard distinct metadata
-        if (!changed) {
-            if (title && strlen(title) > 0) {
-                m_state.track_title = title;
-                changed = true;
-            }
-            if (artist && strlen(artist) > 0) {
-                m_state.track_artist = artist;
-                changed = true;
-            }
+        // Treat each native event as one song snapshot, not a patch to the old song.
+        if (!changed && ((title && *title) || (artist && *artist))) {
+            m_state.track_title = title ? title : "";
+            m_state.track_artist = artist ? artist : "";
+            changed = true;
         }
 
         // Fallback check for streams discovered via foo_artwork (e.g. ?azuracast_api / ?radioreg_api / ACRCloud)
         auto pc = playback_control::get();
-        if (pc->is_playing() || pc->is_paused()) {
+        if (!changed && m_state.track_artist.is_empty() && m_state.track_title.is_empty() &&
+            (pc->is_playing() || pc->is_paused())) {
             static service_ptr_t<titleformat_object> tf_fa_title, tf_fa_artist;
             if (!tf_fa_title.is_valid()) {
                 titleformat_compiler::get()->compile_safe(tf_fa_title, "%foo_artwork_title%");
@@ -265,17 +261,16 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
             pc->playback_format_title(nullptr, fa_title, tf_fa_title, nullptr, playback_control::display_level_all);
             pc->playback_format_title(nullptr, fa_artist, tf_fa_artist, nullptr, playback_control::display_level_all);
 
-            if (!fa_title.is_empty() && fa_title != "?") {
+            if (!fa_title.is_empty() && fa_title != "?" && !fa_artist.is_empty() && fa_artist != "?") {
                 m_state.track_title = fa_title;
-                changed = true;
-            }
-            if (!fa_artist.is_empty() && fa_artist != "?") {
                 m_state.track_artist = fa_artist;
                 changed = true;
             }
         }
 
         if (changed) {
+            const char* album = p_info.meta_get("ALBUM", 0);
+            m_state.track_album = album ? album : "";
             notify_track_changed();
             notify_state_changed();
         }
@@ -327,7 +322,8 @@ void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
 
     // Check %foo_artwork_title% and %foo_artwork_artist% for discovered stream metadata (e.g. ?azuracast_api / ?radioreg_api)
     auto pc = playback_control::get();
-    if (pc->is_playing() || pc->is_paused()) {
+    if ((m_state.track_artist.is_empty() || m_state.track_title.is_empty()) &&
+        (pc->is_playing() || pc->is_paused())) {
         static service_ptr_t<titleformat_object> tf_fa_title, tf_fa_artist;
         if (!tf_fa_title.is_valid()) {
             titleformat_compiler::get()->compile_safe(tf_fa_title, "%foo_artwork_title%");
@@ -339,10 +335,8 @@ void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
         pc->playback_format_title(nullptr, fa_title, tf_fa_title, nullptr, playback_control::display_level_all);
         pc->playback_format_title(nullptr, fa_artist, tf_fa_artist, nullptr, playback_control::display_level_all);
 
-        if (!fa_title.is_empty() && fa_title != "?") {
+        if (!fa_title.is_empty() && fa_title != "?" && !fa_artist.is_empty() && fa_artist != "?") {
             m_state.track_title = fa_title;
-        }
-        if (!fa_artist.is_empty() && fa_artist != "?") {
             m_state.track_artist = fa_artist;
         }
     }
