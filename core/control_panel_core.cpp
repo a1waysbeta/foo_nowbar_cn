@@ -182,6 +182,12 @@ void ControlPanelCore::shutdown() {
   g_instances.clear();
 }
 
+// Live streams have no known duration. Require an active track so stopped playback is not labelled Live.
+static bool is_live_stream(const nowbar::PlaybackState& state) {
+  return (state.is_playing || state.is_paused) &&
+         state.current_track.is_valid() && state.track_length <= 0.0;
+}
+
 // Helper: format time as mm:ss or hh:mm:ss
 static std::wstring format_time(double seconds) {
   if (seconds < 0)
@@ -3932,7 +3938,8 @@ void ControlPanelCore::draw_seekbar_tooltip(Gdiplus::Graphics &g) {
 
 void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   // Hide timers in waveform mode when no track is loaded (e.g. after restart)
-  if (get_nowbar_visualization_mode() == 2 && m_state.track_length <= 0) return;
+  if (get_nowbar_visualization_mode() == 2 && m_state.track_length <= 0 &&
+      !is_live_stream(m_state)) return;
 
   // Determine if we're using artwork-based background that needs light text
   int bg_style = get_nowbar_background_style();
@@ -3946,11 +3953,12 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   Gdiplus::SolidBrush timeBrush(time_color);
 
   std::wstring elapsed = format_time(m_state.playback_time);
-  // Show time remaining with minus sign
+  // Show Live for streams without a duration; otherwise show the countdown.
   double remaining = m_state.track_length - m_state.playback_time;
   if (remaining < 0)
     remaining = 0;
-  std::wstring remaining_str = L"-" + format_time(remaining);
+  std::wstring remaining_str = is_live_stream(m_state)
+      ? L"Live" : L"-" + format_time(remaining);
 
   // Use GenericTypographic to eliminate variable internal padding that
   // MeasureString adds by default — this ensures measurement matches rendering
@@ -6000,7 +6008,7 @@ void ControlPanelCore::draw_time_display_top_right(Gdiplus::Graphics& g) {
   if (m_rect_time.right <= m_rect_time.left) return;
 
   std::wstring elapsed = format_time(m_state.playback_time);
-  std::wstring total = format_time(m_state.track_length);
+  std::wstring total = is_live_stream(m_state) ? L"Live" : format_time(m_state.track_length);
   std::wstring display = elapsed + L" / " + total;
 
   int time_w = m_rect_time.right - m_rect_time.left;
