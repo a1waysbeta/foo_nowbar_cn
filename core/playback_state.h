@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include <cstdint>
 
 namespace nowbar {
 
@@ -81,6 +82,7 @@ private:
     void check_preview_skip(double current_time);  // Check if playback preview should skip to next track
 
     PlaybackState m_state;
+    uint64_t m_stream_metadata_revision = 0; // Invalidates queued song notifications.
     bool m_preview_skip_triggered = false;  // Prevents multiple skips per track
     int m_consecutive_rating_skips = 0;     // Counter for consecutive low-rating skips (max 10)
     titleformat_object::ptr m_rating_format; // Cached compiled "%rating%" titleformat
