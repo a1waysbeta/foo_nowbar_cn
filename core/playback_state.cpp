@@ -80,6 +80,7 @@ void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_
 
 void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) noexcept {
     try {
+        ++m_stream_metadata_revision;
         clear_pending_online_artwork();
 
         auto pc = playback_control::get();
@@ -114,6 +115,7 @@ void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) noex
 
 void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) noexcept {
     try {
+        ++m_stream_metadata_revision;
         // When starting another track (manual next/prev), don't notify UI of "stopped" state
         // The on_playback_new_track() callback will fire immediately after with correct state.
         // Notifying "stopped" here would cause the UI to clear artwork/caches unnecessarily,
@@ -194,6 +196,9 @@ void PlaybackStateManager::on_playback_dynamic_info(const file_info& p_info) noe
 
 void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_info) noexcept {
     try {
+        const pfc::string8 previous_artist = m_state.track_artist;
+        const pfc::string8 previous_title = m_state.track_title;
+        const pfc::string8 previous_album = m_state.track_album;
         // Extract metadata from dynamic info (for streaming sources like internet radio)
         const char* title = nullptr;
         const char* artist = nullptr;
@@ -271,8 +276,25 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
         if (changed) {
             const char* album = p_info.meta_get("ALBUM", 0);
             m_state.track_album = album ? album : "";
-            notify_track_changed();
-            notify_state_changed();
+            if (m_state.track_artist == previous_artist && m_state.track_title == previous_title &&
+                m_state.track_album == previous_album) return;
+
+            // Leave the playback callback before notifying panels. Only the newest
+            // queued song snapshot should refresh artwork, never restart the full
+            // track-change workflow (waveform decoding, progress reset, etc.).
+            const auto revision = ++m_stream_metadata_revision;
+            const auto track = m_state.current_track;
+            const auto song_artist = m_state.track_artist;
+            const auto song_title = m_state.track_title;
+            const auto song_album = m_state.track_album;
+            fb2k::inMainThread([revision, track, song_artist, song_title, song_album]() {
+                if (!is_available()) return;
+                auto& mgr = get();
+                if (mgr.m_stream_metadata_revision != revision ||
+                    mgr.m_state.current_track != track || mgr.m_state.track_artist != song_artist ||
+                    mgr.m_state.track_title != song_title || mgr.m_state.track_album != song_album) return;
+                mgr.notify_track_info_changed();
+            });
         }
     } catch (...) {}
 }
