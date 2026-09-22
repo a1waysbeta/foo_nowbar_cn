@@ -314,9 +314,9 @@ void ControlPanelDUI::update_artwork() {
         if (get_nowbar_online_artwork() && is_artwork_bridge_available()) {
             pfc::string8 artist, title;
             if (!m_tf_artist.is_valid())
-                titleformat_compiler::get()->compile_safe(m_tf_artist, "$if2(%foo_artwork_artist%,%artist%)");
+                titleformat_compiler::get()->compile_safe(m_tf_artist, "$if($or(%artist%,%title%),%artist%,%foo_artwork_artist%)");
             if (!m_tf_title.is_valid())
-                titleformat_compiler::get()->compile_safe(m_tf_title, "$if2(%foo_artwork_title%,%title%)");
+                titleformat_compiler::get()->compile_safe(m_tf_title, "$if($or(%artist%,%title%),%title%,%foo_artwork_title%)");
             if (is_playing_track) {
                 pc->playback_format_title(nullptr, artist, m_tf_artist, nullptr, playback_control::display_level_all);
                 pc->playback_format_title(nullptr, title, m_tf_title, nullptr, playback_control::display_level_all);
