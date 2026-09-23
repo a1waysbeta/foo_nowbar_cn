@@ -3967,7 +3967,18 @@ void ControlPanelCore::draw_time_display(Gdiplus::Graphics &g) {
   // manually using font ascent/descent. StringAlignmentCenter would center
   // the em box, but fonts with asymmetric ascent/descent (e.g. Segoe UI)
   // render digit glyphs visually low relative to the geometric rect center.
-  Gdiplus::StringFormat sfLeft(Gdiplus::StringFormat::GenericTypographic());
+  // This format must stay default-constructed (GenericDefault family), NOT
+  // GenericTypographic: in this font/size combination GDI+ reports Ok but
+  // emits no pixels for pure CJK strings under GenericTypographic (ASCII and
+  // mixed ASCII+CJK strings render fine). NoClip absorbs the extra internal
+  // padding the default format adds versus GenericTypographic.
+  // 此格式必须保持默认构造 (GenericDefault 系列)，而非
+  // GenericTypographic: 在此字体/字号组合下，GDI+ 报告正常，但
+  // 对于纯 CJK 字符串，在 GenericTypographic 下不输出任何像素 (ASCII 和
+  // 混合 ASCII+CJK 字符串渲染正常)。NoClip 会吸收默认格式相对于 GenericTypographic 添加的额外内部填充。
+  // 默认格式相对于 GenericTypographic 添加的额外填充。
+  Gdiplus::StringFormat sfLeft;
+  // Gdiplus::StringFormat sfLeft(Gdiplus::StringFormat::GenericTypographic());
   sfLeft.SetAlignment(Gdiplus::StringAlignmentNear);
   sfLeft.SetLineAlignment(Gdiplus::StringAlignmentNear);
   sfLeft.SetFormatFlags(sfLeft.GetFormatFlags() | Gdiplus::StringFormatFlagsNoClip);
