@@ -5818,8 +5818,8 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
     is_stream = m_waveform_is_stream;
   }
 
-  if (is_stream) {
-    // Streams: no waveform data available, skip rendering entirely
+  if (is_stream || peaks.empty()) {
+    // Streams, or peaks cleared by a vis mode switch while reveal state is stale: nothing to draw
     m_waveform_animating = false;
     return;
   } else {
@@ -8750,45 +8750,42 @@ void ControlPanelCore::draw_miniplayer_icon(Gdiplus::Graphics &g,
   g.SetTransform(&oldMatrix);
 }
 
-// Draw volume icon from Material Design SVGs
+// Draw volume icon: filled speaker with circular sound waves on a 16-unit
+// grid, matching foo_modernplaylist's tab speaker icon
 // level: 0=mute, 1=low, 2=full
 void ControlPanelCore::draw_volume_icon(Gdiplus::Graphics &g, int x, int y,
                                         int size, const Gdiplus::Color &color,
                                         int level) {
-  float scale = static_cast<float>(size) / 24.0f;
+  float scale = static_cast<float>(size) / 16.0f;
 
   Gdiplus::SolidBrush brush(color);
 
-  // Draw speaker body (common to all)
-  // Speaker rectangle: left part
+  // Draw speaker body and cone (common to all)
   Gdiplus::PointF speaker[6];
-  speaker[0] = Gdiplus::PointF(x + 3 * scale, y + 8 * scale);
-  speaker[1] = Gdiplus::PointF(x + 8 * scale, y + 8 * scale);
-  speaker[2] = Gdiplus::PointF(x + 14 * scale, y + 2 * scale);
-  speaker[3] = Gdiplus::PointF(x + 14 * scale, y + 22 * scale);
-  speaker[4] = Gdiplus::PointF(x + 8 * scale, y + 16 * scale);
-  speaker[5] = Gdiplus::PointF(x + 3 * scale, y + 16 * scale);
+  speaker[0] = Gdiplus::PointF(x + 1.5f * scale, y + 6 * scale);
+  speaker[1] = Gdiplus::PointF(x + 3.5f * scale, y + 6 * scale);
+  speaker[2] = Gdiplus::PointF(x + 7.5f * scale, y + 2 * scale);
+  speaker[3] = Gdiplus::PointF(x + 7.5f * scale, y + 14 * scale);
+  speaker[4] = Gdiplus::PointF(x + 3.5f * scale, y + 10 * scale);
+  speaker[5] = Gdiplus::PointF(x + 1.5f * scale, y + 10 * scale);
   g.FillPolygon(&brush, speaker, 6);
 
+  Gdiplus::Pen pen(color, 1.3f * scale);
   if (level == 0) {
     // Mute: draw X
-    Gdiplus::Pen pen(color, 2.0f * scale);
-    g.DrawLine(&pen, x + 16 * scale, y + 8 * scale, x + 22 * scale,
-               y + 16 * scale);
-    g.DrawLine(&pen, x + 22 * scale, y + 8 * scale, x + 16 * scale,
-               y + 16 * scale);
-  } else if (level == 1) {
-    // Low: draw single arc wave
-    Gdiplus::Pen pen(color, 2.0f * scale);
-    g.DrawArc(&pen, x + 14 * scale, y + 7 * scale, 6 * scale, 10 * scale, -60,
-              120);
+    g.DrawLine(&pen, x + 9.5f * scale, y + 5.75f * scale, x + 14 * scale,
+               y + 10.25f * scale);
+    g.DrawLine(&pen, x + 14 * scale, y + 5.75f * scale, x + 9.5f * scale,
+               y + 10.25f * scale);
   } else {
-    // Full: draw double arc waves
-    Gdiplus::Pen pen(color, 2.0f * scale);
-    g.DrawArc(&pen, x + 14 * scale, y + 7 * scale, 6 * scale, 10 * scale, -60,
-              120);
-    g.DrawArc(&pen, x + 14 * scale, y + 3 * scale, 10 * scale, 18 * scale, -50,
-              100);
+    // Waves are circles centered at (6.5, 8), radius 4 and 7, clipped to
+    // +/-46.4 degrees (atan 1.05)
+    g.DrawArc(&pen, x + 2.5f * scale, y + 4 * scale, 8 * scale, 8 * scale,
+              -46.4f, 92.8f);
+    if (level == 2) {
+      g.DrawArc(&pen, x - 0.5f * scale, y + 1 * scale, 14 * scale,
+                14 * scale, -46.4f, 92.8f);
+    }
   }
 }
 
